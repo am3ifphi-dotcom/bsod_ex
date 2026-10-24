@@ -34,18 +34,24 @@ async function boot(): Promise<void> {
   (window as unknown as { __bsodUi?: Ui }).__bsodUi = ui;
 
   const container = $('#viewport-container');
-  const game = new Game(container, settings, ui);
+  let game: Game;
+  try {
+    game = new Game(container, settings, ui);
+  } catch (err) {
+    fatal('WebGL2 を初期化できませんでした。GPU アクセラレーションを有効にしてください。', err);
+    return;
+  }
   (window as unknown as { __bsodGame?: Game }).__bsodGame = game;
 
   ui.setCallbacks({
     onStart: () => {
-      void game.startExperience().catch((err) => fatal('start failed', err));
+      void game.startExperience().catch((err) => fatal('起動に失敗しました', err));
     },
     onResume: () => {
       game.resume();
     },
     onRestart: () => {
-      void game.restart().catch((err) => fatal('restart failed', err));
+      void game.restart().catch((err) => fatal('再開に失敗しました', err));
     },
     onQuitToTitle: () => {
       game.quitToTitle();
