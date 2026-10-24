@@ -242,6 +242,9 @@ export class CollapseCinematic {
           this.phase = 'shatter';
           this.time = 0;
           this.spawnFragments();
+          // 足場の床を実際に抜く(穴が開いてそこから落下できる)
+          const floorMesh = this.voidCtx.group.getObjectByName('collapseFloor');
+          if (floorMesh) floorMesh.visible = false;
           this.stopRumble?.();
           this.stopRumble = this.audio.collapseRumble(12, 1);
         }

@@ -369,16 +369,18 @@ function buildCoreStructure(ctx: VoidContext): void {
   });
   applyGlitch(metal, { amp: 0.04, emissiveFlicker: 0.3 });
 
-  // 基壇(3段)
-  for (let i = 0; i < 3; i++) {
-    const r = 30 - i * 6;
-    const step = new THREE.Mesh(new THREE.CylinderGeometry(r, r + 1.6, 1.6, 48), metal);
-    step.position.y = 0.8 + i * 1.6;
+  // 基壇(12段 × 0.4m — STEP_HEIGHT 以下で歩行可能)
+  const stepN = 12;
+  for (let i = 0; i < stepN; i++) {
+    const r = 30 - i * 1.85;
+    const step = new THREE.Mesh(new THREE.CylinderGeometry(r, r + 0.28, 0.4, 48), metal);
+    step.position.y = 0.2 + i * 0.4;
     step.receiveShadow = true;
     step.castShadow = true;
+    if (i === stepN - 1) step.name = 'collapseFloor'; // 最上段=崩壊時に抜ける床
     coreGroup.add(step);
     // 段差の衝突(円柱を矩形近似)
-    collision.addBoxCentered(0, baseY + 0.8 + i * 1.6, -420, r * 2, 1.6, r * 2);
+    collision.addBoxCentered(0, baseY + 0.2 + i * 0.4, -420, r * 2, 0.4, r * 2);
   }
 
   // 中央モノリス
