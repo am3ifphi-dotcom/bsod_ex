@@ -870,6 +870,11 @@ export class Room {
   screenWorldPosition(out = new THREE.Vector3()) {
     return out.set(this.monitorPos.x, this.monitorPos.y, -1.524);
   }
+
+  /** Top face of the keyboard, in world space (the room group sits at origin). */
+  keyboardWorldPosition(out = new THREE.Vector3()) {
+    return out.set(0, 0.80, -1.16);
+  }
   get screenNormal() { return new THREE.Vector3(0, 0, 1); }
   get screenWidth() { return this.screenSize.x; }
   get screenHeight() { return this.screenSize.y; }

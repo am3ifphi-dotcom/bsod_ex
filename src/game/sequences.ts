@@ -16,6 +16,7 @@ import { Physics } from '../core/physics';
 import { mouthFrag, mouthVert } from '../core/shaders';
 import { RNG, clamp, damp, easeIn, easeInOut, easeOut, lerp, makeCanvas, canvasTexture, smoothstep } from '../core/utils';
 import { settings } from '../core/settings';
+import { APPROACH_DURATION, approachGaze } from './approach';
 
 export type SeqMode = 'none' | 'approach' | 'consume' | 'collapse' | 'fall' | 'return';
 
@@ -48,6 +49,8 @@ export class Sequences {
   private roll = 0;
   private shakeAmt = 0;
   private shakeSeed = 0;
+  /** camera pose at the end of the lean-in (used by the BSOD hold) */
+  private leanPose: { pos: THREE.Vector3; yaw: number; pitch: number; fov: number } | null = null;
 
   // room-devouring props
   private mouth!: THREE.Mesh;
@@ -162,6 +165,10 @@ export class Sequences {
   }
 
   // ------------------------------------------------------------------ setup
+  /** The leaning pose the approach ended on, if it has run. */
+  get approachPose() { return this.leanPose; }
+  forgetApproachPose() { this.leanPose = null; }
+
   private enter(mode: SeqMode) {
     this.mode = mode;
     this.t = 0;
@@ -177,14 +184,19 @@ export class Sequences {
     this.shakeAmt = 0;
   }
 
-  private exit() {
+  /**
+   * Hand the camera back to the player. `resetCamera: false` keeps the scripted
+   * camera transform in place (the lean-in ends off the player's capsule, so
+   * snapping to the standing eye height would flick the view backwards).
+   */
+  private exit(resetCamera = true) {
     this.active = false;
     this.mode = 'none';
     this.player.controlCamera = true;
     this.player.setFrozen(false);
     this.player.yaw = this.lookYaw;
     this.player.pitch = clamp(this.lookPitch, -1.2, 1.2);
-    this.player.updateCamera(0.016);
+    if (resetCamera) this.player.updateCamera(0.016);
     this.tunnelGroup.visible = false;
   }
 
@@ -402,37 +414,41 @@ export class Sequences {
 
   // ---------------------------------------------------------------- approach
   private updateApproach(dt: number) {
-    const t = clamp(this.t / 2.8);
-    const e = easeInOut(t);
+    const t = this.t;
     const screen = this.room.screenWorldPosition();
-    const stand = this.player.feet.clone().add(new THREE.Vector3(0, 0, 0));
-    const from = new THREE.Vector3(stand.x, this.player.feet.y + 1.62, stand.z);
-    // lean in: move toward the monitor and tilt the head
+    const keyboard = this.room.keyboardWorldPosition();
+
+    // ---- body: stand -> lean over the desk -> eye level with the screen
+    const e = easeInOut(clamp(t / (APPROACH_DURATION - 0.4)));
+    const from = new THREE.Vector3(this.player.feet.x, this.player.feet.y + 1.62, this.player.feet.z);
     const target = new THREE.Vector3(screen.x + 0.02, screen.y + 0.03, screen.z + 0.62);
     const pos = from.clone().lerp(target, e);
-    pos.y += Math.sin(e * Math.PI) * 0.04;
+    pos.y -= Math.sin(e * Math.PI) * 0.05;   // dip forward over the desk
+
+    // ---- gaze: your own hands on the keys first, then up to the screen
+    const gaze = approachGaze(pos, screen, keyboard, t);
+    this.setLook(gaze.yaw, gaze.pitch, 0.5);
+
     this.cueFov = lerp(62, 46, e);
     this.roll = lerp(0, -0.055, e);
+    // depth of field follows whatever you are actually looking at, so the keys
+    // are sharp while you look down and the screen is sharp once you look up
+    this.engine.setBokehFocus(gaze.focus, 0.0035, 0.02);
 
-    const yaw = Math.atan2(-(screen.x - pos.x), -(screen.z - pos.z));
-    const pitch = Math.atan2(screen.y - pos.y, Math.hypot(screen.x - pos.x, screen.z - pos.z));
-    this.cam.position.copy(pos);
-    this.cam.quaternion.setFromEuler(new THREE.Euler(
-      pitch + Math.sin(this.t * 0.8) * 0.004,
-      yaw + Math.cos(this.t * 0.6) * 0.003,
-      this.roll, 'YXZ',
-    ));
-    this.cam.fov = damp(this.cam.fov, this.cueFov, 6, dt);
-    this.cam.updateProjectionMatrix();
-    this.engine.setBokehFocus(pos.distanceTo(screen), 0.0035, 0.02);
+    this.applyCamera(dt, pos, 1);
 
-    // small head-inertia settle before handing over
-    if (t >= 1 && this.t > 3.1) {
-      this.exit();
-      this.player.yaw = yaw;
-      this.player.pitch = pitch;
+    // settle, then hand over. The camera stays where the lean left it, and the
+    // pose is recorded so the BSOD "hold" can use the exact same transform.
+    if (t >= 1 && t > APPROACH_DURATION) {
+      this.leanPose = {
+        pos: this.cam.position.clone(),
+        yaw: this.lookYaw,
+        pitch: this.lookPitch,
+        fov: 46,
+      };
       this.cam.fov = 46;
       this.cam.updateProjectionMatrix();
+      this.exit(false);
       this.onApproachDone?.();
     }
   }

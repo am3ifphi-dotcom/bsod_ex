@@ -261,10 +261,14 @@ export class Game {
     this.phase = 'bsod';
     this.input.lookEnabled = false;
     this.input.suspended = false;
-    this.lean.pos.copy(this.engine.camera.position);
-    this.lean.yaw = this.player.yaw;
-    this.lean.pitch = this.player.pitch;
-    this.lean.fov = this.engine.camera.fov;
+    // use the pose the lean-in actually ended on (the camera is hovering in
+    // front of the monitor, not at the player's standing eye height)
+    const pose = this.sequences.approachPose;
+    this.lean.pos.copy(pose ? pose.pos : this.engine.camera.position);
+    this.lean.yaw = pose ? pose.yaw : this.player.yaw;
+    this.lean.pitch = pose ? pose.pitch : this.player.pitch;
+    this.lean.fov = pose ? pose.fov : this.engine.camera.fov;
+    this.sequences.forgetApproachPose();
     this.expectingUnlock = true;
     this.input.releaseLock();
     this.ui.setCursor(true, window.innerWidth / 2, window.innerHeight / 2);
