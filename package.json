@@ -1,0 +1,30 @@
+{
+  "name": "bsod-ex",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/test.mjs && node tools/run-smoke.mjs && node .test-out/smoke.mjs && node tools/run-director.mjs && node .test-out/director.mjs",
+    "fetch-assets": "node scripts/fetch-assets.mjs",
+    "build-assets": "node scripts/build-assets.mjs",
+    "smoke": "node tools/run-smoke.mjs && node .test-out/smoke.mjs",
+    "smoke:director": "node tools/run-director.mjs && node .test-out/director.mjs"
+  },
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@gltf-transform/core": "^4.2.1",
+    "@gltf-transform/extensions": "^4.2.1",
+    "@gltf-transform/functions": "^4.2.1",
+    "@types/three": "^0.186.0",
+    "sharp": "^0.34.4",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.5",
+    "esbuild": "^0.28.2"
+  }
+}

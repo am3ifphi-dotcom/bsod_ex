@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>BSOD_EX — 青い画面の向こう側</title>
+    <meta name="description" content="一人称ホラー／グリッチ体験。自室のPCからBSODの世界へ。" />
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="gl"></canvas>
+
+      <!-- HUD (最小限) -->
+      <div id="hud" class="hidden">
+        <div id="dot"></div>
+        <div id="prompt" class="hidden"><span class="key">E</span><span id="prompt-label"></span></div>
+        <div id="subtitle" class="hidden"></div>
+        <div id="area-title" class="hidden"></div>
+        <div id="click-hint" class="hidden">クリック</div>
+        <div id="crosshair-ring" class="hidden"></div>
+        <div id="fps" class="hidden"></div>
+        <div id="chapter" class="hidden"></div>
+      </div>
+
+      <!-- ローディング -->
+      <div id="loading" class="overlay">
+        <div class="loading-inner">
+          <div class="logo small">BSOD<span>_EX</span></div>
+          <div class="bar"><i id="load-bar"></i></div>
+          <div id="load-text">アセットを読み込み中…</div>
+        </div>
+      </div>
+
+      <!-- タイトル / 注意表示 -->
+      <div id="start" class="overlay hidden">
+        <div class="start-inner">
+          <div class="logo">BSOD<span>_EX</span></div>
+          <div class="tagline">青い画面の向こう側へ</div>
+
+          <div class="warn">
+            <strong>⚠ プレイ前の注意</strong>
+            <ul>
+              <li>本作はホラー演出を含みます。光の点滅・画面の歪み・強いノイズが苦手な方はご注意ください。</li>
+              <li>点滅は 1 秒 3 回以下に制限し、設定で「グリッチ演出の強度」「カメラ揺れ」を下げられます。</li>
+              <li>ヘッドホン推奨。音量は小さめから始めてください。</li>
+            </ul>
+          </div>
+
+          <div class="quality-row">
+            <label>画質プリセット
+              <select id="start-quality">
+                <option value="low">低 (Low)</option>
+                <option value="medium">中 (Medium)</option>
+                <option value="high" selected>高 (High)</option>
+                <option value="epic">最高 (Epic)</option>
+              </select>
+            </label>
+          </div>
+
+          <button id="start-btn" class="primary">はじめる</button>
+
+          <div class="controls">
+            <div><b>WASD</b> 移動</div>
+            <div><b>Shift</b> ダッシュ</div>
+            <div><b>マウス</b> 視点</div>
+            <div><b>E / クリック</b> 調べる</div>
+            <div><b>F</b> ライト</div>
+            <div><b>C</b> コンソール (異世界)</div>
+            <div><b>F3</b> 性能表示</div>
+            <div><b>Esc</b> メニュー</div>
+          </div>
+          <div class="footnote">マウスロックが使えない環境では、ドラッグで視点操作できます。</div>
+        </div>
+      </div>
+
+      <!-- ポーズ / 設定 -->
+      <div id="menu" class="overlay hidden">
+        <div class="menu-inner">
+          <h2>PAUSE</h2>
+          <div class="menu-grid">
+            <section>
+              <h3>設定</h3>
+              <label class="slider">
+                <span>マウス感度 <em id="v-sens">1.00</em></span>
+                <input id="s-sens" type="range" min="0.2" max="3" step="0.01" value="1" />
+              </label>
+              <label class="slider">
+                <span>マスター音量 <em id="v-master">85</em></span>
+                <input id="s-master" type="range" min="0" max="1" step="0.01" value="0.85" />
+              </label>
+              <label class="slider">
+                <span>環境音 <em id="v-amb">90</em></span>
+                <input id="s-amb" type="range" min="0" max="1" step="0.01" value="0.9" />
+              </label>
+              <label class="slider">
+                <span>効果音 <em id="v-sfx">100</em></span>
+                <input id="s-sfx" type="range" min="0" max="1" step="0.01" value="1" />
+              </label>
+              <label class="slider">
+                <span>グリッチ演出の強度 <em id="v-glitch">100</em></span>
+                <input id="s-glitch" type="range" min="0" max="1" step="0.01" value="1" />
+              </label>
+              <label class="slider">
+                <span>カメラ揺れ / ヘッドボブ <em id="v-bob">100</em></span>
+                <input id="s-bob" type="range" min="0" max="1" step="0.01" value="1" />
+              </label>
+              <label class="check">
+                <input id="s-invert" type="checkbox" /> 視点 Y 反転
+              </label>
+              <label class="check">
+                <input id="s-dynres" type="checkbox" checked /> 動的解像度 (60fps 優先)
+              </label>
+              <label class="slider">
+                <span>画質プリセット</span>
+                <select id="s-quality">
+                  <option value="low">低 (Low)</option>
+                  <option value="medium">中 (Medium)</option>
+                  <option value="high">高 (High)</option>
+                  <option value="epic">最高 (Epic)</option>
+                </select>
+              </label>
+            </section>
+            <section>
+              <h3>クレジット</h3>
+              <div id="credits" class="credits"></div>
+            </section>
+          </div>
+          <div class="menu-buttons">
+            <button id="resume-btn" class="primary">再開</button>
+            <button id="restart-btn">はじめから</button>
+          </div>
+          <div class="footnote">Esc / クリックで再開</div>
+        </div>
+      </div>
+
+      <!-- ゲーム内コンソール -->
+      <div id="console" class="hidden">
+        <div class="console-box">
+          <div class="console-head">
+            <span>OPERATOR_CONSOLE // MEMORY_INTERFACE</span>
+            <span class="console-hint">Esc / C で閉じる</span>
+          </div>
+          <div id="console-log" class="console-log"></div>
+          <div class="console-input-row">
+            <span class="caret">&gt;</span>
+            <input id="console-input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="96" />
+          </div>
+        </div>
+      </div>
+
+      <!-- ノートなどのテキスト表示 -->
+      <div id="read" class="hidden">
+        <div class="read-box">
+          <div class="read-head" id="read-title">RECORD</div>
+          <div class="read-body" id="read-body"></div>
+          <div class="read-foot">E / クリック / Esc で閉じる</div>
+        </div>
+      </div>
+
+      <!-- デバッグ -->
+      <div id="debug" class="hidden"></div>
+
+      <div id="vignette"></div>
+      <div id="letterbox"></div>
+    </div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
