@@ -1,0 +1,5 @@
+node_modules/
+dist/
+public/textures/polyhaven/
+*.log
+.DS_Store
