@@ -135,6 +135,28 @@ console.log('--- collision ---');
   ok(Math.abs(c.position.y) < 0.02, `落下して床で停止 (y=${c.position.y.toFixed(3)})`);
 }
 
+console.log('--- stair climbability ---');
+{
+  const world = new CollisionWorld();
+  world.addBoxCentered(0, -0.5, 0, 40, 1, 40);
+  // buildStairs と同じ手順形状(rise 0.42 / run 0.34 × 28 段 ≒ 2F)
+  const rise = 5.6 / 28;
+  const run = 0.34;
+  for (let i = 0; i < 28; i++) {
+    const z = 10 - i * run;
+    world.addBoxCentered(0, rise * (i + 1) - 0.09, z, 3, 0.18, run + 0.06);
+  }
+  const c = new CharacterController(world);
+  c.teleport(0, 0.05, 12);
+  let maxY = 0;
+  for (let i = 0; i < 500; i++) {
+    c.update(new THREE.Vector3(0, 0, -1), 3, 1 / 60);
+    maxY = Math.max(maxY, c.position.y);
+  }
+  ok(maxY > 5.2, `28段の階段を登り切れる (y=${maxY.toFixed(2)})`);
+  ok(maxY < 6.2, `階段の上端で止まる (y=${maxY.toFixed(2)})`);
+}
+
 console.log('--- utils ---');
 {
   ok(clamp(5, 0, 1) === 1 && lerp(0, 10, 0.5) === 5, 'clamp/lerp');
