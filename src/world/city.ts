@@ -172,14 +172,14 @@ function buildCityStairs(ctx: VoidContext): void {
     roughness: 0.85,
     metalness: 0.2,
   });
-  // 橋(x=112, y=+8) → 街路
-  const startX = 114;
-  const steps = 26;
-  const gy = wastelandHeight(startX + 10, CZ) + VOID_Y;
-  const topY = wastelandHeight(80, CZ) + VOID_Y + 8;
+  // 橋(x=49+seg9 → ≈121) → 街路へ降りる階段
+  const startX = 121;
+  const steps = 30;
+  const gy = wastelandHeight(startX + 12, CZ) + VOID_Y;
+  const topY = wastelandHeight(34, CZ) + VOID_Y + 5.6; // 橋上面(2Fスラブ高)
   for (let i = 0; i < steps; i++) {
     const t = i / (steps - 1);
-    const x = startX + t * 10;
+    const x = startX + t * 12;
     const y = lerp(topY, gy, t);
     const step = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.28, 0.38), mat);
     step.position.set(x, y - 0.14, CZ);
@@ -193,8 +193,8 @@ function buildCityStairs(ctx: VoidContext): void {
       group.add(rail);
     }
   }
-  collision.addBox(new THREE.Vector3(startX, gy, CZ - 2.1), new THREE.Vector3(startX + 10, topY, CZ - 1.7), false);
-  collision.addBox(new THREE.Vector3(startX, gy, CZ + 1.7), new THREE.Vector3(startX + 10, topY, CZ + 2.1), false);
+  collision.addBox(new THREE.Vector3(startX, gy, CZ - 2.1), new THREE.Vector3(startX + 12, topY, CZ - 1.7), false);
+  collision.addBox(new THREE.Vector3(startX, gy, CZ + 1.7), new THREE.Vector3(startX + 12, topY, CZ + 2.1), false);
 }
 
 function buildShopInterior(ctx: VoidContext, x: number, z: number): void {

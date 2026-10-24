@@ -728,6 +728,7 @@ export class Game {
     window.setTimeout(() => {
       this.restartQueued = false;
       // 完全初期化
+      this.bsod.restoreSuction();
       this.bsod.reset();
       this.collapse.reset(this.engine.scene);
       this.room.reset();
@@ -797,7 +798,10 @@ export class Game {
         this.room.group.visible = false;
         this.phase = 'void';
         this.controller.teleport(0, wastelandHeight(0, -6) + VOID_Y, -6);
+        this.yaw = 0;
+        this.pitch = -0.06;
         this.audio.startVoidDrone();
+        this.audio.startBeacon(this.voidCtx.beacon);
         this.setPhaseFog('void');
         break;
       case 'console':

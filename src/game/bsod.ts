@@ -34,7 +34,7 @@ export class BsodSequence {
   private tunnel: THREE.Mesh | null = null;
   private tunnelRings: THREE.InstancedMesh | null = null;
   private path: THREE.CatmullRomCurve3 | null = null;
-  private suctionObjects: { obj: THREE.Object3D; origin: THREE.Vector3 }[] = [];
+  private suctionObjects: { obj: THREE.Object3D; origin: THREE.Vector3; localPos: THREE.Vector3; localRot: THREE.Euler }[] = [];
   private onSwallowDone: (() => void) | null = null;
 
   constructor(
@@ -183,7 +183,12 @@ export class BsodSequence {
         const mesh = ch as THREE.Mesh;
         if (mesh.isMesh && (mesh.geometry as THREE.BufferGeometry).attributes?.position) {
           if (Math.random() < 0.4) {
-            this.suctionObjects.push({ obj: mesh, origin: mesh.getWorldPosition(new THREE.Vector3()) });
+            this.suctionObjects.push({
+              obj: mesh,
+              origin: mesh.getWorldPosition(new THREE.Vector3()),
+              localPos: mesh.position.clone(),
+              localRot: mesh.rotation.clone(),
+            });
           }
         }
         collect(ch, depth + 1);
@@ -295,7 +300,8 @@ export class BsodSequence {
           this.state = 'arrived';
           const ey = wastelandHeight(0, -6) + VOID_Y;
           this.camera.position.set(0, ey + 1.62, -6);
-          this.camera.quaternion.setFromEuler(new THREE.Euler(0, Math.PI, 0, 'YXZ')); // 北(構造物)向き
+          // 中心構造物(北 = -z)を向く
+          this.camera.quaternion.setFromEuler(new THREE.Euler(-0.06, 0, 0, 'YXZ'));
           this.camera.fov = 72;
           this.camera.updateProjectionMatrix();
           // チューブ掃除
@@ -345,7 +351,18 @@ export class BsodSequence {
     return this.corruption;
   }
 
+  /** 吸い込まれた小物を元の位置へ戻す(リプレイ時の完全初期化) */
+  restoreSuction(): void {
+    for (const s of this.suctionObjects) {
+      if (!s.obj.parent) continue;
+      s.obj.position.copy(s.localPos);
+      s.obj.rotation.copy(s.localRot);
+    }
+    this.suctionObjects = [];
+  }
+
   reset(): void {
+    this.restoreSuction();
     this.state = 'idle';
     this.clicks = 0;
     this.corruption = 0;

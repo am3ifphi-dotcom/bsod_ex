@@ -62,40 +62,63 @@ export function buildRuins(ctx: VoidContext): void {
   // 各階のスラブ(L字に一部欠損)
   for (let f = 0; f < floors.length; f++) {
     const y = floors[f];
-    // 主スラブ
-    const slab = new THREE.Mesh(new THREE.BoxGeometry(30, 0.5, 24), slabMat);
-    slab.position.set(hallX, groundY + y + 0.25, RZ);
-    slab.receiveShadow = true;
-    slab.castShadow = true;
-    hall.add(slab);
-    collision.addBoxCentered(hallX, groundY + y + 0.25, RZ, 30, 0.5, 24);
+    // 主スラブ(3F は階段用の穴を開ける)
+    const addSlabPiece = (px: number, pz: number, pw: number, pd: number): void => {
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(pw, 0.4, pd), slabMat);
+      slab.position.set(px, groundY + y + 0.2, pz);
+      slab.receiveShadow = true;
+      slab.castShadow = true;
+      hall.add(slab);
+      collision.addBoxCentered(px, groundY + y + 0.2, pz, pw, 0.4, pd);
+    };
+    if (f < 2) {
+      addSlabPiece(hallX, RZ, 30, 24);
+    } else {
+      // 穴: x [hallX-10, hallX-6], z [RZ-11, RZ-2]
+      addSlabPiece(hallX - 12.5, RZ, 5, 24);
+      addSlabPiece(hallX + 4.5, RZ, 21, 24);
+      addSlabPiece(hallX - 8, RZ - 11.5, 4, 1);
+      addSlabPiece(hallX - 8, RZ + 5, 4, 14);
+      // 穴の縁の手すり(落下防止)
+      addRailings(hall, collision, [
+        [hallX - 10, groundY + y + 0.4, RZ - 6.5, 9, Math.PI / 2, 0],
+        [hallX - 6, groundY + y + 0.4, RZ - 6.5, 9, Math.PI / 2, 0],
+        [hallX - 8, groundY + y + 0.4, RZ - 11, 4, 0, 0],
+      ]);
+    }
 
     // 吹き抜け(上の階は中央を空ける)
     if (f >= 1) {
       // 空洞を演出するパネル(描画のみ・衝突は周辺で)
       const voidPanel = new THREE.Mesh(new THREE.BoxGeometry(12, 0.52, 10), new THREE.MeshStandardMaterial({ color: 0x08122c, roughness: 0.9 }));
-      voidPanel.position.set(hallX - 4, groundY + y + 0.26, RZ + 2);
+      voidPanel.position.set(hallX - 4, groundY + y + 0.21, RZ + 2);
       hall.add(voidPanel);
       // 吹き抜け縁の手すり
       addRailings(hall, collision, [
-        [hallX - 10, groundY + y + 0.5, RZ - 3, 12, 0, 0],
-        [hallX - 10, groundY + y + 0.5, RZ + 7, 12, 0, 0],
-        [hallX - 10, groundY + y + 0.5, RZ + 2, 10, Math.PI / 2, 0],
-        [hallX + 2, groundY + y + 0.5, RZ + 2, 10, Math.PI / 2, 0],
+        [hallX - 10, groundY + y + 0.4, RZ - 3, 12, 0, 0],
+        [hallX - 10, groundY + y + 0.4, RZ + 7, 12, 0, 0],
+        [hallX - 10, groundY + y + 0.4, RZ + 2, 10, Math.PI / 2, 0],
+        [hallX + 2, groundY + y + 0.4, RZ + 2, 10, Math.PI / 2, 0],
       ]);
     }
 
-    // 外周手すり
-    addRailings(hall, collision, [
-      [hallX, groundY + y + 0.5, RZ - 12, 30, 0, 0],
-      [hallX - 15, groundY + y + 0.5, RZ, 24, Math.PI / 2, 0],
-      [hallX + 15, groundY + y + 0.5, RZ, 24, Math.PI / 2, 0],
-      // 南側は開口(階段)
-    ]);
+    // 外周手すり(2F の東側は高架橋の接続口なので開ける)
+    const edgeRails: [number, number, number, number, number, number][] = [
+      [hallX, groundY + y + 0.4, RZ - 12, 30, 0, 0],
+      [hallX - 15, groundY + y + 0.4, RZ, 24, Math.PI / 2, 0],
+    ];
+    if (f !== 1) {
+      edgeRails.push([hallX + 15, groundY + y + 0.4, RZ, 24, Math.PI / 2, 0]);
+    } else {
+      // 接続口の脇だけ短い手すり
+      edgeRails.push([hallX + 15, groundY + y + 0.4, RZ - 9, 6, Math.PI / 2, 0]);
+      edgeRails.push([hallX + 15, groundY + y + 0.4, RZ + 9, 6, Math.PI / 2, 0]);
+    }
+    addRailings(hall, collision, edgeRails);
 
     // 発光の床縁
     const edge = new THREE.Mesh(new THREE.BoxGeometry(30, 0.1, 0.16), edgeMat);
-    edge.position.set(hallX, groundY + y + 0.52, RZ - 11.9);
+    edge.position.set(hallX, groundY + y + 0.42, RZ - 11.9);
     hall.add(edge);
   }
 
@@ -110,9 +133,15 @@ export function buildRuins(ctx: VoidContext): void {
     }
   }
 
-  // 階段(南側: 1F→2F, 2F→3F) — ステップアップ対応
-  buildStairs(hall, collision, hallX + 8, groundY, RZ + 13, 0, FLOOR_H, 1);
-  buildStairs(hall, collision, hallX - 8, groundY, RZ + 13, FLOOR_H, FLOOR_H * 2, -1);
+  // 階段(1F→2F は南側からスラブ縁へ / 2F→3F は北側から) — ステップアップ対応
+  // スラブ上面 = groundY + y + 0.4。階段はその高さまで登り、スラブ縁(z=±12)で接続。
+  const top1 = FLOOR_H + 0.4;
+  const top2 = FLOOR_H * 2 + 0.4;
+  const runN = 0.34 * Math.ceil(top1 / 0.26); // 階段の全長
+  // 1F→2F: 南側の外から2Fスラブ縁へ
+  buildStairs(hall, collision, hallX + 8, groundY, RZ + 12 + runN, 0, top1, -1);
+  // 2F→3F: 2F床の上を登り、3Fスラブ縁へ(吹き抜けの上を通る立体動線)
+  buildStairs(hall, collision, hallX - 8, groundY, RZ - 10, top1, top2, 1);
 
   // 崩れた壁の断片
   const rng = mulberry32(31337);
@@ -252,6 +281,7 @@ function buildStairs(
   fromY: number,
   toY: number,
   dir: number,
+  axis: 'x' | 'z' = 'z',
 ): void {
   const mat = new THREE.MeshStandardMaterial({
     color: 0x27428c,
@@ -263,32 +293,64 @@ function buildStairs(
   const steps = Math.ceil((toY - fromY) / 0.26);
   const run = 0.34;
   const width = 2.6;
+  const rise = (toY - fromY) / steps;
   for (let i = 0; i < steps; i++) {
-    const y = y0 + fromY + (i + 0.5) * ((toY - fromY) / steps);
-    const zz = z + dir * i * run;
-    const step = new THREE.Mesh(new THREE.BoxGeometry(width, 0.26, run + 0.02), mat);
-    step.position.set(x, y - 0.13, zz);
+    // 上面が y0 + fromY + (i+1)*rise になる高さの踏段
+    const top = y0 + fromY + (i + 1) * rise;
+    const off = (axis === 'z' ? z : x) + dir * i * run;
+    const step =
+      axis === 'z'
+        ? new THREE.Mesh(new THREE.BoxGeometry(width, rise + 0.1, run + 0.02), mat)
+        : new THREE.Mesh(new THREE.BoxGeometry(run + 0.02, rise + 0.1, width), mat);
+    step.position.set(axis === 'z' ? x : off, top - (rise + 0.1) / 2, axis === 'z' ? off : z);
     step.receiveShadow = true;
     step.castShadow = true;
     parent.add(step);
-    collision.addBoxCentered(x, y - 0.13, zz, width, 0.26, run + 0.02);
-    // 手すり(階段側)
+    collision.addBox(
+      new THREE.Vector3(
+        axis === 'z' ? x - width / 2 : off - run / 2,
+        top - rise - 0.1,
+        axis === 'z' ? off - run / 2 : z - width / 2,
+      ),
+      new THREE.Vector3(
+        axis === 'z' ? x + width / 2 : off + run / 2,
+        top,
+        axis === 'z' ? off + run / 2 : z + width / 2,
+      ),
+    );
+    // 手すりポスト(階段側)
     if (i % 3 === 0) {
       const rail = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.9, 0.07), mat);
-      rail.position.set(x - width / 2 + 0.1, y + 0.45, zz);
+      rail.position.set(axis === 'z' ? x - width / 2 + 0.1 : off, top + 0.45, axis === 'z' ? off : z - width / 2 + 0.1);
       parent.add(rail);
     }
   }
-  // 階段の手すり壁(片側)
-  const railWall = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.0, steps * run), mat);
-  railWall.position.set(x - width / 2 + 0.06, y0 + fromY + (toY - fromY) / 2 + 0.5, z + dir * (steps * run) / 2);
-  railWall.rotation.x = -dir * Math.atan2(toY - fromY, steps * run);
+  // 階段の手すり壁(片側) + 衝突
+  const len = steps * run;
+  const midY = y0 + fromY + (toY - fromY) / 2 + 0.5;
+  const railWall =
+    axis === 'z'
+      ? new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.0, len), mat)
+      : new THREE.Mesh(new THREE.BoxGeometry(len, 1.0, 0.12), mat);
+  if (axis === 'z') {
+    railWall.position.set(x - width / 2 + 0.06, midY, z + dir * len / 2);
+    railWall.rotation.x = -dir * Math.atan2(toY - fromY, len);
+  } else {
+    railWall.position.set(z * 0 + x + dir * len / 2, midY, z - width / 2 + 0.06);
+    railWall.rotation.z = dir * Math.atan2(toY - fromY, len);
+  }
   parent.add(railWall);
-  collision.addBox(
-    new THREE.Vector3(x - width / 2, y0 + fromY, Math.min(z, z + dir * steps * run)),
-    new THREE.Vector3(x - width / 2 + 0.14, y0 + toY + 0.4, Math.max(z, z + dir * steps * run)),
-    false,
-  );
+  const zLo = Math.min(z, z + (axis === 'z' ? dir * len : 0));
+  const zHi = Math.max(z, z + (axis === 'z' ? dir * len : 0));
+  const xLo = Math.min(x, x + (axis === 'x' ? dir * len : 0));
+  const xHi = Math.max(x, x + (axis === 'x' ? dir * len : 0));
+  if (axis === 'z') {
+    collision.addBox(new THREE.Vector3(x - width / 2, y0 + fromY, zLo), new THREE.Vector3(x - width / 2 + 0.14, y0 + toY + 0.4, zHi), false);
+    collision.addBox(new THREE.Vector3(x + width / 2 - 0.14, y0 + fromY, zLo), new THREE.Vector3(x + width / 2, y0 + toY + 0.4, zHi), false);
+  } else {
+    collision.addBox(new THREE.Vector3(xLo, y0 + fromY, z - width / 2), new THREE.Vector3(xHi, y0 + toY + 0.4, z - width / 2 + 0.14), false);
+    collision.addBox(new THREE.Vector3(xLo, y0 + fromY, z + width / 2 - 0.14), new THREE.Vector3(xHi, y0 + toY + 0.4, z + width / 2), false);
+  }
 }
 
 /** 崩壊建築→都市の高架橋(歩行可能・手すり付き) */
@@ -308,11 +370,12 @@ function buildHighBridge(ctx: VoidContext): void {
     metalness: 0.5,
   });
 
-  // 東へ伸びる橋(x: 45→110), 高さ 8m
-  const bridgeY = wastelandHeight(80, RZ) + VOID_Y + 8;
-  const segs = 8;
+  // 東へ伸びる橋: 2F スラブ上面(groundY+5.6)に直接接続する高架橋
+  const hallGround = wastelandHeight(34, RZ) + VOID_Y;
+  const bridgeY = hallGround + 5.3; // スラブ中心 = 上面 5.6 - 0.3
+  const segs = 9;
   for (let i = 0; i < segs; i++) {
-    const x = 48 + i * 8;
+    const x = 53.1 + i * 8; // 東縁 x=49 から伸ばす
     const slab = new THREE.Mesh(new THREE.BoxGeometry(8.2, 0.6, 5.2), mat);
     slab.position.set(x, bridgeY, RZ);
     slab.castShadow = true;
@@ -338,6 +401,5 @@ function buildHighBridge(ctx: VoidContext): void {
     }
   }
 
-  // 崩壊建築側: 階段で橋の高さまで
-  buildStairs(group, collision, 46, wastelandHeight(46, RZ + 7) + VOID_Y, RZ + 7, 0, 8, 1);
+  // 橋は2Fスラブに直結(地面からの階段はホール内の1F→2F階段を使う)
 }

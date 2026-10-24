@@ -1,6 +1,7 @@
 /**
  * ④深層エリア — 配線とブロックノイズが露出した閉鎖空間
- * 都市/崩壊建築から続くトンネルで接続。狭く、暗く、青い血管状の光。
+ * 都市/崩壊建築から続く廊下で接続。狭く、暗く、青い血管状の光。
+ * 各室の壁はドア開口付き(歩行可能・衝突判定あり)。
  */
 import * as THREE from 'three';
 import { textures } from './textures';
@@ -27,10 +28,59 @@ export function buildDepths(ctx: VoidContext): void {
   applyGlitch(wallMat, { amp: 0.025, block: 0.25, emissiveFlicker: 0.3 });
   const veinMat = new THREE.MeshBasicMaterial({ color: 0x3f7dff });
 
-  // ---------------- 大広間(24x24, 天井低め) ----------------
-  const HW = 26;
-  const HH = 6.5;
-  const mkRoom = (cx: number, cz: number, w: number, d: number, h: number): void => {
+  /** 壁(ドア開口付き): axis 'x' は x に沿った壁(厚み z) */
+  const mkWall = (
+    cx: number,
+    cz: number,
+    w: number,
+    h: number,
+    axis: 'x' | 'z',
+    door: { width: number; height: number } | null,
+  ): void => {
+    const t = 0.5;
+    const seg = (sx: number, sz: number, sw: number, sd: number, sy: number, sh: number): void => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(sw, sh, sd), wallMat);
+      m.position.set(sx, gy + sy + sh / 2, sz);
+      m.receiveShadow = true;
+      m.castShadow = true;
+      group.add(m);
+      collision.addBoxCentered(sx, gy + sy + sh / 2, sz, sw, sh, sd);
+    };
+    if (!door) {
+      seg(cx, cz, axis === 'x' ? w : t, axis === 'x' ? t : w, 0, h);
+      return;
+    }
+    const dw = door.width;
+    const dh = door.height;
+    const side = (w - dw) / 2;
+    if (axis === 'x') {
+      // 左右の柱間壁
+      seg(cx - dw / 2 - side / 2, cz, side, t, 0, h);
+      seg(cx + dw / 2 + side / 2, cz, side, t, 0, h);
+      // リンテル
+      seg(cx, cz, dw, t, dh, h - dh);
+    } else {
+      seg(cx, cz - dw / 2 - side / 2, t, side, 0, h);
+      seg(cx, cz + dw / 2 + side / 2, t, side, 0, h);
+      seg(cx, cz, t, dw, dh, h - dh);
+    }
+    // ドア枠の発光
+    const glowW = axis === 'x' ? dw : 0.12;
+    const glowD = axis === 'x' ? 0.12 : dw;
+    const glow = new THREE.Mesh(new THREE.BoxGeometry(glowW, 0.1, glowD), veinMat);
+    glow.position.set(cx, gy + dh + 0.05, cz);
+    group.add(glow);
+  };
+
+  /** 室(床・天井・4壁、指定辺にドア) */
+  const mkRoom = (
+    cx: number,
+    cz: number,
+    w: number,
+    d: number,
+    h: number,
+    doors: { n?: boolean; s?: boolean; e?: boolean; w?: boolean } = {},
+  ): void => {
     const floor = new THREE.Mesh(new THREE.BoxGeometry(w, 0.4, d), wallMat);
     floor.position.set(cx, gy + 0.2, cz);
     floor.receiveShadow = true;
@@ -42,38 +92,18 @@ export function buildDepths(ctx: VoidContext): void {
     group.add(ceil);
     collision.addBoxCentered(cx, gy + h, cz, w, 0.4, d);
 
-    for (const [sx, sz, ww, dd] of [
-      [0, -d / 2, w, 0.5],
-      [0, d / 2, w, 0.5],
-      [-w / 2, 0, 0.5, d],
-      [w / 2, 0, 0.5, d],
-    ] as [number, number, number, number][]) {
-      const wall = new THREE.Mesh(new THREE.BoxGeometry(ww, h, dd), wallMat);
-      wall.position.set(cx + sx, gy + h / 2, cz + sz);
-      wall.receiveShadow = true;
-      wall.castShadow = true;
-      group.add(wall);
-      collision.addBoxCentered(cx + sx, gy + h / 2, cz + sz, ww, h, dd);
-    }
+    const doorSpec = { width: 3.2, height: 3.0 };
+    mkWall(cx, cz - d / 2, w, h, 'x', doors.n ? doorSpec : null);
+    mkWall(cx, cz + d / 2, w, h, 'x', doors.s ? doorSpec : null);
+    mkWall(cx - w / 2, cz, d, h, 'z', doors.w ? doorSpec : null);
+    mkWall(cx + w / 2, cz, d, h, 'z', doors.e ? doorSpec : null);
   };
 
-  mkRoom(DX, DZ, HW, 24, HH);
-  // 通路(東へ: 崩壊建築・都市へ。西へ: さらに深い盲端)
-  mkRoom(DX + 30, DZ, 22, 8, 4.2);
-  mkRoom(DX - 28, DZ, 18, 8, 4.2);
-  mkRoom(DX, DZ - 28, 8, 22, 4.2);
-
-  // 開口(通路と広間の間のドア)
-  for (const [x, z, w, d] of [
-    [DX + HW / 2 - 0.3, DZ, 0.6, 3.2],
-    [DX - HW / 2 + 0.3, DZ, 0.6, 3.2],
-    [DX, DZ - 12.3, 3.2, 0.6],
-  ] as [number, number, number, number][]) {
-    // 壁の一部を「穴」にするための追加衝突は作り込まず、開口部のみ描画
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(w === 0.6 ? 0.35 : 3.4, 3.6, w === 0.6 ? 3.4 : 0.35), wallMat);
-    frame.position.set(x, gy + 1.9, z);
-    group.add(frame);
-  }
+  // 大広間 + 3つの廊下(壁同士が接する位置に配置し、ドアで連結)
+  mkRoom(DX, DZ, 26, 24, 6.5, { e: true, w: true, n: true });
+  mkRoom(DX + 24.35, DZ, 22, 8, 4.2, { w: true, e: true }); // 東廊下 → 外へ出られる
+  mkRoom(DX - 22.35, DZ, 18, 8, 4.2, { e: true, w: true }); // 西廊下(盲端側 + 外へ)
+  mkRoom(DX, DZ - 23.35, 8, 22, 4.2, { s: true, n: true }); // 北廊下
 
   // ---------------- 配線(チューブ) ----------------
   const cableMat = new THREE.MeshStandardMaterial({
@@ -91,7 +121,7 @@ export function buildDepths(ctx: VoidContext): void {
     for (let s = 0; s < 5; s++) {
       points.push(new THREE.Vector3(
         x0 + (rng() - 0.5) * 10,
-        gy + HH - 0.8 - rng() * 1.6,
+        gy + 6.5 - 0.8 - rng() * 1.6,
         z0 + s * 3.2 - 6 + (rng() - 0.5) * 4,
       ));
     }
@@ -100,7 +130,7 @@ export function buildDepths(ctx: VoidContext): void {
     group.add(tube);
   }
 
-  // 発光の血管(床/壁)
+  // 発光の血管(床)
   for (let i = 0; i < 26; i++) {
     const vein = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 1.4 + rng() * 2.2), veinMat);
     vein.position.set(DX - 11 + rng() * 22, gy + 0.42, DZ - 11 + rng() * 22);
@@ -153,9 +183,12 @@ export function buildDepths(ctx: VoidContext): void {
     (hint.material as THREE.MeshBasicMaterial).opacity = 0.7 + Math.sin(time * 0.8) * 0.18;
   });
 
-  // ---------------- 崩壊建築へ戻るトンネル入口の表示(発光) ----------------
-  const exitGlow = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 3.6), new THREE.MeshBasicMaterial({ color: 0x2244aa, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false }));
-  exitGlow.position.set(DX + 13.2, gy + 1.9, DZ);
+  // ---------------- 出入口の表示(発光) ----------------
+  const exitGlow = new THREE.Mesh(
+    new THREE.PlaneGeometry(3.4, 3.6),
+    new THREE.MeshBasicMaterial({ color: 0x2244aa, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false }),
+  );
+  exitGlow.position.set(DX + 35.5, gy + 1.9, DZ);
   exitGlow.rotation.y = Math.PI / 2;
   group.add(exitGlow);
 }
