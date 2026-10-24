@@ -98,7 +98,7 @@ export async function makeMaterial(assets: Assets, key: string, v: PBRVariant = 
     const c = t.clone();
     c.needsUpdate = true;
     c.wrapS = c.wrapT = THREE.RepeatWrapping;
-    c.repeat.set(rx, ry);
+    c.repeat?.set(rx, ry);
     return c;
   };
   const normal = clone(set.normal);
@@ -119,7 +119,8 @@ export async function makeMaterial(assets: Assets, key: string, v: PBRVariant = 
     side: v.side ?? THREE.FrontSide,
   });
   mat.aoMapIntensity = v.aoIntensity ?? 1.0;
-  if (normal) (normal as unknown as { normalScale: THREE.Vector2 }).normalScale.set(v.normalScale ?? 1, v.normalScale ?? 1);
+  // normalScale は Texture ではなく Material 側のプロパティ (r6x 以降も同じ)
+  if (normal) mat.normalScale.set(v.normalScale ?? 1, v.normalScale ?? 1);
   // glTF の metallicRoughness / occlusion は同じテクスチャを共有できる
   if (mat.roughnessMap) mat.roughnessMap.channel = 0;
   if (v.pole) {

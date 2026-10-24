@@ -11,7 +11,8 @@ const audio = new Proxy({}, { get: () => () => ({ stop() {}, set() {} }) }) as u
 
 function fakeAssets(): Assets {
   return {
-    texSet: async () => ({ albedo: null, normal: null, orm: null }),
+    // 実テクスチャを返す: makeMaterial の clone / repeat / normalScale 経路を必ず通す
+    texSet: async () => ({ albedo: new THREE.Texture(), normal: new THREE.Texture(), orm: new THREE.Texture() }),
     instance: async () => {
       const g = new THREE.Group();
       g.add(new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), new THREE.MeshStandardMaterial()));
@@ -263,7 +264,32 @@ function auditScene(name: string, root: THREE.Object3D, interactables: readonly 
   for (const b of bad.slice(0, 8)) problems.push(`${name}: ${b}`);
 }
 
+async function testMaterials() {
+  const { makeMaterial, solid, emissive } = await import('../src/core/materials');
+  const assets = fakeAssets();
+  const m = await makeMaterial(assets, 'floor_wood', { repeat: [2, 3], glitch: 0.5, normalScale: 0.7, pole: 0.4 });
+  assert(m.isMeshStandardMaterial, 'material: not a MeshStandardMaterial');
+  assert(!!m.map && !!m.normalMap && !!m.aoMap, 'material: texture maps missing');
+  assert(m.normalScale.x === 0.7 && m.normalScale.y === 0.7, `material: normalScale ${m.normalScale.x}`);
+  assert(m.map!.repeat.x === 2 && m.map!.repeat.y === 3, 'material: repeat not applied');
+  assert(!!m.onBeforeCompile, 'material: glitch patch missing');
+  // パッチは実シェーダー文字列に対して行われるので、差し替え対象が存在するか確認
+  const shader = {
+    vertexShader: '#include <common>\nvoid main(){ #include <begin_vertex> }',
+    fragmentShader: '#include <common>\nvoid main(){ #include <emissivemap_fragment> }',
+    uniforms: {} as Record<string, { value: unknown }>,
+  };
+  m.onBeforeCompile!(shader as never, null as never);
+  assert(shader.vertexShader.includes('vGlitchWPos'), 'material: vertex glitch not injected');
+  assert(shader.fragmentShader.includes('uCorrupt'), 'material: fragment glitch not injected');
+  assert(!!shader.uniforms.uGlitch, 'material: glitch uniforms missing');
+  solid(0x335577);
+  emissive(0x9fd0ff, 3);
+  console.log('[materials] ok');
+}
+
 (async () => {
+  await testMaterials();
   await testRoom();
   await testWorld();
   if (problems.length) {
