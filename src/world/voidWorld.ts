@@ -34,11 +34,19 @@ export interface VoidContext {
 export function wastelandHeight(x: number, z: number): number {
   const base = fbm2(x * 0.012, z * 0.012, 4) * 4.2;
   const ridges = Math.abs(fbm2(x * 0.03 + 7, z * 0.03 - 3, 3)) * 2.2;
-  // 中心の平坦な着地点
-  const spawnFlatten = clamp(1 - Math.hypot(x, z + 6) / 26, 0, 1);
-  const pathFlatten = clamp(1 - Math.abs(x) / 26, 0, 1) * clamp(1 - Math.abs(z + 130) / 130, 0, 1);
-  const flat = Math.max(spawnFlatten, pathFlatten * 0.85);
-  return lerp(base + ridges - 1.2, 0, flat * flat);
+  let h = base + ridges - 1.2;
+  // 建築エリアは完全に平坦化(めり込み・段差の防止)
+  const zone = (cx: number, cz: number, r: number): number => clamp(1 - Math.hypot(x - cx, z - cz) / r, 0, 1);
+  const flatten = Math.max(
+    zone(0, -6, 30) ** 2,        // 到着地点
+    zone(34, -220, 34) ** 2,     // 崩壊建築
+    zone(140, -245, 42) ** 2,    // 都市
+    zone(-150, -230, 30) ** 2,   // 深層
+    zone(0, -420, 40) ** 2,      // 中心構造物
+    (clamp(1 - Math.abs(x) / 26, 0, 1) * clamp(1 - Math.abs(z + 130) / 130, 0, 1)) ** 2, // 導線の道
+  );
+  h = lerp(h, 0, flatten);
+  return h;
 }
 
 class WastelandTerrain implements TerrainSampler {
