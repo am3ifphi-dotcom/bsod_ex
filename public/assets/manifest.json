@@ -1,0 +1,500 @@
+{
+  "generated": "2026-10-24T03:31:07.604Z",
+  "models": {
+    "sofa": {
+      "source": "SheenWoodLeatherSofa",
+      "bytes": 2017276,
+      "triangles": 46492,
+      "bounds": {
+        "min": [
+          -1.363,
+          0.001,
+          -0.463
+        ],
+        "max": [
+          1.363,
+          1.118,
+          0.46
+        ],
+        "size": [
+          2.726,
+          1.117,
+          0.923
+        ]
+      },
+      "boundsQ": {
+        "min": [
+          -1.363,
+          0.001,
+          -0.463
+        ],
+        "max": [
+          1.363,
+          1.118,
+          0.46
+        ]
+      }
+    },
+    "chair": {
+      "source": "SheenChair",
+      "bytes": 1314564,
+      "triangles": 39936,
+      "bounds": {
+        "min": [
+          -0.414,
+          0,
+          -0.277
+        ],
+        "max": [
+          0.413,
+          0.686,
+          0.294
+        ],
+        "size": [
+          0.827,
+          0.686,
+          0.57
+        ]
+      },
+      "boundsQ": {
+        "min": [
+          -0.414,
+          0,
+          -0.277
+        ],
+        "max": [
+          0.413,
+          0.686,
+          0.294
+        ]
+      }
+    },
+    "lantern": {
+      "source": "Lantern",
+      "bytes": 413344,
+      "triangles": 5394,
+      "bounds": {
+        "min": [
+          -3.922,
+          0.184,
+          -2.316
+        ],
+        "max": [
+          11.569,
+          25.848,
+          2.316
+        ],
+        "size": [
+          15.491,
+          25.664,
+          4.631
+        ]
+      },
+      "boundsQ": {
+        "min": [
+          -3.922,
+          0.184,
+          -2.315
+        ],
+        "max": [
+          11.569,
+          25.848,
+          2.315
+        ]
+      }
+    },
+    "bottle": {
+      "source": "WaterBottle",
+      "bytes": 163308,
+      "triangles": 4510,
+      "bounds": {
+        "min": [
+          -0.054,
+          -0.13,
+          -0.054
+        ],
+        "max": [
+          0.054,
+          0.13,
+          0.054
+        ],
+        "size": [
+          0.109,
+          0.26,
+          0.109
+        ]
+      },
+      "boundsQ": {
+        "min": [
+          -0.054,
+          -0.13,
+          -0.054
+        ],
+        "max": [
+          0.054,
+          0.13,
+          0.054
+        ]
+      }
+    },
+    "plant": {
+      "source": "DiffuseTransmissionPlant",
+      "bytes": 2269376,
+      "triangles": 68409,
+      "bounds": {
+        "min": [
+          -0.397,
+          0,
+          -0.42
+        ],
+        "max": [
+          0.304,
+          0.841,
+          0.237
+        ],
+        "size": [
+          0.701,
+          0.841,
+          0.657
+        ]
+      },
+      "boundsQ": {
+        "min": [
+          -0.397,
+          0,
+          -0.42
+        ],
+        "max": [
+          0.304,
+          0.841,
+          0.237
+        ]
+      }
+    },
+    "vase": {
+      "source": "GlassVaseFlowers",
+      "bytes": 340020,
+      "triangles": 10218,
+      "bounds": {
+        "min": [
+          -0.054,
+          0,
+          -0.068
+        ],
+        "max": [
+          0.164,
+          0.203,
+          0.074
+        ],
+        "size": [
+          0.217,
+          0.203,
+          0.142
+        ]
+      },
+      "boundsQ": {
+        "min": [
+          -0.054,
+          0,
+          -0.068
+        ],
+        "max": [
+          0.164,
+          0.203,
+          0.074
+        ]
+      }
+    },
+    "toycar": {
+      "source": "ToyCar",
+      "bytes": 2993860,
+      "triangles": 108936,
+      "bounds": {
+        "min": [
+          -0.035,
+          -0.016,
+          -0.037
+        ],
+        "max": [
+          0.038,
+          0.013,
+          0.037
+        ],
+        "size": [
+          0.073,
+          0.029,
+          0.074
+        ]
+      },
+      "boundsQ": {
+        "min": [
+          -0.035,
+          -0.016,
+          -0.037
+        ],
+        "max": [
+          0.038,
+          0.013,
+          0.037
+        ]
+      }
+    },
+    "coals": {
+      "source": "PotOfCoals",
+      "bytes": 784752,
+      "triangles": 18223,
+      "bounds": {
+        "min": [
+          -0.04,
+          0.001,
+          -0.04
+        ],
+        "max": [
+          0.04,
+          0.05,
+          0.04
+        ],
+        "size": [
+          0.08,
+          0.049,
+          0.08
+        ]
+      },
+      "boundsQ": {
+        "min": [
+          -0.04,
+          0.001,
+          -0.04
+        ],
+        "max": [
+          0.04,
+          0.05,
+          0.04
+        ]
+      }
+    },
+    "helmet_scifi": {
+      "source": "SciFiHelmet",
+      "bytes": 2824304,
+      "triangles": 23358,
+      "bounds": {
+        "min": [
+          -1.151,
+          -1.459,
+          -1.251
+        ],
+        "max": [
+          1.151,
+          1.459,
+          1.251
+        ],
+        "size": [
+          2.302,
+          2.917,
+          2.502
+        ]
+      },
+      "boundsQ": {
+        "min": [
+          -1.151,
+          -1.459,
+          -1.251
+        ],
+        "max": [
+          1.151,
+          1.459,
+          1.251
+        ]
+      }
+    },
+    "helmet_flight": {
+      "source": "FlightHelmet",
+      "bytes": 3585468,
+      "triangles": 94722,
+      "bounds": {
+        "min": [
+          -0.204,
+          0,
+          -0.172
+        ],
+        "max": [
+          0.163,
+          0.716,
+          0.2
+        ],
+        "size": [
+          0.367,
+          0.716,
+          0.372
+        ]
+      },
+      "boundsQ": {
+        "min": [
+          -0.204,
+          0,
+          -0.172
+        ],
+        "max": [
+          0.163,
+          0.716,
+          0.2
+        ]
+      }
+    }
+  },
+  "textures": {
+    "floor_wood": {
+      "source": "ambientCG/Wood092",
+      "license": "CC0-1.0",
+      "url": "https://ambientcg.com/view?id=Wood092",
+      "bytes": 127162,
+      "files": [
+        "albedo.webp",
+        "normal.webp",
+        "orm.webp"
+      ]
+    },
+    "desk_wood": {
+      "source": "ambientCG/Wood094",
+      "license": "CC0-1.0",
+      "url": "https://ambientcg.com/view?id=Wood094",
+      "bytes": 77960,
+      "files": [
+        "albedo.webp",
+        "normal.webp",
+        "orm.webp"
+      ]
+    },
+    "wood_planks": {
+      "source": "ambientCG/Wood095",
+      "license": "CC0-1.0",
+      "url": "https://ambientcg.com/view?id=Wood095",
+      "bytes": 487226,
+      "files": [
+        "albedo.webp",
+        "normal.webp",
+        "orm.webp"
+      ]
+    },
+    "wall_plaster": {
+      "source": "ambientCG/Plaster001",
+      "license": "CC0-1.0",
+      "url": "https://ambientcg.com/view?id=Plaster001",
+      "bytes": 625286,
+      "files": [
+        "albedo.webp",
+        "normal.webp",
+        "orm.webp"
+      ]
+    },
+    "wall_plaster_old": {
+      "source": "ambientCG/Plaster002",
+      "license": "CC0-1.0",
+      "url": "https://ambientcg.com/view?id=Plaster002",
+      "bytes": 779926,
+      "files": [
+        "albedo.webp",
+        "normal.webp",
+        "orm.webp"
+      ]
+    },
+    "ceiling_plaster": {
+      "source": "ambientCG/Plaster007",
+      "license": "CC0-1.0",
+      "url": "https://ambientcg.com/view?id=Plaster007",
+      "bytes": 830378,
+      "files": [
+        "albedo.webp",
+        "normal.webp",
+        "orm.webp"
+      ]
+    },
+    "concrete": {
+      "source": "ambientCG/Concrete048",
+      "license": "CC0-1.0",
+      "url": "https://ambientcg.com/view?id=Concrete048",
+      "bytes": 681524,
+      "files": [
+        "albedo.webp",
+        "normal.webp",
+        "orm.webp"
+      ]
+    },
+    "brick": {
+      "source": "ambientCG/Bricks102",
+      "license": "CC0-1.0",
+      "url": "https://ambientcg.com/view?id=Bricks102",
+      "bytes": 906062,
+      "files": [
+        "albedo.webp",
+        "normal.webp",
+        "orm.webp"
+      ]
+    },
+    "metal": {
+      "source": "ambientCG/Metal063",
+      "license": "CC0-1.0",
+      "url": "https://ambientcg.com/view?id=Metal063",
+      "bytes": 503556,
+      "files": [
+        "albedo.webp",
+        "normal.webp",
+        "orm.webp"
+      ]
+    },
+    "asphalt": {
+      "source": "ambientCG/Asphalt031",
+      "license": "CC0-1.0",
+      "url": "https://ambientcg.com/view?id=Asphalt031",
+      "bytes": 1288106,
+      "files": [
+        "albedo.webp",
+        "normal.webp",
+        "orm.webp"
+      ]
+    },
+    "rock": {
+      "source": "ambientCG/Rock058",
+      "license": "CC0-1.0",
+      "url": "https://ambientcg.com/view?id=Rock058",
+      "bytes": 899844,
+      "files": [
+        "albedo.webp",
+        "normal.webp",
+        "orm.webp"
+      ]
+    },
+    "ground": {
+      "source": "ambientCG/Ground054",
+      "license": "CC0-1.0",
+      "url": "https://ambientcg.com/view?id=Ground054",
+      "bytes": 946828,
+      "files": [
+        "albedo.webp",
+        "normal.webp",
+        "orm.webp"
+      ]
+    }
+  },
+  "audio": {
+    "footsteps": {
+      "source": "Fantozzi's Footsteps (OpenGameArt, CC0)",
+      "url": "https://opengameart.org/content/fantozzis-footsteps-grasssand-stone",
+      "license": "CC0-1.0",
+      "files": [
+        "Fantozzi-SandL1.ogg",
+        "Fantozzi-SandL2.ogg",
+        "Fantozzi-SandL3.ogg",
+        "Fantozzi-SandR1.ogg",
+        "Fantozzi-SandR2.ogg",
+        "Fantozzi-SandR3.ogg",
+        "Fantozzi-StoneL1.ogg",
+        "Fantozzi-StoneL2.ogg",
+        "Fantozzi-StoneL3.ogg",
+        "Fantozzi-StoneR1.ogg",
+        "Fantozzi-StoneR2.ogg",
+        "Fantozzi-StoneR3.ogg"
+      ]
+    }
+  }
+}
