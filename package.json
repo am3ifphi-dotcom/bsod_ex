@@ -1,0 +1,37 @@
+{
+  "name": "bsod-ex",
+  "private": true,
+  "version": "1.0.0",
+  "description": "BSOD_EX — a first-person short horror / glitch experience (WebGL2, three.js)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5173",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4173",
+    "typecheck": "tsc --noEmit",
+    "assets:fetch": "bash scripts/fetch-assets.sh",
+    "assets:build": "node scripts/build-assets.mjs",
+    "credits": "node scripts/gen-credits.mjs",
+    "test": "node scripts/run-tests.mjs",
+    "assets:all": "bash scripts/fetch-assets.sh && node scripts/build-assets.mjs && node scripts/gen-credits.mjs"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.14.0",
+    "three": "^0.170.0",
+    "three-mesh-bvh": "^0.8.3"
+  },
+  "devDependencies": {
+    "@gltf-transform/core": "4.1.1",
+    "@gltf-transform/extensions": "4.1.1",
+    "@gltf-transform/functions": "4.1.1",
+    "@napi-rs/canvas": "^0.1.65",
+    "@shaderfrog/glsl-parser": "^7.0.1",
+    "@types/three": "0.170.0",
+    "esbuild": "^0.21.5",
+    "jsdom": "^25.0.1",
+    "meshoptimizer": "0.20.0",
+    "sharp": "0.33.5",
+    "typescript": "5.6.3",
+    "vite": "5.4.11"
+  }
+}

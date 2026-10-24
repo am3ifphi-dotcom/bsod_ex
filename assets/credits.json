@@ -1,0 +1,191 @@
+{
+  "title": "BSOD_EX",
+  "subtitle": "short first-person horror / glitch experience",
+  "software": [
+    {
+      "name": "three.js r170",
+      "author": "three.js authors",
+      "licence": "MIT",
+      "url": "https://threejs.org/"
+    },
+    {
+      "name": "Rapier 3D (rapier3d-compat 0.14)",
+      "author": "Dimforge",
+      "licence": "Apache-2.0",
+      "url": "https://rapier.rs/"
+    },
+    {
+      "name": "three-mesh-bvh",
+      "author": "Garrett Johnson",
+      "licence": "MIT",
+      "url": "https://github.com/gkjohnson/three-mesh-bvh"
+    },
+    {
+      "name": "Vite",
+      "author": "Evan You & contributors",
+      "licence": "MIT",
+      "url": "https://vitejs.dev/"
+    },
+    {
+      "name": "TypeScript",
+      "author": "Microsoft",
+      "licence": "Apache-2.0",
+      "url": "https://www.typescriptlang.org/"
+    },
+    {
+      "name": "meshoptimizer",
+      "author": "Arseny Kapoulkine",
+      "licence": "MIT",
+      "url": "https://github.com/zeux/meshoptimizer"
+    },
+    {
+      "name": "glTF Transform",
+      "author": "Don McCurdy",
+      "licence": "MIT",
+      "url": "https://gltf-transform.dev/"
+    },
+    {
+      "name": "sharp",
+      "author": "Lovell Fuller",
+      "licence": "Apache-2.0",
+      "url": "https://sharp.pixelplumbing.com/"
+    }
+  ],
+  "models": [
+    {
+      "name": "A Beautiful Game",
+      "author": "Khronos Group / AGI",
+      "licence": "CC-BY-4.0",
+      "url": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/ABeautifulGame",
+      "use": "giant chess pieces floating in the wasteland"
+    },
+    {
+      "name": "Antique Camera",
+      "author": "Khronos Group / UX3D",
+      "licence": "CC0-1.0",
+      "url": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/AntiqueCamera",
+      "use": "floating relic over the arrival basin and the atrium"
+    },
+    {
+      "name": "Car Concept",
+      "author": "Khronos Group / DGG",
+      "licence": "CC-BY-4.0",
+      "url": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CarConcept",
+      "use": "wrecked car in the invaded city"
+    },
+    {
+      "name": "Chronograph Watch",
+      "author": "Khronos Group",
+      "licence": "CC-BY-4.0",
+      "url": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/ChronographWatch",
+      "use": "watch lying on the bedroom desk"
+    },
+    {
+      "name": "Damaged Helmet",
+      "author": "theblueturtle_",
+      "licence": "CC-BY-4.0",
+      "url": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/DamagedHelmet",
+      "use": "large relic hanging in the collapsed atrium"
+    },
+    {
+      "name": "Diffuse Transmission Plant",
+      "author": "Khronos Group / UX3D",
+      "licence": "CC-BY-4.0",
+      "url": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/DiffuseTransmissionPlant",
+      "use": "potted plant in the bedroom and the atrium"
+    },
+    {
+      "name": "Glam Velvet Sofa",
+      "author": "Khronos Group / Wayfair",
+      "licence": "CC-BY-4.0",
+      "url": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/GlamVelvetSofa",
+      "use": "sofa tumbling slowly above the wasteland"
+    },
+    {
+      "name": "Glass Broken Window",
+      "author": "Khronos Group",
+      "licence": "CC-BY-4.0",
+      "url": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/GlassBrokenWindow",
+      "use": "shattered panes embedded in the city ruins"
+    },
+    {
+      "name": "Glass Hurricane Candle Holder",
+      "author": "Khronos Group",
+      "licence": "CC-BY-4.0",
+      "url": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/GlassHurricaneCandleHolder",
+      "use": "candle holder on the bedroom shelf"
+    },
+    {
+      "name": "Glass Vase with Flowers",
+      "author": "Khronos Group",
+      "licence": "CC0-1.0",
+      "url": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/GlassVaseFlowers",
+      "use": "vase on the bedroom shelf"
+    },
+    {
+      "name": "Lantern",
+      "author": "Khronos Group / Microsoft",
+      "licence": "CC0-1.0",
+      "url": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/Lantern",
+      "use": "hanging lanterns in the deep cable layer"
+    },
+    {
+      "name": "Pot of Coals",
+      "author": "Khronos Group",
+      "licence": "CC-BY-4.0",
+      "url": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/PotOfCoals",
+      "use": "embers burning on the deep layer floor"
+    },
+    {
+      "name": "Sci-Fi Helmet",
+      "author": "Khronos Group",
+      "licence": "CC0-1.0",
+      "url": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/SciFiHelmet",
+      "use": "floating relic over the wasteland and inside the atrium"
+    },
+    {
+      "name": "Sheen Chair",
+      "author": "Khronos Group / Wayfair",
+      "licence": "CC0-1.0",
+      "url": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/SheenChair",
+      "use": "desk chair in the bedroom"
+    },
+    {
+      "name": "Water Bottle",
+      "author": "Khronos Group",
+      "licence": "CC0-1.0",
+      "url": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/WaterBottle",
+      "use": "bottle on the bedroom desk"
+    }
+  ],
+  "environments": [
+    {
+      "name": "night / city / apartment / warehouse / studio / dawn HDRIs (downsampled to 512x256 EXR)",
+      "author": "@pmndrs/assets (CC0)",
+      "licence": "CC0-1.0",
+      "url": "https://github.com/pmndrs/assets"
+    }
+  ],
+  "audio": [
+    {
+      "name": "All sound effects, ambience and the drone score",
+      "author": "synthesised at runtime by this project with the Web Audio API",
+      "licence": "original work (CC0)",
+      "url": ""
+    }
+  ],
+  "textures": [
+    {
+      "name": "Every PBR material (wood, plaster, concrete, sand, fabric, metal, rug, skyline, noise)",
+      "author": "procedurally generated at runtime by this project",
+      "licence": "original work (CC0)",
+      "url": ""
+    }
+  ],
+  "notes": [
+    "Every 3D model is a Khronos glTF Sample Asset, fetched by scripts/fetch-assets.sh and re-materialised, re-scaled (1 unit = 1 m) and optimised by scripts/build-assets.mjs.",
+    "Upstream licence files for all shipped models are kept in public/assets/licences/ and are copied verbatim rather than summarised.",
+    "No asset with unknown or non-redistributable terms is used; no model in the manifest is missing an attribution (checked by tests/assets.test.ts).",
+    "HDRIs are CC0 environment maps authored by the pmndrs/assets project; they are used for lighting and reflections only."
+  ]
+}

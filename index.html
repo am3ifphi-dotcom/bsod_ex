@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <meta name="color-scheme" content="dark" />
+    <title>BSOD_EX — memory leak</title>
+    <meta name="description" content="A first-person short horror / glitch experience. Room → BSOD → world → fall → room." />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="view"></canvas>
+
+      <!-- cinematic letterbox -->
+      <div id="letterbox" class="letterbox"><i></i><i></i></div>
+
+      <!-- ============================== HUD ============================== -->
+      <div id="hud" class="hud">
+        <div id="reticle" class="reticle"><span></span></div>
+        <div id="prompt" class="prompt"><b>E</b><em></em></div>
+        <div id="toast" class="toast"></div>
+        <div id="hint" class="hint"></div>
+        <div id="perf" class="perf"></div>
+      </div>
+
+      <!-- ============================ BSOD cursor ======================= -->
+      <div id="softcursor" class="softcursor"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M4 2 L4 19 L8.6 14.6 L11.6 21.4 L14.6 20 L11.6 13.2 L18 13 Z" fill="#fff" stroke="#001033" stroke-width="1.2"/></svg></div>
+
+      <!-- ============================ boot / warning ==================== -->
+      <div id="boot" class="screen boot">
+        <div class="boot-inner">
+          <div class="boot-kicker">MEMORY FAULT / UNRECOVERABLE</div>
+          <h1>BSOD<span>_</span>EX</h1>
+          <p class="boot-sub">短編ホラー / グリッチ体験 &nbsp;·&nbsp; プレイ時間 15〜25分</p>
+          <div class="warn">
+            <h2>⚠ コンテンツ警告</h2>
+            <ul>
+              <li>点滅・画面の乱れ・グリッチ表現を含みます（1秒に3回を超える強い明滅は使用していません）。</li>
+              <li>大きな音、暗闇、閉所、落下する感覚の演出があります。</li>
+              <li>気分が悪くなった場合は<strong>Esc → 設定</strong>で「グリッチ強度」「カメラ揺れ」を下げるか、プレイを中断してください。</li>
+            </ul>
+          </div>
+          <div class="boot-controls">
+            <div><b>WASD</b> 移動</div><div><b>Shift</b> ダッシュ</div><div><b>E / クリック</b> 調べる</div>
+            <div><b>C</b> コンソール（異世界）</div><div><b>F</b> ライト</div><div><b>F3</b> パフォーマンス</div><div><b>Esc</b> メニュー</div>
+          </div>
+          <button id="startBtn" class="btn btn-primary" disabled>読み込み中…</button>
+          <div class="boot-foot">
+            <span id="bootProgress">0%</span>
+            <button id="bootCredits" class="link">クレジット</button>
+            <label class="chk"><input type="checkbox" id="bootReduce" /> 揺れ・点滅を控えめにする</label>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================== pause ============================ -->
+      <div id="menu" class="screen menu hidden">
+        <div class="menu-inner">
+          <header><h2>PAUSED</h2><span id="menuPhase" class="dim"></span></header>
+          <div class="row"><label>マウス感度</label><input id="sSens" type="range" min="0.2" max="3" step="0.05" /><output id="oSens"></output></div>
+          <div class="row"><label>音量</label><input id="sVol" type="range" min="0" max="1" step="0.01" /><output id="oVol"></output></div>
+          <div class="row"><label>グリッチ演出</label><input id="sGlitch" type="range" min="0" max="1" step="0.05" /><output id="oGlitch"></output></div>
+          <div class="row"><label>カメラ揺れ</label><input id="sShake" type="range" min="0" max="1" step="0.05" /><output id="oShake"></output></div>
+          <div class="row"><label>画質</label>
+            <select id="sQuality">
+              <option value="low">低 (GPU負荷 小)</option>
+              <option value="medium">中</option>
+              <option value="high">高</option>
+            </select>
+            <output id="oQuality"></output>
+          </div>
+          <div class="row"><label>解像度スケール</label><input id="sRes" type="range" min="0.5" max="1.5" step="0.05" /><output id="oRes"></output></div>
+          <div class="row"><label>ダイナミック解像度</label><input id="sDyn" type="checkbox" /><output></output></div>
+          <div class="menu-actions">
+            <button id="resumeBtn" class="btn btn-primary">再開</button>
+            <button id="restartBtn" class="btn">最初からやり直す</button>
+            <button id="creditsBtn" class="btn">クレジット</button>
+          </div>
+          <p class="menu-note">設定は即時反映されます。再開するとマウスが固定されます。</p>
+        </div>
+      </div>
+
+      <!-- ============================= credits =========================== -->
+      <div id="credits" class="screen credits hidden">
+        <div class="credits-inner">
+          <h2>CREDITS / LICENCES</h2>
+          <div id="creditsBody" class="credits-body"></div>
+          <button id="creditsClose" class="btn btn-primary">閉じる</button>
+        </div>
+      </div>
+
+      <!-- ============================ console =========================== -->
+      <div id="consoleWrap" class="console-wrap hidden">
+        <div class="console" role="dialog" aria-label="recovery console">
+          <div class="console-head">
+            <span>RECOVERY CONSOLE v0.0.7</span><span class="blink" id="consoleState">READY</span>
+          </div>
+          <div id="consoleLog" class="console-log"></div>
+          <div class="console-input">
+            <span>&gt;</span><input id="consoleInput" autocomplete="off" autocapitalize="off" spellcheck="false"
+              inputmode="text" enterkeyhint="send" aria-label="console input" />
+          </div>
+          <div class="console-foot">HELP でコマンド一覧 / Esc で閉じる</div>
+        </div>
+      </div>
+
+      <!-- ============================= cursor prompt for BSOD ========== -->
+      <div id="clickHint" class="click-hint hidden"><b>:</b>) をクリック</div>
+
+      <!-- ============================= title card ====================== -->
+      <div id="chapter" class="chapter hidden"><span></span></div>
+
+      <div id="fadeBlack" class="fade-black"></div>
+      <div id="bootLine" class="boot-line hidden"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

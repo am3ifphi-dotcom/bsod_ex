@@ -1,0 +1,699 @@
+{
+  "generated": "2026-10-24T11:22:36.995Z",
+  "models": [
+    {
+      "name": "SheenChair",
+      "file": "assets/models/SheenChair.glb",
+      "bytes": 814896,
+      "tris": 39936,
+      "bounds": {
+        "min": [
+          -0.41402238607406616,
+          -0.0000532132051928591,
+          -0.2767141361470429
+        ],
+        "max": [
+          0.41253557801246643,
+          0.6862034626359902,
+          0.29352938129856265
+        ],
+        "size": [
+          0.8265579640865326,
+          0.686256675841183,
+          0.5702435174456055
+        ]
+      },
+      "licence": "CC0-1.0 / CC-BY-4.0",
+      "author": "Khronos Group / Wayfair",
+      "lod": false
+    },
+    {
+      "name": "SheenChair",
+      "file": "assets/models/SheenChair.lod1.glb",
+      "bytes": 531948,
+      "tris": 4858,
+      "bounds": {
+        "min": [
+          -0.4137589931488037,
+          0.000957977387466058,
+          -0.2763701680805859
+        ],
+        "max": [
+          0.4124263823032379,
+          0.686180570237442,
+          0.293515444150227
+        ],
+        "size": [
+          0.8261853754520416,
+          0.6852225928499759,
+          0.5698856122308129
+        ]
+      },
+      "licence": "CC0-1.0 / CC-BY-4.0",
+      "author": "Khronos Group / Wayfair",
+      "lod": true
+    },
+    {
+      "name": "DiffuseTransmissionPlant",
+      "file": "assets/models/DiffuseTransmissionPlant.glb",
+      "bytes": 1359428,
+      "tris": 68409,
+      "bounds": {
+        "min": [
+          -0.3966600392013788,
+          0.00005152688329917998,
+          -0.4203061845749427
+        ],
+        "max": [
+          0.3044969942420721,
+          0.8412432616255214,
+          0.23707398894017573
+        ],
+        "size": [
+          0.7011570334434509,
+          0.8411917347422222,
+          0.6573801735151183
+        ]
+      },
+      "licence": "CC-BY-4.0 / CC0-1.0",
+      "author": "Khronos Group / UX3D",
+      "lod": false
+    },
+    {
+      "name": "DiffuseTransmissionPlant",
+      "file": "assets/models/DiffuseTransmissionPlant.lod1.glb",
+      "bytes": 949672,
+      "tris": 10004,
+      "bounds": {
+        "min": [
+          -0.3959729168564081,
+          0.000621913706530447,
+          -0.41866426789556643
+        ],
+        "max": [
+          0.3044969942420721,
+          0.8401418964773224,
+          0.2350192678231424
+        ],
+        "size": [
+          0.7004699110984802,
+          0.839519982770792,
+          0.6536835357187089
+        ]
+      },
+      "licence": "CC-BY-4.0 / CC0-1.0",
+      "author": "Khronos Group / UX3D",
+      "lod": true
+    },
+    {
+      "name": "WaterBottle",
+      "file": "assets/models/WaterBottle.glb",
+      "bytes": 98912,
+      "tris": 4510,
+      "bounds": {
+        "min": [
+          -0.05444956390755539,
+          -0.13022033870220184,
+          -0.05444956390755539
+        ],
+        "max": [
+          0.05444956390755539,
+          0.13022033870220184,
+          0.05444956390755539
+        ],
+        "size": [
+          0.10889912781511078,
+          0.2604406774044037,
+          0.10889912781511078
+        ]
+      },
+      "licence": "CC0-1.0 / CC-BY-4.0",
+      "author": "Khronos Group",
+      "lod": false
+    },
+    {
+      "name": "Lantern",
+      "file": "assets/models/Lantern.glb",
+      "bytes": 318612,
+      "tris": 5394,
+      "bounds": {
+        "min": [
+          -3.922243926164179,
+          0.18392054870605534,
+          -2.315238840176086
+        ],
+        "max": [
+          11.568552346164179,
+          25.848139451293946,
+          2.315238840176086
+        ],
+        "size": [
+          15.490796272328357,
+          25.66421890258789,
+          4.630477680352172
+        ]
+      },
+      "licence": "CC0-1.0 / CC-BY-4.0",
+      "author": "Khronos Group",
+      "lod": false
+    },
+    {
+      "name": "Lantern",
+      "file": "assets/models/Lantern.lod1.glb",
+      "bytes": 291004,
+      "tris": 1589,
+      "bounds": {
+        "min": [
+          -3.8899564205079438,
+          0.18392054870605534,
+          -2.3154184339276913
+        ],
+        "max": [
+          11.536264840507943,
+          25.798139260559083,
+          2.3154184339276913
+        ],
+        "size": [
+          15.426221261015886,
+          25.614218711853027,
+          4.630836867855383
+        ]
+      },
+      "licence": "CC0-1.0 / CC-BY-4.0",
+      "author": "Khronos Group",
+      "lod": true
+    },
+    {
+      "name": "GlassVaseFlowers",
+      "file": "assets/models/GlassVaseFlowers.glb",
+      "bytes": 212720,
+      "tris": 10218,
+      "bounds": {
+        "min": [
+          -0.053520973305221875,
+          8.881784197001252e-16,
+          -0.0682890408567017
+        ],
+        "max": [
+          0.16376074158476472,
+          0.20321936156658935,
+          0.07419768841484106
+        ],
+        "size": [
+          0.2172817148899866,
+          0.20321936156658846,
+          0.14248672927154277
+        ]
+      },
+      "licence": "CC0-1.0 / CC-BY-4.0",
+      "author": "Khronos Group",
+      "lod": false
+    },
+    {
+      "name": "GlassVaseFlowers",
+      "file": "assets/models/GlassVaseFlowers.lod1.glb",
+      "bytes": 174736,
+      "tris": 1226,
+      "bounds": {
+        "min": [
+          -0.053520973305221875,
+          -1.3626599848493015e-13,
+          -0.0682890408567017
+        ],
+        "max": [
+          0.16376074158476472,
+          0.20321936156658935,
+          0.07419768841484106
+        ],
+        "size": [
+          0.2172817148899866,
+          0.2032193615667256,
+          0.14248672927154277
+        ]
+      },
+      "licence": "CC0-1.0 / CC-BY-4.0",
+      "author": "Khronos Group",
+      "lod": true
+    },
+    {
+      "name": "AntiqueCamera",
+      "file": "assets/models/AntiqueCamera.glb",
+      "bytes": 746268,
+      "tris": 20066,
+      "bounds": {
+        "min": [
+          -1.626115128558072,
+          -0.0008064662422668789,
+          -1.8948861616303105
+        ],
+        "max": [
+          0.9715791458992467,
+          7.208080991730617,
+          1.499566506933755
+        ],
+        "size": [
+          2.597694274457319,
+          7.208887457972883,
+          3.3944526685640657
+        ]
+      },
+      "licence": "CC0-1.0 / CC-BY-4.0",
+      "author": "Khronos Group / UX3D",
+      "lod": false
+    },
+    {
+      "name": "AntiqueCamera",
+      "file": "assets/models/AntiqueCamera.lod1.glb",
+      "bytes": 650692,
+      "tris": 7477,
+      "bounds": {
+        "min": [
+          -1.6261155362965232,
+          -0.0008064662422668789,
+          -1.8944034333715656
+        ],
+        "max": [
+          0.971578384370624,
+          7.206716114837622,
+          1.4749075889496934
+        ],
+        "size": [
+          2.5976939206671474,
+          7.207522581079889,
+          3.3693110223212592
+        ]
+      },
+      "licence": "CC0-1.0 / CC-BY-4.0",
+      "author": "Khronos Group / UX3D",
+      "lod": true
+    },
+    {
+      "name": "PotOfCoals",
+      "file": "assets/models/PotOfCoals.glb",
+      "bytes": 588812,
+      "tris": 18223,
+      "bounds": {
+        "min": [
+          -0.03999999910593033,
+          0.0007151600355648248,
+          -0.0399999971207296
+        ],
+        "max": [
+          0.03999999910593033,
+          0.0499695917762228,
+          0.03999999835284776
+        ],
+        "size": [
+          0.07999999821186066,
+          0.04925443174065798,
+          0.07999999547357736
+        ]
+      },
+      "licence": "CC-BY-4.0",
+      "author": "Khronos Group",
+      "lod": false
+    },
+    {
+      "name": "DamagedHelmet",
+      "file": "assets/models/DamagedHelmet.glb",
+      "bytes": 573820,
+      "tris": 15452,
+      "bounds": {
+        "min": [
+          -0.9474262450089674,
+          -0.9009876830720247,
+          -1.1871551298125091
+        ],
+        "max": [
+          0.9424630854478102,
+          0.9010087077483432,
+          0.8128451260846905
+        ],
+        "size": [
+          1.8898893304567776,
+          1.801996390820368,
+          2.0000002558971994
+        ]
+      },
+      "licence": "CC-BY-4.0 / CC-BY-NC-4.0",
+      "author": "theblueturtle_",
+      "lod": false
+    },
+    {
+      "name": "DamagedHelmet",
+      "file": "assets/models/DamagedHelmet.lod1.glb",
+      "bytes": 483780,
+      "tris": 5389,
+      "bounds": {
+        "min": [
+          -0.9465556106196079,
+          -0.9010392639537541,
+          -1.1734000448718467
+        ],
+        "max": [
+          0.9415192565546665,
+          0.8834172950839654,
+          0.8098201310445663
+        ],
+        "size": [
+          1.8880748671742744,
+          1.7844565590377195,
+          1.983220175916413
+        ]
+      },
+      "licence": "CC-BY-4.0 / CC-BY-NC-4.0",
+      "author": "theblueturtle_",
+      "lod": true
+    },
+    {
+      "name": "CarConcept",
+      "file": "assets/models/CarConcept.glb",
+      "bytes": 2602368,
+      "tris": 213347,
+      "bounds": {
+        "min": [
+          -1.2714135208765978,
+          -0.00024612235556548123,
+          -1.9402775690957728
+        ],
+        "max": [
+          1.2709209933627008,
+          1.1486407670950138,
+          2.417178955813965
+        ],
+        "size": [
+          2.5423345142392986,
+          1.1488868894505793,
+          4.357456524909738
+        ]
+      },
+      "licence": "CC-BY-4.0",
+      "author": "Khronos Group / DGG",
+      "lod": false
+    },
+    {
+      "name": "CarConcept",
+      "file": "assets/models/CarConcept.lod1.glb",
+      "bytes": 1285756,
+      "tris": 44523,
+      "bounds": {
+        "min": [
+          -1.271390780091105,
+          -0.0002334351034516957,
+          -1.940058536072888
+        ],
+        "max": [
+          1.2709016158668986,
+          1.14864822007675,
+          2.4163517556741443
+        ],
+        "size": [
+          2.542292395958004,
+          1.1488816551802017,
+          4.356410291747032
+        ]
+      },
+      "licence": "CC-BY-4.0",
+      "author": "Khronos Group / DGG",
+      "lod": true
+    },
+    {
+      "name": "GlassBrokenWindow",
+      "file": "assets/models/GlassBrokenWindow.glb",
+      "bytes": 195268,
+      "tris": 987,
+      "bounds": {
+        "min": [
+          -0.2520594596862793,
+          0.00015282332861171755,
+          -0.018407889204483198
+        ],
+        "max": [
+          0.25594043731689453,
+          0.5166234789122817,
+          0.019668460386257337
+        ],
+        "size": [
+          0.5079998970031738,
+          0.51647065558367,
+          0.038076349590740535
+        ]
+      },
+      "licence": "CC-BY-4.0",
+      "author": "Khronos Group",
+      "lod": false
+    },
+    {
+      "name": "GlamVelvetSofa",
+      "file": "assets/models/GlamVelvetSofa.glb",
+      "bytes": 458488,
+      "tris": 4196,
+      "bounds": {
+        "min": [
+          -1.1139731407165527,
+          4.0808238791975593e-7,
+          -0.6277439210250226
+        ],
+        "max": [
+          1.0744699239730835,
+          0.7876086461415157,
+          0.3951719615294782
+        ],
+        "size": [
+          2.1884430646896362,
+          0.7876082380591278,
+          1.0229158825545008
+        ]
+      },
+      "licence": "CC-BY-4.0",
+      "author": "Khronos Group / Wayfair",
+      "lod": false
+    },
+    {
+      "name": "GlamVelvetSofa",
+      "file": "assets/models/GlamVelvetSofa.lod1.glb",
+      "bytes": 431972,
+      "tris": 580,
+      "bounds": {
+        "min": [
+          -1.1099590063095093,
+          0.00010483917046064106,
+          -0.6277220703191446
+        ],
+        "max": [
+          1.069201946258545,
+          0.7807424964212311,
+          0.3951501108236002
+        ],
+        "size": [
+          2.179160952568054,
+          0.7806376572507704,
+          1.0228721811427448
+        ]
+      },
+      "licence": "CC-BY-4.0",
+      "author": "Khronos Group / Wayfair",
+      "lod": true
+    },
+    {
+      "name": "ABeautifulGame",
+      "file": "assets/models/ABeautifulGame.glb",
+      "bytes": 4453604,
+      "tris": 573952,
+      "bounds": {
+        "min": [
+          -0.3527080714702606,
+          3.706855560749872e-7,
+          -0.3527080714702606
+        ],
+        "max": [
+          0.3527080714702606,
+          0.16899584978818893,
+          0.3527080714702606
+        ],
+        "size": [
+          0.7054161429405212,
+          0.16899547910263285,
+          0.7054161429405212
+        ]
+      },
+      "licence": "CC-BY-4.0",
+      "author": "Khronos Group / AGI",
+      "lod": false
+    },
+    {
+      "name": "ABeautifulGame",
+      "file": "assets/models/ABeautifulGame.lod1.glb",
+      "bytes": 2995676,
+      "tris": 97384,
+      "bounds": {
+        "min": [
+          -0.3527080714702606,
+          3.706855560749872e-7,
+          -0.3527080714702606
+        ],
+        "max": [
+          0.3527080714702606,
+          0.16899584978818893,
+          0.3527080714702606
+        ],
+        "size": [
+          0.7054161429405212,
+          0.16899547910263285,
+          0.7054161429405212
+        ]
+      },
+      "licence": "CC-BY-4.0",
+      "author": "Khronos Group / AGI",
+      "lod": true
+    },
+    {
+      "name": "ChronographWatch",
+      "file": "assets/models/ChronographWatch.glb",
+      "bytes": 1614352,
+      "tris": 100002,
+      "bounds": {
+        "min": [
+          -2.138473295658317,
+          -2.952116012573242,
+          -5.0328396611732185
+        ],
+        "max": [
+          2.236015556381915,
+          2.8639800548553467,
+          1.1488248696440162
+        ],
+        "size": [
+          4.374488852040232,
+          5.816096067428589,
+          6.181664530817235
+        ]
+      },
+      "licence": "CC-BY-4.0",
+      "author": "Khronos Group",
+      "lod": false
+    },
+    {
+      "name": "ChronographWatch",
+      "file": "assets/models/ChronographWatch.lod1.glb",
+      "bytes": 1262392,
+      "tris": 49160,
+      "bounds": {
+        "min": [
+          -2.1384513611490394,
+          -2.952116012573242,
+          -5.028867269892403
+        ],
+        "max": [
+          2.2360050767295423,
+          2.8633320331573486,
+          1.1404739210033814
+        ],
+        "size": [
+          4.374456437878582,
+          5.815448045730591,
+          6.169341190895784
+        ]
+      },
+      "licence": "CC-BY-4.0",
+      "author": "Khronos Group",
+      "lod": true
+    },
+    {
+      "name": "GlassHurricaneCandleHolder",
+      "file": "assets/models/GlassHurricaneCandleHolder.glb",
+      "bytes": 71580,
+      "tris": 4126,
+      "bounds": {
+        "min": [
+          -0.09516571720004005,
+          0,
+          -0.09516572685659201
+        ],
+        "max": [
+          0.09516571720004005,
+          0.30657578286727083,
+          0.09516569075456548
+        ],
+        "size": [
+          0.1903314344000801,
+          0.30657578286727083,
+          0.1903314176111575
+        ]
+      },
+      "licence": "CC-BY-4.0",
+      "author": "Khronos Group",
+      "lod": false
+    },
+    {
+      "name": "SciFiHelmet",
+      "file": "assets/models/SciFiHelmet.glb",
+      "bytes": 1361808,
+      "tris": 23358,
+      "bounds": {
+        "min": [
+          -1.1511886366632353,
+          -1.4587182998657227,
+          -1.2510873037116277
+        ],
+        "max": [
+          1.1511886366632353,
+          1.4587184190750122,
+          1.2510863500373113
+        ],
+        "size": [
+          2.3023772733264707,
+          2.917436718940735,
+          2.502173653748939
+        ]
+      },
+      "licence": "CC0-1.0 / CC-BY-4.0",
+      "author": "Khronos Group",
+      "lod": false
+    }
+  ],
+  "hdr": [
+    {
+      "name": "night",
+      "file": "assets/hdr/night.exr",
+      "bytes": 154431,
+      "width": 512,
+      "height": 256
+    },
+    {
+      "name": "city",
+      "file": "assets/hdr/city.exr",
+      "bytes": 133404,
+      "width": 512,
+      "height": 256
+    },
+    {
+      "name": "apartment",
+      "file": "assets/hdr/apartment.exr",
+      "bytes": 100399,
+      "width": 512,
+      "height": 256
+    },
+    {
+      "name": "warehouse",
+      "file": "assets/hdr/warehouse.exr",
+      "bytes": 160000,
+      "width": 512,
+      "height": 256
+    },
+    {
+      "name": "studio",
+      "file": "assets/hdr/studio.exr",
+      "bytes": 110735,
+      "width": 512,
+      "height": 256
+    },
+    {
+      "name": "dawn",
+      "file": "assets/hdr/dawn.exr",
+      "bytes": 182198,
+      "width": 512,
+      "height": 256
+    }
+  ]
+}
