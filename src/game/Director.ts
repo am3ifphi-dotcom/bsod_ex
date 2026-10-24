@@ -858,6 +858,7 @@ export class Director {
     this.crackLight = l;
   }
   private crackLight: THREE.PointLight | null = null;
+  private holeMesh: THREE.Mesh | null = null;
 
   /** 地面を割り、破片を実際に落下させる */
   private breakGround(at: THREE.Vector3) {
@@ -883,7 +884,9 @@ export class Director {
     );
     hole.rotation.x = -Math.PI / 2;
     hole.position.set(at.x, at.y + 0.04, at.z);
+    if (this.holeMesh) { this.holeMesh.parent?.remove(this.holeMesh); (this.holeMesh.material as THREE.Material).dispose(); this.holeMesh.geometry.dispose(); }
     sceneWorld.add(hole);
+    this.holeMesh = hole;
     this.r.world.collision.allowFalling = true;
     audio.collapseRumble();
   }
@@ -1157,8 +1160,21 @@ export class Director {
     if (this.facePortal) { sceneRoom.remove(this.facePortal); this.facePortal = null; }
     if (this.mouthDisk) { sceneRoom.remove(this.mouthDisk); this.mouthDisk = null; }
     this.flash = 0;
-    if (this.crackGroup) { sceneWorld.remove(this.crackGroup); this.crackGroup = null; }
+    if (this.crackGroup) {
+      sceneWorld.remove(this.crackGroup);
+      this.crackGroup.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.isMesh) { m.geometry.dispose(); (m.material as THREE.Material).dispose(); }
+      });
+      this.crackGroup = null;
+    }
     this.crackLight = null;
+    if (this.holeMesh) {
+      this.holeMesh.parent?.remove(this.holeMesh);
+      this.holeMesh.geometry.dispose();
+      (this.holeMesh.material as THREE.Material).dispose();
+      this.holeMesh = null;
+    }
     if (this.gateTunnel) { this.gateTunnel.setOpacity(0); }
     if (this.worldShaft) this.worldShaft.setOpacity(0);
     if (this.roomShaft) this.roomShaft.setOpacity(0);
