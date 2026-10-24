@@ -288,7 +288,55 @@ async function testMaterials() {
   console.log('[materials] ok');
 }
 
+/**
+ * カスタム GLSL の構文検査。ブラウザ (実 GPU) がない環境では唯一のシェーダー検証手段。
+ * three の #include は展開できないので、注入チャンクは自前の最小コンテキストに差し込んで解析する。
+ */
+async function testShaders() {
+  const { DofShader, FinalShader } = await import('../src/core/postfx');
+  const { GLITCH_VERTEX, GLITCH_FRAGMENT } = await import('../src/core/materials');
+  const { parse } = await import('@shaderfrog/glsl-parser');
+  const strip = (src: string) => src.replace(/^\s*#include\s*<[^>]+>\s*$/gm, '');
+  const check = (name: string, src: string) => {
+    try { parse(strip(src)); } catch (e) {
+      problems.push(`shader ${name}: ${String(e).split('\n')[0]}`);
+    }
+  };
+  check('dof.vert', DofShader.vertexShader);
+  check('dof.frag', DofShader.fragmentShader);
+  check('final.vert', FinalShader.vertexShader);
+  check('final.frag', FinalShader.fragmentShader);
+
+  const vertCtx = `
+    attribute vec3 position; attribute vec3 normal;
+    uniform mat4 modelMatrix; uniform float uTime; uniform float uGlitch;
+    uniform float uCorrupt; uniform vec3 uPlayer; varying vec3 vGlitchWPos;
+    void main(){ vec3 transformed = vec3(position);
+      ${strip(GLITCH_VERTEX)}
+      gl_Position = vec4(transformed, 1.0); }`;
+  const fragCtx = `
+    precision highp float;
+    uniform float uTime; uniform float uCorrupt; varying vec3 vGlitchWPos;
+    void main(){ vec3 totalEmissiveRadiance = vec3(0.0);
+      ${strip(GLITCH_FRAGMENT)}
+      gl_FragColor = vec4(totalEmissiveRadiance, 1.0); }`;
+  check('glitch.vert', vertCtx);
+  check('glitch.frag', fragCtx);
+
+  // 最終パスの uniform 名が GLSL 側と JS 側で一致しているか
+  for (const [name, shader] of [['dof', DofShader], ['final', FinalShader]] as const) {
+    const declared = new Set(Array.from(shader.fragmentShader.matchAll(/uniform\s+\w+\s+([\w,\s]+);/g))
+      .flatMap((m) => m[1].split(',').map((v) => v.trim())).filter(Boolean));
+    for (const u of declared) {
+      if (u === 'sampler2D' || u === 'float' || u === 'vec2' || u === 'vec3') continue;
+      if (!(u in (shader.uniforms as Record<string, unknown>))) problems.push(`shader ${name}: uniform ${u} missing in JS`);
+    }
+  }
+  console.log('[shaders] glsl syntax ok');
+}
+
 (async () => {
+  await testShaders();
   await testMaterials();
   await testRoom();
   await testWorld();

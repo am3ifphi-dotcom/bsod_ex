@@ -13,7 +13,7 @@ export const glitchUniforms = {
   uPulse: { value: 0 },         // 中心構造物の鼓動
 };
 
-const GLITCH_VERTEX = /* glsl */`
+export const GLITCH_VERTEX = /* glsl */`
 #include <begin_vertex>
 vGlitchWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
 {
@@ -35,7 +35,7 @@ vGlitchWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
 }
 `;
 
-const GLITCH_FRAGMENT = /* glsl */`
+export const GLITCH_FRAGMENT = /* glsl */`
 #include <emissivemap_fragment>
 {
   // 走査線と横方向のノイズバンドを発光に重ねる

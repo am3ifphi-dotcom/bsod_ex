@@ -13,7 +13,7 @@ import { clamp, damp } from './util';
  *  - ピント距離 f、錯乱円は深度差から計算
  *  - 13 タップのゴールデンアングル・スパイラル
  * ------------------------------------------------------------------ */
-const DofShader = {
+export const DofShader = {
   uniforms: {
     tColor: { value: null as THREE.Texture | null },
     tDepth: { value: null as THREE.Texture | null },
@@ -108,7 +108,7 @@ class DofPass extends Pass {
 /* ------------------------------------------------------------------ *
  * 最終カラーグレード + グリッチ + フィルムグレイン
  * ------------------------------------------------------------------ */
-const FinalShader = {
+export const FinalShader = {
   uniforms: {
     tDiffuse: { value: null as THREE.Texture | null },
     uTime: { value: 0 },

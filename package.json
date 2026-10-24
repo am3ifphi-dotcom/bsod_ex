@@ -21,10 +21,11 @@
     "@gltf-transform/core": "^4.2.1",
     "@gltf-transform/extensions": "^4.2.1",
     "@gltf-transform/functions": "^4.2.1",
+    "@shaderfrog/glsl-parser": "^7.0.1",
     "@types/three": "^0.186.0",
+    "esbuild": "^0.28.2",
     "sharp": "^0.34.4",
     "typescript": "^5.9.2",
-    "vite": "^7.1.5",
-    "esbuild": "^0.28.2"
+    "vite": "^7.1.5"
   }
 }
