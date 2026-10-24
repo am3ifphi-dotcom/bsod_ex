@@ -1,0 +1,16 @@
+{
+  "name": "bsod-ex",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "BSOD_EX — first-person short horror / glitch experience (WebGL / three.js)",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5173",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4173",
+    "fetch:github": "python3 scripts/fetch_github_assets.py",
+    "fetch:polyhaven": "node scripts/fetch_polyhaven.mjs"
+  },
+  "dependencies": { "three": "^0.180.0" },
+  "devDependencies": { "vite": "^6.3.0" }
+}
