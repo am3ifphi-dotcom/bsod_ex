@@ -60,6 +60,17 @@ export class Engine {
     const q = qualityParams(this.settings.data.quality);
     this.quality = q;
     this.renderer.shadowMap.enabled = q.shadows;
+    // シャドウマップ解像度の変更を即時反映
+    this.scene.traverse((o) => {
+      const light = o as THREE.Light & { shadow?: THREE.LightShadow & { mapSize: THREE.Vector2; map: THREE.WebGLRenderTarget | null } };
+      if (light.isLight && light.shadow) {
+        light.shadow.mapSize.set(q.shadowMapSize, q.shadowMapSize);
+        if (light.shadow.map) {
+          light.shadow.map.dispose();
+          light.shadow.map = null;
+        }
+      }
+    });
     this.post?.applyQuality(q);
     this.onResize();
   }
