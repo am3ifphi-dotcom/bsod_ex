@@ -31,6 +31,12 @@ export class Input {
 
   locked = false;
   lockSupported = true;
+  /**
+   * Set when Pointer Lock is unavailable (an iframe without allow="pointer-lock", a browser
+   * policy, a remote-desktop client). The game stays fully playable: mouse movement over the
+   * viewport turns the camera without a locked cursor.
+   */
+  freeLook = false;
 
   private canvas: HTMLElement;
   private listeners: Array<() => void> = [];
@@ -54,7 +60,8 @@ export class Input {
 
     add(window, 'mousemove', (e) => {
       const me = e as MouseEvent;
-      if (!this.locked || !this.isActive()) return;
+      if (!this.isActive()) return;
+      if (!this.locked && !this.freeLook) return;
       // Ignore occasional giant spikes some mice/OS combos emit on lock acquisition.
       if (Math.abs(me.movementX) > 400 || Math.abs(me.movementY) > 400) return;
       this.mouseDX += me.movementX;
@@ -164,7 +171,7 @@ export class Input {
 
   /** Consume accumulated mouse delta (radians handled by the caller through sensitivity). */
   takeMouseDelta(): { x: number; y: number } {
-    if (!this.locked || !this.isActive()) {
+    if ((!this.locked && !this.freeLook) || !this.isActive()) {
       this.mouseDX = 0;
       this.mouseDY = 0;
       return { x: 0, y: 0 };
@@ -190,7 +197,17 @@ export class Input {
     if (!v) this.clearKeys();
   }
 
+  /** True when the view can be turned, with or without a locked pointer. */
+  get lookActive(): boolean { return this.locked || this.freeLook; }
+
+  /** Fallback used when Pointer Lock is denied (e.g. inside an iframe). */
+  setFreeLook(enabled: boolean): void {
+    this.freeLook = enabled;
+    if (enabled) this.mouseDX = this.mouseDY = 0;
+  }
+
   requestPointerLock(): void {
+    if (this.freeLook) return;
     if (document.pointerLockElement === this.canvas) return;
     const el = this.canvas as HTMLElement & { requestPointerLock?: (opts?: unknown) => Promise<void> | void };
     try {

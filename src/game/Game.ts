@@ -199,9 +199,12 @@ export class Game {
     // click also interacts while the pointer is locked (games do both)
     this.input.on('click', () => this.tryInteract());
 
+    this.input.onLockError = () => this.enableFreeLook();
+
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement !== null;
-      this.ui.setCursorLocked(this.locked);
+      if (this.locked) this.input.setFreeLook(false);
+      this.ui.setCursorLocked(this.locked || this.input.freeLook);
       if (!this.locked && this.isPlayable && !this.menuOpen && !this.consoleOpen) this.openMenu();
     });
   }
@@ -304,14 +307,38 @@ export class Game {
   requestLockFromUi(): void {
     if (!this.isPlayable || this.menuOpen || this.consoleOpen) return;
     if (this.ui.isMenuOpen || this.ui.isCreditsOpen) return;
+    this.armLook();
+  }
+
+  /**
+   * Ask for pointer lock and, if the browser refuses it (an embedding iframe without
+   * allow="pointer-lock", a policy, a remote-desktop client), fall back to lock-free mouse look
+   * after a moment so the game stays playable in a preview pane.
+   */
+  private armLook(): void {
+    if (!this.isPlayable || this.menuOpen || this.consoleOpen) return;
+    if (this.input.freeLook) return;
     this.input.requestPointerLock();
+    const id = window.setTimeout(() => {
+      this.hintTimers = this.hintTimers.filter((x) => x !== id);
+      if (this.locked || this.input.freeLook || !this.isPlayable) return;
+      this.enableFreeLook();
+    }, 900);
+    this.hintTimers.push(id);
+  }
+
+  private enableFreeLook(): void {
+    if (!this.isPlayable || this.input.freeLook) return;
+    this.input.setFreeLook(true);
+    this.ui.setCursorLocked(true);
+    this.ui.subtitle('この環境ではポインタロックが使えません。マウスの移動で視界が動きます。', 8000);
   }
 
   /** Start a run from the title screen. */
   async startExperience(): Promise<void> {
     if (this.phase !== 'title') return;
     // request the lock while we are still inside the click gesture
-    this.input.requestPointerLock();
+    this.armLook();
     this.ui.hideTitle();
     this.ui.setHudVisible(true);
     await this.audio.ensure();
@@ -320,7 +347,7 @@ export class Game {
     this.audio.startRoomAmbience();
     this.resetPlaythrough();
     this.enterRoom(true);
-    this.input.requestPointerLock();
+    this.armLook();
     this.ui.subtitle('03:47。モニタの光だけが、部屋を青くしている。', 7000);
     this.scheduleHint([
       '机の前に立て。モニタを見る。',
@@ -330,7 +357,6 @@ export class Game {
   }
 
   async restart(): Promise<void> {
-    this.input.requestPointerLock();
     this.clearHintTimers();
     this.ui.closeMenu();
     this.ui.closeCredits();
@@ -342,7 +368,7 @@ export class Game {
     await this.audio.ensure();
     this.audio.startRoomAmbience();
     this.enterRoom(true);
-    this.input.requestPointerLock();
+    this.armLook();
     this.ui.subtitle('03:47。モニタの光だけが、部屋を青くしている。', 6000);
   }
 
@@ -363,6 +389,8 @@ export class Game {
     this.flashlightOn = false;
     if (this.flashlight) this.flashlight.visible = false;
     this.input.exitPointerLock();
+    this.input.setFreeLook(false);
+    this.ui.setCursorLocked(false);
     this.audio.stopAllAmbience();
     this.resetPlaythrough();
     this.world.group.visible = false;
@@ -388,7 +416,7 @@ export class Game {
     this.ui.closeMenu();
     this.releaseInputBlock();
     this.player.controlEnabled = !this.cinematics?.active;
-    this.input.requestPointerLock();
+    this.armLook();
   }
 
   onSettingChanged(key: string, value: number | string | boolean): void {
@@ -603,7 +631,7 @@ export class Game {
       this.audio.startRoomAmbience();
       this.renderer.setFx({ glitch: 0.05, chroma: 0.12, grain: 0.06, dofStrength: 0, radialBlur: 0, flash: 0, invert: 0 });
       this.ui.subtitle('03:47。まだ、03:47。', 8000);
-      this.input.requestPointerLock();
+      this.armLook();
     }).catch((err) => {
       console.error('[game] collapse failed', err);
       this.fail(err);
@@ -636,20 +664,20 @@ export class Game {
     this.ui.closeConsole();
     this.releaseInputBlock();
     this.player.controlEnabled = !this.cinematics.active;
-    this.input.requestPointerLock();
+    this.armLook();
   }
 
   onConsoleClosed(): void {
     if (!this.consoleOpen) {
       this.player.controlEnabled = true;
       this.releaseInputBlock();
-      this.input.requestPointerLock();
+      this.armLook();
       return;
     }
     this.consoleOpen = false;
     this.releaseInputBlock();
     this.player.controlEnabled = !this.cinematics.active;
-    this.input.requestPointerLock();
+    this.armLook();
   }
 
   onConsoleCommand(text: string): void {
@@ -894,7 +922,7 @@ export class Game {
     }
 
     const cam = this.renderer.camera;
-    const canLook = this.isPlayable && this.locked && !this.menuOpen && !this.consoleOpen && !this.cinematics.active;
+    const canLook = this.isPlayable && this.input.lookActive && !this.menuOpen && !this.consoleOpen && !this.cinematics.active;
     if (cam && this.player.controlEnabled && !this.cinematics.active) {
       const axis = this.input.isActive() ? this.input.moveAxis() : { x: 0, y: 0 };
       const sprint = this.input.isActive() && this.input.isSprinting();

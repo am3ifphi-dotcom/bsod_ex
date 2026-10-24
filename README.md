@@ -40,7 +40,7 @@ Everything is static: `dist/` can be served by any file server (relative `base`,
 | script | what it does |
 |---|---|
 | `npm run typecheck` | strict TypeScript, zero errors |
-| `npm test` | 56 headless tests (jsdom + node) |
+| `npm test` | 62 headless tests (jsdom + node) |
 | `npm run assets:fetch` | re-download every third-party asset from its public repository, verify the licence metadata, rebuild `public/assets/credits.json` |
 | `npm run assets:optimize` | glTF-Transform: dedupe, prune, weld, WebP textures → 13 GLBs |
 | `npm run textures` | regenerate the 13 procedural PBR texture sets (`scripts/gen-textures.mjs`) |
@@ -56,7 +56,7 @@ Everything is static: `dist/` can be served by any file server (relative `base`,
 |---|---|
 | **WASD** / arrows | walk |
 | **Shift** | dash (≈2× walk speed: 8.1 m/s vs 4.05 m/s) |
-| **Mouse** | look |
+| **Mouse** | look (if the browser refuses Pointer Lock — e.g. inside an embedded preview frame — the game falls back to lock-free mouse look automatically) |
 | **E** or **left click** | interact (only when the reticle is hot and a prompt is shown) |
 | **F** | flashlight (glitch world only) |
 | **C** | in-world console (the glitch world only) |
@@ -221,8 +221,8 @@ callback, and every failure path goes to an explicit error phase with a readable
 
 | metric | value | how |
 |---|---|---|
-| production bundle | **352 kB gzip** (1,165 kB raw JS + 3.6 kB CSS) | `npm run build` |
-| build time | 3.8 s, 52 modules | `npm run build` |
+| production bundle | **353 kB gzip** (1,166 kB raw JS + 3.6 kB CSS) | `npm run build` |
+| build time | 3.6 s, 52 modules | `npm run build` |
 | shipped assets | 36 MB, 13 GLB + 56 textures + 2 HDRIs | `du -sh public/assets` |
 | source triangles | 615,793 before instancing | `assets-report.json` |
 
@@ -248,8 +248,8 @@ end-to-end and escape-proof, and the production bundle builds clean.
 | check | result |
 |---|---|
 | `npx tsc --noEmit` | 0 errors (strict) |
-| `npx vitest run` | **56 / 56 passing** in 8 files |
-| `npx vite build` | clean, 352 kB gzip |
+| `npx vitest run` | **62 / 62 passing** in 9 files |
+| `npx vite build` | clean, 353 kB gzip |
 | `node scripts/verify-assets.mjs` | 23 / 23 checks (licences, files, hashes) |
 | map integrity (real controller flood fill) | 123k states reached, 0 escapes, 0 cells outside the map, all four landmarks reachable |
 | shaders parse as GLSL | BSOD pass, DOF pass, world corruption — yes |
@@ -271,7 +271,9 @@ end-to-end and escape-proof, and the production bundle builds clean.
   is the first lever if a weaker GPU dips.
 - The console supports a fixed command vocabulary; it never states the answer, and unknown input
   always gets an in-fiction error.
-- Mobile is not a target. The layout, pointer lock and the settings assume a desktop mouse.
+- Mobile is not a target. The layout and the settings assume a desktop mouse.
+- In an embedded frame without pointer-lock permission the game falls back to lock-free mouse
+  look (the cursor stays visible over the viewport); a native window gets real pointer lock.
 
 ---
 
@@ -290,7 +292,7 @@ src/narrative/Console.ts   the in-world console and its fiction
 src/ui/                    Ui.ts (all overlays) + style.css
 scripts/                   fetch / optimize / verify / textures / credits
 public/assets/             models, env, textures, credits.json, assets-lock.json, assets-report.json
-tests/                     8 files, 56 tests (collision, settings, console, cinematics, ui, shaders, world, room)
+tests/                     9 files, 62 tests (collision, input, settings, console, cinematics, ui, shaders, world, room)
 ```
 
 ## Credits
