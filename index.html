@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="color-scheme" content="dark" />
+  <title>BSOD // EX</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%230a4ea2'/%3E%3Ctext x='32' y='46' font-size='36' font-family='monospace' fill='white' text-anchor='middle'%3E:(%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/src/ui/style.css" />
+</head>
+<body>
+  <div id="app">
+    <div id="viewport-container" aria-hidden="true"></div>
+
+    <!-- in-game HUD -->
+    <div id="hud" class="hidden">
+      <div id="reticle"></div>
+      <div id="prompt" class="hidden"><span class="key">E</span><span id="prompt-text"></span></div>
+      <div id="subtitle"></div>
+      <div id="hint"></div>
+      <div id="objectives"></div>
+    </div>
+
+    <!-- the monitor's blue screen, aligned over the 3D screen -->
+    <div id="bsod" class="hidden"></div>
+
+    <!-- game console -->
+    <div id="console-overlay" class="hidden">
+      <div id="console-header">CONSOLE — session 0x2F63</div>
+      <div id="console-log" role="log" aria-live="polite"></div>
+      <div id="console-input-row">
+        <span class="caret">&gt;</span>
+        <input id="console-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="off"
+               spellcheck="false" aria-label="console input" />
+      </div>
+      <div id="console-foot">ENTER 実行 / ESC で閉じる — 端末はあなたの言葉を待っている</div>
+    </div>
+
+    <!-- pause menu -->
+    <div id="menu" class="hidden"></div>
+    <div id="credits" class="hidden"></div>
+
+    <!-- title -->
+    <div id="title-screen" class="hidden"></div>
+
+    <!-- loading -->
+    <div id="loading">
+      <div class="load-inner">
+        <div class="load-mark">:(</div>
+        <div class="load-title">BSOD // EX</div>
+        <div class="load-sub">initialising memory sectors</div>
+        <div class="load-bar"><div id="load-fill"></div></div>
+        <div id="load-label">…</div>
+        <div class="load-legal">この体験には点滅・強いコントラストの演出が含まれます。<br />
+          光に敏感な方・てんかんの既往のある方はご注意ください。</div>
+      </div>
+    </div>
+
+    <div id="fade"></div>
+    <div id="perf" class="hidden"></div>
+    <div id="crash-screen" class="hidden"></div>
+    <div id="dev-hint" class="hidden"></div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

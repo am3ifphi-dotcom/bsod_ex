@@ -1,0 +1,385 @@
+{
+  "generated": "2026-10-24T05:30:56.442Z",
+  "note": "Every third-party asset used by the experience. CC0 assets need no attribution but are credited anyway; CC-BY assets require the attribution listed here. No asset with unclear provenance is used.",
+  "assets": [
+    {
+      "type": "model",
+      "id": "SheenChair",
+      "title": "SheenChair",
+      "authors": [
+        "Eric Chadwick"
+      ],
+      "licenses": [
+        "CC0-1.0"
+      ],
+      "licenseNote": "CC0-1.0. Model + textures by Eric Chadwick / Wayfair, LLC.",
+      "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/SheenChair/glTF",
+      "sourceLabel": "Khronos glTF Sample Assets",
+      "use": "Bedroom desk chair (also instanced as props in the glitch world).",
+      "entry": "SheenChair.gltf",
+      "format": "gltf",
+      "bytes": 4138211
+    },
+    {
+      "type": "model",
+      "id": "Lantern",
+      "title": "Lantern",
+      "authors": [
+        "sbtron",
+        "Frank Galligan"
+      ],
+      "licenses": [
+        "CC0-1.0"
+      ],
+      "licenseNote": "CC0-1.0. Model + textures by Microsoft.",
+      "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/Lantern/glTF-Binary",
+      "sourceLabel": "Khronos glTF Sample Assets",
+      "use": "Wooden street lantern used as the bedroom's desk lamp and as world lamps.",
+      "entry": "Lantern.glb",
+      "format": "glb",
+      "bytes": 9564264
+    },
+    {
+      "type": "model",
+      "id": "WaterBottle",
+      "title": "WaterBottle",
+      "authors": [
+        "Microsoft"
+      ],
+      "licenses": [
+        "CC0-1.0"
+      ],
+      "licenseNote": "CC0-1.0. Model + textures by Microsoft.",
+      "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/WaterBottle/glTF-Binary",
+      "sourceLabel": "Khronos glTF Sample Assets",
+      "use": "Desk clutter.",
+      "entry": "WaterBottle.glb",
+      "format": "glb",
+      "bytes": 8966700
+    },
+    {
+      "type": "model",
+      "id": "BoomBox",
+      "title": "BoomBox",
+      "authors": [
+        "Microsoft"
+      ],
+      "licenses": [
+        "CC0-1.0"
+      ],
+      "licenseNote": "CC0-1.0. Model + textures by Microsoft.",
+      "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/BoomBox/glTF-Binary",
+      "sourceLabel": "Khronos glTF Sample Assets",
+      "use": "Bedroom shelf radio; a corrupted duplicate sits in the street area.",
+      "entry": "BoomBox.glb",
+      "format": "glb",
+      "bytes": 10614184
+    },
+    {
+      "type": "model",
+      "id": "GlassVaseFlowers",
+      "title": "GlassVaseFlowers",
+      "authors": [
+        "Eric Chadwick",
+        "Rico Cilliers"
+      ],
+      "licenses": [
+        "CC0-1.0"
+      ],
+      "licenseNote": "CC0-1.0. Model + textures by Microsoft.",
+      "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/GlassVaseFlowers/glTF-Binary",
+      "sourceLabel": "Khronos glTF Sample Assets",
+      "use": "Window-sill flowers in the bedroom.",
+      "entry": "GlassVaseFlowers.glb",
+      "format": "glb",
+      "bytes": 1819824
+    },
+    {
+      "type": "model",
+      "id": "DiffuseTransmissionTeacup",
+      "title": "DiffuseTransmissionTeacup",
+      "authors": [
+        "Polyhaven.com, and Eric Chadwick"
+      ],
+      "licenses": [
+        "CC0-1.0"
+      ],
+      "licenseNote": "CC0-1.0. Model + textures by Khronos Group.",
+      "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/DiffuseTransmissionTeacup/glTF-Binary",
+      "sourceLabel": "Khronos glTF Sample Assets",
+      "use": "Mug beside the keyboard, and the same mug abandoned in the deep area.",
+      "entry": "DiffuseTransmissionTeacup.glb",
+      "format": "glb",
+      "bytes": 4795028
+    },
+    {
+      "type": "model",
+      "id": "ToyCar",
+      "title": "ToyCar",
+      "authors": [
+        "Guido Odendahl",
+        "Eric Chadwick"
+      ],
+      "licenses": [
+        "CC0-1.0"
+      ],
+      "licenseNote": "CC0-1.0. Model + textures by Khronos Group.",
+      "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/ToyCar/glTF-Binary",
+      "sourceLabel": "Khronos glTF Sample Assets",
+      "use": "Shelf toy.",
+      "entry": "ToyCar.glb",
+      "format": "glb",
+      "bytes": 5422412
+    },
+    {
+      "type": "model",
+      "id": "SciFiHelmet",
+      "title": "SciFiHelmet",
+      "authors": [
+        "Michael Pavlovic",
+        "Norbert Nopper"
+      ],
+      "licenses": [
+        "CC0-1.0"
+      ],
+      "licenseNote": "CC0-1.0. Model + textures by Microsoft.",
+      "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/SciFiHelmet/glTF",
+      "sourceLabel": "Khronos glTF Sample Assets",
+      "use": "Floating wreckage and the crown ornament of the core monolith.",
+      "entry": "SciFiHelmet.gltf",
+      "format": "gltf",
+      "bytes": 30286979
+    },
+    {
+      "type": "model",
+      "id": "FlightHelmet",
+      "title": "FlightHelmet",
+      "authors": [
+        "Gary Hsu"
+      ],
+      "licenses": [
+        "CC0-1.0"
+      ],
+      "licenseNote": "CC0-1.0. Model + textures by Microsoft.",
+      "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/FlightHelmet/glTF",
+      "sourceLabel": "Khronos glTF Sample Assets",
+      "use": "Debris lodged in the collapsed atrium and grim totem in the deep area.",
+      "entry": "FlightHelmet.gltf",
+      "format": "gltf",
+      "bytes": 48392569
+    },
+    {
+      "type": "model",
+      "id": "GlamVelvetSofa",
+      "title": "GlamVelvetSofa",
+      "authors": [
+        "Eric Chadwick"
+      ],
+      "licenses": [
+        "CC-BY-4.0"
+      ],
+      "licenseNote": "CC-BY-4.0. Model + textures by Eric Chadwick / Wayfair, LLC.",
+      "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/GlamVelvetSofa/glTF-Binary",
+      "sourceLabel": "Khronos glTF Sample Assets",
+      "use": "Abandoned lounge in the corrupted street area.",
+      "entry": "GlamVelvetSofa.glb",
+      "format": "glb",
+      "bytes": 3149844
+    },
+    {
+      "type": "model",
+      "id": "CommercialRefrigerator",
+      "title": "CommercialRefrigerator",
+      "authors": [
+        "Eric Chadwick",
+        "Sean Thomas"
+      ],
+      "licenses": [
+        "CC-BY-4.0"
+      ],
+      "licenseNote": "CC-BY-4.0. Model + textures by Pawe\u0142 P\u0119ksa / Szymon Szymczyk.",
+      "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CommercialRefrigerator/glTF-Binary",
+      "sourceLabel": "Khronos glTF Sample Assets",
+      "use": "Shop front in the corrupted street area.",
+      "entry": "CommercialRefrigerator.glb",
+      "format": "glb",
+      "bytes": 10131180
+    },
+    {
+      "type": "model",
+      "id": "SheenWoodLeatherSofa",
+      "title": "SheenWoodLeatherSofa",
+      "authors": [
+        "Eric Chadwick",
+        "Fran Calvente"
+      ],
+      "licenses": [
+        "CC-BY-4.0",
+        "CC0-1.0"
+      ],
+      "licenseNote": "CC0-1.0 (model) + CC-BY-4.0 (documentation). Model by Eric Chadwick / Wayfair, LLC.",
+      "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/SheenWoodLeatherSofa/glTF-Binary",
+      "sourceLabel": "Khronos glTF Sample Assets",
+      "use": "Second lounge, hidden side-room.",
+      "entry": "SheenWoodLeatherSofa.glb",
+      "format": "glb",
+      "bytes": 10107912
+    },
+    {
+      "type": "model",
+      "id": "StainedGlassLamp",
+      "title": "StainedGlassLamp",
+      "authors": [
+        "Eric Chadwick"
+      ],
+      "licenses": [
+        "CC-BY-4.0"
+      ],
+      "licenseNote": "CC-BY-4.0. Model + textures by Eric Chadwick.",
+      "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/StainedGlassLamp/glTF",
+      "sourceLabel": "Khronos glTF Sample Assets",
+      "use": "Bedroom floor lamp \u2014 the only warm light in the room.",
+      "entry": "StainedGlassLamp.gltf",
+      "format": "gltf",
+      "bytes": 34257611
+    },
+    {
+      "type": "environment",
+      "id": "moonless_golf",
+      "title": "moonless golf",
+      "authors": [
+        "Poly Haven"
+      ],
+      "licenses": [
+        "CC0-1.0"
+      ],
+      "licenseNote": "CC0-1.0. HDRI by Poly Haven (moonless golf course).",
+      "source": "https://github.com/mrdoob/three.js/blob/dev/examples/textures/equirectangular/moonless_golf_1k.hdr",
+      "sourceLabel": "three.js repository (asset mirror)",
+      "use": "Night sky / bedroom window backdrop and reflection probe source.",
+      "bytes": 1672754
+    },
+    {
+      "type": "environment",
+      "id": "pedestrian_overpass",
+      "title": "pedestrian overpass",
+      "authors": [
+        "Poly Haven"
+      ],
+      "licenses": [
+        "CC0-1.0"
+      ],
+      "licenseNote": "CC0-1.0. HDRI by Poly Haven (pedestrian overpass).",
+      "source": "https://github.com/mrdoob/three.js/blob/dev/examples/textures/equirectangular/pedestrian_overpass_1k.hdr",
+      "sourceLabel": "three.js repository (asset mirror)",
+      "use": "Urban dusk reflections for the corrupted street.",
+      "bytes": 1513980
+    },
+    {
+      "type": "texture",
+      "id": "Ice002",
+      "title": "Ice002 (ambientCG)",
+      "authors": [
+        "ambientCG (Lennart Demes)"
+      ],
+      "licenses": [
+        "CC0-1.0"
+      ],
+      "licenseNote": "CC0-1.0. Colour/normal/roughness/displacement maps, converted to glTF-ready form and repacked as WebP.",
+      "source": "https://ambientcg.com/view?id=Ice002",
+      "sourceLabel": "ambientCG (via the three.js repository mirror)",
+      "use": "Crystalline crust on the arrival plateau and the monolith plinth."
+    }
+  ],
+  "software": [
+    {
+      "title": "three.js",
+      "authors": [
+        "three.js authors"
+      ],
+      "licenses": [
+        "MIT"
+      ],
+      "source": "https://github.com/mrdoob/three.js",
+      "use": "WebGL rendering, post-processing, glTF loading."
+    },
+    {
+      "title": "Vite",
+      "authors": [
+        "Vite contributors"
+      ],
+      "licenses": [
+        "MIT"
+      ],
+      "source": "https://github.com/vitejs/vite",
+      "use": "Dev server and production build."
+    },
+    {
+      "title": "TypeScript",
+      "authors": [
+        "Microsoft"
+      ],
+      "licenses": [
+        "Apache-2.0"
+      ],
+      "source": "https://github.com/microsoft/TypeScript",
+      "use": "Language / type checking."
+    },
+    {
+      "title": "glTF Transform",
+      "authors": [
+        "Don McCurdy"
+      ],
+      "licenses": [
+        "MIT"
+      ],
+      "source": "https://github.com/donmccurdy/glTF-Transform",
+      "use": "Offline asset optimisation (dedupe, prune, WebP texture compression)."
+    },
+    {
+      "title": "sharp",
+      "authors": [
+        "Lovell Fuller and contributors"
+      ],
+      "licenses": [
+        "Apache-2.0"
+      ],
+      "source": "https://github.com/lovell/sharp",
+      "use": "Offline texture generation and encoding (build-time only)."
+    },
+    {
+      "title": "Vitest",
+      "authors": [
+        "Vitest contributors"
+      ],
+      "licenses": [
+        "MIT"
+      ],
+      "source": "https://github.com/vitest-dev/vitest",
+      "use": "Automated tests (build-time only)."
+    }
+  ],
+  "selfMade": [
+    {
+      "title": "Procedural PBR textures",
+      "licenses": [
+        "CC0-1.0"
+      ],
+      "note": "13 seamless material sets generated by scripts/gen-textures.mjs (wood, plaster, concrete, metal, fabric, carpet, paper, asphalt, rubber, tile \u2026)."
+    },
+    {
+      "title": "All audio",
+      "licenses": [
+        "CC0-1.0"
+      ],
+      "note": "Synthesised at runtime with the Web Audio API in src/audio/AudioEngine.ts. No sampled recordings, no third-party sound files."
+    },
+    {
+      "title": "Level geometry, level design, shaders, UI, code",
+      "licenses": [
+        "see README"
+      ],
+      "note": "Authored for this project."
+    }
+  ]
+}

@@ -1,0 +1,166 @@
+{
+  "$comment": "Single source of truth for every third-party asset. The fetch script downloads exactly these paths, extracts license metadata, and fails loudly if anything is missing. Nothing is used in the game unless it is listed here.",
+  "repos": {
+    "khronos": {
+      "url": "https://github.com/KhronosGroup/glTF-Sample-Assets.git",
+      "ref": "main",
+      "label": "Khronos glTF Sample Assets"
+    },
+    "three": {
+      "url": "https://github.com/mrdoob/three.js.git",
+      "ref": "dev",
+      "label": "three.js repository (asset mirror)"
+    }
+  },
+  "models": [
+    {
+      "id": "SheenChair",
+      "repo": "khronos",
+      "dir": "Models/SheenChair",
+      "format": "gltf",
+      "variant": "glTF",
+      "use": "Bedroom desk chair (also instanced as props in the glitch world).",
+      "licenseNote": "CC0-1.0. Model + textures by Eric Chadwick / Wayfair, LLC."
+    },
+    {
+      "id": "Lantern",
+      "repo": "khronos",
+      "dir": "Models/Lantern",
+      "format": "gltf",
+      "variant": "glTF-Binary",
+      "use": "Hand lantern props in the glitch world (the bedroom uses the stained-glass lamp).",
+      "licenseNote": "CC0-1.0. Model + textures by Microsoft."
+    },
+    {
+      "id": "WaterBottle",
+      "repo": "khronos",
+      "dir": "Models/WaterBottle",
+      "format": "gltf",
+      "variant": "glTF-Binary",
+      "use": "Desk clutter.",
+      "licenseNote": "CC0-1.0. Model + textures by Microsoft."
+    },
+    {
+      "id": "BoomBox",
+      "repo": "khronos",
+      "dir": "Models/BoomBox",
+      "format": "gltf",
+      "variant": "glTF-Binary",
+      "use": "Bedroom shelf radio; a corrupted duplicate sits in the street area.",
+      "licenseNote": "CC0-1.0. Model + textures by Microsoft."
+    },
+    {
+      "id": "GlassVaseFlowers",
+      "repo": "khronos",
+      "dir": "Models/GlassVaseFlowers",
+      "format": "gltf",
+      "variant": "glTF-Binary",
+      "use": "Window-sill flowers in the bedroom.",
+      "licenseNote": "CC0-1.0. Model + textures by Microsoft."
+    },
+    {
+      "id": "DiffuseTransmissionTeacup",
+      "repo": "khronos",
+      "dir": "Models/DiffuseTransmissionTeacup",
+      "format": "gltf",
+      "variant": "glTF-Binary",
+      "use": "Mug beside the keyboard, and the same mug abandoned in the deep area.",
+      "licenseNote": "CC0-1.0. Model + textures by Khronos Group."
+    },
+    {
+      "id": "ToyCar",
+      "repo": "khronos",
+      "dir": "Models/ToyCar",
+      "format": "gltf",
+      "variant": "glTF-Binary",
+      "use": "Shelf toy.",
+      "licenseNote": "CC0-1.0. Model + textures by Khronos Group."
+    },
+    {
+      "id": "SciFiHelmet",
+      "repo": "khronos",
+      "dir": "Models/SciFiHelmet",
+      "format": "gltf",
+      "variant": "glTF",
+      "use": "Floating wreckage and the crown ornament of the core monolith.",
+      "licenseNote": "CC0-1.0. Model + textures by Microsoft."
+    },
+    {
+      "id": "FlightHelmet",
+      "repo": "khronos",
+      "dir": "Models/FlightHelmet",
+      "format": "gltf",
+      "variant": "glTF",
+      "use": "Debris lodged in the collapsed atrium and grim totem in the deep area.",
+      "licenseNote": "CC0-1.0. Model + textures by Microsoft."
+    },
+    {
+      "id": "GlamVelvetSofa",
+      "repo": "khronos",
+      "dir": "Models/GlamVelvetSofa",
+      "format": "gltf",
+      "variant": "glTF-Binary",
+      "use": "Abandoned lounge in the corrupted street area.",
+      "licenseNote": "CC-BY-4.0. Model + textures by Eric Chadwick / Wayfair, LLC."
+    },
+    {
+      "id": "CommercialRefrigerator",
+      "repo": "khronos",
+      "dir": "Models/CommercialRefrigerator",
+      "format": "gltf",
+      "variant": "glTF-Binary",
+      "use": "Shop front in the corrupted street area.",
+      "licenseNote": "CC-BY-4.0. Model + textures by Pawe\u0142 P\u0119ksa / Szymon Szymczyk."
+    },
+    {
+      "id": "SheenWoodLeatherSofa",
+      "repo": "khronos",
+      "dir": "Models/SheenWoodLeatherSofa",
+      "format": "gltf",
+      "variant": "glTF-Binary",
+      "use": "Second lounge, hidden side-room.",
+      "licenseNote": "CC0-1.0 (model) + CC-BY-4.0 (documentation). Model by Eric Chadwick / Wayfair, LLC."
+    },
+    {
+      "id": "StainedGlassLamp",
+      "repo": "khronos",
+      "dir": "Models/StainedGlassLamp",
+      "format": "gltf",
+      "variant": "glTF",
+      "use": "Bedroom floor lamp \u2014 the only warm light in the room.",
+      "licenseNote": "CC-BY-4.0. Model + textures by Eric Chadwick."
+    }
+  ],
+  "environments": [
+    {
+      "id": "moonless_golf",
+      "repo": "three",
+      "path": "examples/textures/equirectangular/moonless_golf_1k.hdr",
+      "output": "moonless_golf_1k.hdr",
+      "use": "Night sky above the glitch world; source for the world reflection probe.",
+      "licenseNote": "CC0-1.0. HDRI by Poly Haven (moonless golf course)."
+    },
+    {
+      "id": "pedestrian_overpass",
+      "repo": "three",
+      "path": "examples/textures/equirectangular/pedestrian_overpass_1k.hdr",
+      "output": "pedestrian_overpass_1k.hdr",
+      "use": "City light reflections inside the monitor tunnel (the way into the machine).",
+      "licenseNote": "CC0-1.0. HDRI by Poly Haven (pedestrian overpass)."
+    }
+  ],
+  "textures": [
+    {
+      "id": "Ice002",
+      "repo": "three",
+      "files": {
+        "color": "examples/textures/ambientcg/Ice002_1K-JPG_Color.jpg",
+        "normal": "examples/textures/ambientcg/Ice002_1K-JPG_NormalGL.jpg",
+        "roughness": "examples/textures/ambientcg/Ice002_1K-JPG_Roughness.jpg",
+        "displacement": "examples/textures/ambientcg/Ice002_1K-JPG_Displacement.jpg"
+      },
+      "use": "Crystalline crust on the arrival-area ground and monolith plinth.",
+      "licenseNote": "CC0-1.0. ambientCG Ice002."
+    }
+  ]
+}
