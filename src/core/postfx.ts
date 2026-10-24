@@ -300,7 +300,6 @@ export class PostFX {
     this.bloom.enabled = q !== 'low';
     this.dof.material.uniforms.enabled.value = q === 'low' ? 0 : 1;
     this.bloom.strength = q === 'epic' ? 0.7 : q === 'high' ? 0.55 : 0.4;
-    this.bloom.resolution.set(1, 1);
     this.renderer.shadowMap.enabled = q !== 'low';
   }
 

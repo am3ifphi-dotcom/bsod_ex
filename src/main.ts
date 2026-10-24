@@ -63,11 +63,11 @@ async function boot() {
   clearInterval(loadPoll);
   ui.setLoading(0.96, 'シーンを構築中…');
 
-  const env = assets.makeEnvMap();
-  sceneRoom.environment = env;
+  // 反射プローブ: 自室は暖色のスタジオ、異世界は青い地平から採る
+  sceneRoom.environment = assets.makeEnvMap('room');
   sceneRoom.environmentIntensity = 0.35;
-  sceneWorld.environment = env;
-  sceneWorld.environmentIntensity = 0.22;
+  sceneWorld.environment = assets.makeEnvMap('void');
+  sceneWorld.environmentIntensity = 0.55;
 
   const player = new Player();
   const room = new Room(sceneRoom, assets, audio);
@@ -100,6 +100,7 @@ async function boot() {
       }
     },
   });
+  ui.onConsoleEscape = () => { if (ui.consoleOpen) consoleCtl.close(); };
 
   room.onText = (text, dur) => ui.setSubtitle(text, dur ?? 6000);
   room.onPC = () => director.usePC();
@@ -253,6 +254,7 @@ async function boot() {
   let fps = 60;
   let resTimer = 0;
   let resAccum = 0;
+  let resFrames = 0;
   const menuCamPos = new THREE.Vector3(0.55, 1.55, 1.35);
   const menuCamLook = new THREE.Vector3(0.5, 1.16, -2.06);
 
@@ -326,18 +328,17 @@ async function boot() {
 
     // ---- 動的解像度 ----
     if (ui.settings.dynamicRes && running) {
-      resAccum += ms; resTimer += dt;
+      resAccum += ms; resFrames++; resTimer += dt;
       if (resTimer > 1.6) {
-        const avg = resAccum / Math.max(1, resTimer / (1 / 60));
-        const avgFrame = resAccum / Math.max(1, Math.round(1 / dt));
+        const avgFrame = resAccum / Math.max(1, resFrames);
         if (avgFrame > 17.8 && post.resolutionScale > 0.56) post.setScale(post.resolutionScale - 0.08);
-        else if (avgFrame < 12.5 && post.resolutionScale < 1) post.setScale(post.resolutionScale + 0.05);
-        void avg;
-        resAccum = 0; resTimer = 0;
+        else if (avgFrame < 12.5 && post.resolutionScale < 1) post.setScale(Math.min(1, post.resolutionScale + 0.05));
+        resAccum = 0; resFrames = 0; resTimer = 0;
       }
     }
 
-    // 自動テスト用
+    // 自動テスト / デバッグ用ハンドル (?debug=1 のときだけ公開)
+    if (!debug) return;
     (window as unknown as { __BSOD: unknown }).__BSOD = {
       phase: director.phase, fps, lowFps, avgMs,
       settings: ui.settings, director, consoleCtl, startRoom: () => director.startRoom(true),

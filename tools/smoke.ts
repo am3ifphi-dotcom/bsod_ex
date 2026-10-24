@@ -76,6 +76,7 @@ async function testRoom() {
     assert(inside, `room: escaped at yaw ${yaw} → (${q.pos.x.toFixed(2)}, ${q.pos.z.toFixed(2)})`);
   }
   console.log('[room] collision ok');
+  auditScene('room', room.group, room.interactables);
 }
 
 async function testWorld() {
@@ -218,6 +219,48 @@ async function testWorld() {
   world.setSecretRevealed();
   for (let i = 0; i < 60; i++) world.update(1 / 60, 10 + i / 60, cam);
   console.log('[world] ok');
+  auditScene('world', world.group, world.interactables);
+}
+
+/** シーングラフの健全性: NaN 変換・空ジオメトリ・ライト欠如・未接続インタラクトを検出 */
+function auditScene(name: string, root: THREE.Object3D, interactables: readonly { id: string; label?: unknown; point: THREE.Vector3; radius: number; onUse?: () => void }[]) {
+  let meshes = 0, lights = 0, instanced = 0, tris = 0;
+  const bad: string[] = [];
+  root.updateMatrixWorld(true);
+  root.traverse((o) => {
+    const p = o.position, q = o.quaternion, sc = o.scale;
+    if (![p.x, p.y, p.z, q.x, q.y, q.z, q.w, sc.x, sc.y, sc.z].every(Number.isFinite)) bad.push(`non-finite transform: ${o.name || o.type}`);
+    if (o instanceof THREE.Light) {
+      lights++;
+      if (!Number.isFinite(o.intensity) || o.intensity < 0) bad.push(`bad light intensity: ${o.name || o.type}`);
+    }
+    if (o instanceof THREE.Mesh || o instanceof THREE.InstancedMesh) {
+      meshes++;
+      if (o instanceof THREE.InstancedMesh) instanced++;
+      const geo = o.geometry;
+      if (!geo) { bad.push(`mesh without geometry: ${o.name || o.type}`); return; }
+      const pos = geo.getAttribute('position');
+      if (!pos || pos.count === 0) bad.push(`empty geometry: ${o.name || o.type}`);
+      if (pos) {
+        const arr = pos.array as ArrayLike<number>;
+        let nan = false;
+        for (let i = 0; i < Math.min(arr.length, 600); i++) if (!Number.isFinite(arr[i])) { nan = true; break; }
+        if (nan) bad.push(`NaN vertex: ${o.name || o.type}`);
+        tris += (geo.index ? geo.index.count : pos.count) / 3;
+      }
+      if (!o.material) bad.push(`mesh without material: ${o.name || o.type}`);
+      if (o instanceof THREE.InstancedMesh && o.count === 0) bad.push(`instanced mesh with 0 instances: ${o.name || o.type}`);
+    }
+  });
+  for (const it of interactables) {
+    if (!it.id) bad.push('interactable without id');
+    if (!Number.isFinite(it.point.x) || !Number.isFinite(it.point.z)) bad.push(`interactable ${it.id}: non-finite point`);
+    if (!(it.radius > 0)) bad.push(`interactable ${it.id}: radius ${it.radius}`);
+    if (typeof it.label !== 'string' && typeof it.label !== 'function') bad.push(`interactable ${it.id}: no label`);
+    if (typeof it.onUse !== 'function') bad.push(`interactable ${it.id}: no handler`);
+  }
+  console.log(`[${name}] audit: ${meshes} meshes (${instanced} instanced), ${lights} lights, ${(tris / 1000).toFixed(0)}k tris`);
+  for (const b of bad.slice(0, 8)) problems.push(`${name}: ${b}`);
 }
 
 (async () => {

@@ -51,6 +51,14 @@ export class World {
   private chamberLight?: THREE.PointLight;
   private revealed = false;
   private rng = new RNG(20240601);
+  private frame = 0;
+  private _m4 = new THREE.Matrix4();
+  private _q = new THREE.Quaternion();
+  private _v1 = new THREE.Vector3();
+  private _v2 = new THREE.Vector3();
+  private _v3 = new THREE.Vector3();
+  private _e = new THREE.Euler();
+  private _glyphCenter = new THREE.Vector3(0, 30, 20);
 
   constructor(private scene: THREE.Scene, private assets: Assets, private audio: AudioEngine) {}
 
@@ -346,9 +354,10 @@ export class World {
     nroof.castShadow = true;
     this.group.add(nroof);
     slab(7.6, 16, B.x, B.z - 26, 0);
-    for (let i = 0; i < 4; i++) {
-      const l = new THREE.PointLight(0x8fc8ff, 6, 14, 2);
-      l.position.set(B.x, 3.2, B.z - 20 - i * 4);
+    // 光源は「描画コストの上限」を守るため 2 灯に集約 (明るさを補償)
+    for (const z of [B.z - 20, B.z - 30]) {
+      const l = new THREE.PointLight(0x8fc8ff, 9, 20, 2);
+      l.position.set(B.x, 3.2, z);
       this.group.add(l);
     }
     // 東西の外壁: 2F の橋が通る高さ (y 4.2..6.2 / z 18..22) に開口部を空ける
@@ -465,14 +474,18 @@ export class World {
       { key: 'plant', h: 1.5, pos: [B.x - 13, 4.4, B.z - 12] },
       { key: 'lantern', h: 2.2, pos: [B.x + 15.5, 0, B.z - 14] },
     ];
-    for (const f of fragments) {
+    for (let i = 0; i < fragments.length; i++) {
+      const f = fragments[i];
       const obj = await this.assets.instance(f.key, { scale: this.assets.scaleFor(f.key, f.h), rotateY: f.ry ?? 0 });
       obj.position.set(...f.pos);
       this.bsodify(obj, 0.6);
       this.group.add(obj);
-      const l = new THREE.PointLight(0x7fb6ff, 4.5, 18, 2);
-      l.position.set(f.pos[0], f.pos[1] + 0.8, f.pos[2]);
-      this.group.add(l);
+      // 自発光を強め、実ライトは 1 つおきに間引く
+      if (i % 2 === 0) {
+        const l = new THREE.PointLight(0x7fb6ff, 7, 22, 2);
+        l.position.set(f.pos[0], f.pos[1] + 0.8, f.pos[2]);
+        this.group.add(l);
+      }
       this.chunks.push({ mesh: obj, base: obj.position.clone(), amp: 0.32, speed: 0.35, phase: Math.random() * 6.28, rot: new THREE.Vector3(0.02, 0.05, 0.01) });
     }
 
@@ -759,14 +772,18 @@ export class World {
       const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), emissive(0xff5a3c, 8));
       lamp.position.set(D.x - 15 + i * 10, floorY + 8.2, D.z - 17.5);
       this.group.add(lamp);
-      const l = new THREE.PointLight(0xff5a3c, 4, 12, 2);
-      l.position.copy(lamp.position);
-      this.group.add(l);
+      if (i % 2 === 0) {
+        const l = new THREE.PointLight(0xff5a3c, 6, 18, 2);
+        l.position.copy(lamp.position);
+        this.group.add(l);
+      }
     }
-    // 足元の誘導灯
+    // 足元の誘導灯 (発光体は全数、実ライトは 3 灯)
     for (let i = 0; i < 6; i++) {
-      const l = new THREE.PointLight(0x4fa8ff, 3.2, 14, 2);
-      l.position.set(D.x - 18 + i * 7, floorY + 1.2, D.z + 14);
+      const p = new THREE.Vector3(D.x - 18 + i * 7, floorY + 1.2, D.z + 14);
+      if (i % 2 === 1) continue;
+      const l = new THREE.PointLight(0x4fa8ff, 4.4, 18, 2);
+      l.position.copy(p);
       this.group.add(l);
     }
   }
@@ -881,9 +898,11 @@ export class World {
       f.position.set(E.x, 0.2, z);
       this.group.add(f);
       this.collision.addPlatform(E.x - 3, E.x + 3, z - 1.2, z + 1.2, 0.4);
-      const l = new THREE.PointLight(0x7fc0ff, 7, 18, 2);
-      l.position.set(E.x, 4, z);
-      this.group.add(l);
+      if (i % 3 === 0) {
+        const l = new THREE.PointLight(0x7fc0ff, 9, 22, 2);
+        l.position.set(E.x, 4, z);
+        this.group.add(l);
+      }
     }
     // 通路の屋根
     const roof = new THREE.Mesh(new THREE.BoxGeometry(11, 0.5, 28), wallMat);
@@ -1010,36 +1029,41 @@ export class World {
         c.mesh.rotation.z += c.rot.z * dt;
       }
     }
-    if (this.debris) {
-      const m4 = new THREE.Matrix4();
-      const q = new THREE.Quaternion();
-      const scale = new THREE.Vector3();
-      const pos = new THREE.Vector3();
-      for (let i = 0; i < this.debrisData.length; i++) {
+    // 負荷対策: 一時オブジェクトを再利用し、遠方の環境アニメーションは 2 フレームに 1 回へ間引く
+    this.frame++;
+    const camPos = camera.position;
+    const farFromScene = camPos.lengthSq() > 1e4;
+    if (this.debris && (!farFromScene || this.frame % 2 === 0)) {
+      const m4 = this._m4, q = this._q, scale = this._v1, pos = this._v2, tmp = this._v3;
+      const animate = camPos.distanceTo(this.debris.position) < 200;
+      for (let i = 0; animate && i < this.debrisData.length; i++) {
         const d = this.debrisData[i];
         this.debris.getMatrixAt(i, m4);
         m4.decompose(pos, q, scale);
-        q.setFromEuler(new THREE.Euler(d.rot.x + t * 0.02, d.rot.y + t * 0.03, d.rot.z));
+        q.setFromEuler(this._e.set(d.rot.x + t * 0.02, d.rot.y + t * 0.03, d.rot.z));
         m4.compose(
-          new THREE.Vector3(d.base.x + Math.cos(t * 0.17 + d.phase) * d.amp * 0.6, d.base.y + Math.sin(t * 0.25 + d.phase) * d.amp, d.base.z),
+          tmp.set(d.base.x + Math.cos(t * 0.17 + d.phase) * d.amp * 0.6, d.base.y + Math.sin(t * 0.25 + d.phase) * d.amp, d.base.z),
           q, scale,
         );
         this.debris.setMatrixAt(i, m4);
       }
-      this.debris.instanceMatrix.needsUpdate = true;
+      if (animate) this.debris.instanceMatrix.needsUpdate = true;
     }
-    if (this.glyphField) {
-      const m4 = new THREE.Matrix4();
-      const q = new THREE.Quaternion();
-      for (let i = 0; i < this.glyphData.length; i++) {
-        const g = this.glyphData[i];
-        let y = g.base.y - ((t * g.speed + g.phase * 10) % 60);
-        if (y < 0.5) y += 59;
-        q.setFromEuler(new THREE.Euler(0, Math.sin(t * 0.2 + g.phase) * 0.4, 0));
-        m4.compose(new THREE.Vector3(g.base.x + Math.sin(t * 0.3 + g.phase) * 0.5, y, g.base.z), q, new THREE.Vector3(g.scale, g.scale, 1));
-        this.glyphField.setMatrixAt(i, m4);
+    if (this.glyphField && this.frame % 2 === 0) {
+      const m4 = this._m4, q = this._q, tmp = this._v3, sc = this._v1;
+      const visible = camPos.distanceTo(this._glyphCenter) < 190;
+      this.glyphField.visible = visible;
+      if (visible) {
+        for (let i = 0; i < this.glyphData.length; i++) {
+          const g = this.glyphData[i];
+          let y = g.base.y - ((t * g.speed + g.phase * 10) % 60);
+          if (y < 0.5) y += 59;
+          q.setFromEuler(this._e.set(0, Math.sin(t * 0.2 + g.phase) * 0.4, 0));
+          m4.compose(tmp.set(g.base.x + Math.sin(t * 0.3 + g.phase) * 0.5, y, g.base.z), q, sc.set(g.scale, g.scale, 1));
+          this.glyphField.setMatrixAt(i, m4);
+        }
+        this.glyphField.instanceMatrix.needsUpdate = true;
       }
-      this.glyphField.instanceMatrix.needsUpdate = true;
     }
     this.rings.forEach((r, i) => {
       r.rotation.z = t * (0.05 + i * 0.02) * (i % 2 ? -1 : 1);

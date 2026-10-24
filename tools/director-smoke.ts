@@ -76,7 +76,24 @@ const audio = magic();
   watch('after leanin');
   if (director.phase !== 'screen') problems.push(`expected screen, got ${director.phase}`);
 
-  for (let i = 0; i < 12; i++) (director as unknown as { advanceBSOD: () => void }).advanceBSOD();
+  // 実際のクリック判定: 画面メッシュ上の「:(」を狙って NDC を差し替える
+  room.group.updateMatrixWorld(true);
+  const faceWorld = new THREE.Vector3(0, (0.5 - 0.30) * 0.345, 0.002).applyMatrix4(room.screenMesh.matrixWorld);
+  const ndcPoint = faceWorld.clone().project(camera);
+  Object.defineProperty(input, 'ndc', { value: { x: ndcPoint.x, y: ndcPoint.y }, configurable: true });
+  const before = (director as unknown as { clicks: number }).clicks;
+  input.clicked = true;
+  director.update(1 / 60);
+  const afterClick = (director as unknown as { clicks: number }).clicks;
+  if (afterClick !== before + 1) problems.push(`clicking the face did not advance the BSOD (${before} → ${afterClick})`);
+
+  // 画面の外側をクリックしても進まない
+  Object.defineProperty(input, 'ndc', { value: { x: -0.95, y: 0.95 }, configurable: true });
+  input.clicked = true;
+  director.update(1 / 60);
+  if ((director as unknown as { clicks: number }).clicks !== afterClick) problems.push('clicking outside the face advanced the BSOD');
+
+  for (let i = 0; i < 10; i++) (director as unknown as { advanceBSOD: () => void }).advanceBSOD();
   watch('after 12 clicks');
   step(0.2);
   watch('finale starts');

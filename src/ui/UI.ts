@@ -31,6 +31,7 @@ export class UI {
   onConsoleSubmit?: (text: string) => void;
   onConsoleOpen?: () => void;
   onConsoleClose?: () => void;
+  onConsoleEscape?: () => void;
   onSettingsChanged?: (s: Settings, key: keyof Settings) => void;
   reading = false;
 
@@ -65,6 +66,13 @@ export class UI {
     this.el.consoleInput.addEventListener('compositionstart', () => { this.composing = true; });
     this.el.consoleInput.addEventListener('compositionend', () => { this.composing = false; });
     this.el.consoleInput.addEventListener('keydown', (e) => {
+      // Esc はコンソールを閉じる (伝播を止めるとウィンドウ側の処理に届かないため自前で処理)
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        this.onConsoleEscape?.();
+        return;
+      }
       if (e.key === 'Enter') {
         if (this.composing || e.isComposing) return;
         e.preventDefault();

@@ -65,6 +65,20 @@ export const CREDITS: Credit[] = [
     used: 'サイドテーブルの鉢',
   },
   {
+    name: 'SciFi Helmet',
+    author: 'Michael Pavlovic (glTF conversion: Norbert Nopper)',
+    license: 'CC0-1.0',
+    url: 'https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/SciFiHelmet',
+    used: '異世界の西部・東部の都市に浮かぶ記憶の断片 (BSOD 化)',
+  },
+  {
+    name: 'Flight Helmet',
+    author: 'Gary Hsu (Microsoft)',
+    license: 'CC0-1.0',
+    url: 'https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/FlightHelmet',
+    used: '都市の上に浮かぶ記憶の断片 (BSOD 化)',
+  },
+  {
     name: 'PBR textures (Wood / Plaster / Concrete / Brick / Metal / Asphalt / Rock / Ground)',
     author: 'ambientCG (via petroulacl/fps-asset-kit mirror)',
     license: 'CC0-1.0',
