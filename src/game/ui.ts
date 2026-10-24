@@ -1,6 +1,7 @@
 // All DOM UI: HUD, pause menu, in-game console, credits, boot screen.
 import { settings, Quality } from '../core/settings';
 import creditsData from '../../assets/credits.json';
+import type { UiSound } from '../core/audio';
 
 export interface UIHandlers {
   onStart: (reduceMotion: boolean) => void;
@@ -23,8 +24,7 @@ export class UI {
   private history: string[] = [];
   private historyIdx = -1;
   private perfOn = false;
-  private fpsHistory: number[] = [];
-  private lastUiSound: ((kind: 'hover' | 'click' | 'open' | 'close' | 'error') => void) | null = null;
+  private lastUiSound: ((kind: UiSound) => void) | null = null;
 
   // elements
   private el = {
@@ -36,7 +36,7 @@ export class UI {
     creditsClose: $<HTMLButtonElement>('creditsClose'), creditsBtn: $<HTMLButtonElement>('creditsBtn'),
     resumeBtn: $<HTMLButtonElement>('resumeBtn'), restartBtn: $<HTMLButtonElement>('restartBtn'),
     consoleWrap: $('consoleWrap'), consoleLog: $('consoleLog'), consoleInput: $<HTMLInputElement>('consoleInput'),
-    consoleState: $('consoleState'), chapter: $('chapter'), fade: $('fadeBlack'), bootLine: $('bootLine'),
+    consoleState: $('consoleState'), chapter: $('chapter'), bootLine: $('bootLine'),
     letterbox: $('letterbox'),
   };
 
@@ -60,8 +60,8 @@ export class UI {
     }
   }
 
-  setUiSound(fn: (kind: 'hover' | 'click' | 'open' | 'close' | 'error') => void) { this.lastUiSound = fn; }
-  private playUi(kind: 'hover' | 'click' | 'open' | 'close' | 'error') { this.lastUiSound?.(kind); }
+  setUiSound(fn: (kind: UiSound) => void) { this.lastUiSound = fn; }
+  private playUi(kind: UiSound) { this.lastUiSound?.(kind); }
 
   // ------------------------------------------------------------- boot
   setBootProgress(frac: number, label: string) {
@@ -84,7 +84,6 @@ export class UI {
     this.el.boot.classList.add('hidden');
     this.el.letterbox.classList.add('on');
   }
-  bootVisible() { return !this.el.boot.classList.contains('hidden'); }
 
   // -------------------------------------------------------------- HUD
   showPrompt(text: string | null) {
@@ -123,10 +122,6 @@ export class UI {
     (this as any)._chapterT = window.setTimeout(() => ch.classList.remove('show'), ms);
   }
   setLetterbox(on: boolean) { this.el.letterbox.classList.toggle('on', on); }
-  fade(on: boolean, ms = 400) {
-    this.el.fade.style.transition = `opacity ${ms}ms linear`;
-    this.el.fade.classList.toggle('on', on);
-  }
   bootLine(text: string | null) {
     if (!text) { this.el.bootLine.classList.add('hidden'); return; }
     this.el.bootLine.textContent = text;
@@ -150,13 +145,6 @@ export class UI {
     return this.perfOn;
   }
   perfVisible() { return this.perfOn; }
-
-  updatePerf(text: string) {
-    if (!this.perfOn) return;
-    this.el.perf.textContent = text;
-    this.fpsHistory.push(0);
-    if (this.fpsHistory.length > 4) this.fpsHistory.shift();
-  }
 
   // ------------------------------------------------------------ menus
   openMenu(phaseLabel: string) {
@@ -220,7 +208,7 @@ export class UI {
       this.handlers?.onSettingsChanged?.();
     });
 
-    this.el.consoleInput.addEventListener('input', () => this.playUi('hover'));
+    this.el.consoleInput.addEventListener('input', () => this.playUi('key'));
   }
 
   syncSettingsUi() {
@@ -360,10 +348,6 @@ export class UI {
   setPerfText(text: string) {
     if (!this.perfOn) return;
     this.el.perf.textContent = text;
-  }
-
-  setHudVisible(v: boolean) {
-    this.el.hud.style.opacity = v ? '1' : '0';
   }
 }
 

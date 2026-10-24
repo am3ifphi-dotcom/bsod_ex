@@ -1159,6 +1159,9 @@ export class World {
   /** where the "reading the secret" trigger sits, in world space */
   get wakeUpPoint() { return new THREE.Vector3(0, 2, 11).add(WORLD_OFFSET); }
 
+  /** the monument's centre in world space (used to place the spatial hum) */
+  get monumentPosition() { return new THREE.Vector3(0, 14, 0).add(WORLD_OFFSET); }
+
   /** Surface type for footsteps at a world-space position. */
   surfaceAt(p: THREE.Vector3): 'sand' | 'concrete' | 'metal' {
     const l = p.clone().sub(WORLD_OFFSET);

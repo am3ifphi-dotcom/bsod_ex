@@ -187,8 +187,6 @@ select { background: #0b1a33; color: #dce9ff; border: 1px solid #2c4a7d; padding
 .chapter.show { opacity: .85; }
 .chapter span { display: block; margin-top: 6px; font-size: 22px; letter-spacing: .12em; color: #fff; }
 
-.fade-black { position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; z-index: 12; transition: opacity .4s linear; }
-.fade-black.on { opacity: 1; }
 
 .boot-line {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 13;

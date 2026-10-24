@@ -14,6 +14,8 @@ type Surf = 'wood' | 'carpet' | 'concrete' | 'sand' | 'metal' | 'glass';
 
 const rng = new RNG(90210);
 
+export type UiSound = 'hover' | 'click' | 'open' | 'close' | 'error' | 'key';
+
 export class AudioEngine {
   ctx: AudioContext | null = null;
   private preMaster!: GainNode;
@@ -216,12 +218,17 @@ export class AudioEngine {
   }
   stopRoomAmbience() { this.roomAmb?.stop(); }
 
-  startWorldAmbience() {
+  /**
+   * `monument` must be the monument's position in *world* space (the world
+   * group is offset far from the bedroom, so passing a local position would
+   * put the hum several hundred metres away and make it inaudible).
+   */
+  startWorldAmbience(monument?: THREE.Vector3) {
     if (!this.ctx) return;
     this.stopRoomAmbience();
     if (!this.worldAmb) this.worldAmb = new AmbienceWorld(this);
     this.worldAmb.start();
-    this.startMonumentHum(new THREE.Vector3(0, 14, 0));
+    this.startMonumentHum(monument ?? new THREE.Vector3(0, 14, 0));
   }
   stopWorldAmbience() { this.worldAmb?.stop(); this.stopMonumentHum(); }
 
@@ -341,8 +348,9 @@ export class AudioEngine {
     this.tone({ t, f0: 220, f1: 48, dur: 0.34, gain: 0.1, type: 'sawtooth', reverb: 0.3 });
   }
 
-  ui(kind: 'hover' | 'click' | 'open' | 'close' | 'error' = 'click') {
+  ui(kind: UiSound = 'click') {
     if (!this.ctx) return;
+    if (kind === 'key') { this.keypress(); return; }
     const t = this.ctx.currentTime;
     switch (kind) {
       case 'hover': this.tone({ bus: this.uiBus, t, f0: 1600, dur: 0.03, gain: 0.05, type: 'sine' }); break;

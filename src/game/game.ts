@@ -49,6 +49,7 @@ export class Game {
   private consumeTimer = -1;
   private perfTimer = 0;
   private debug = false;
+  private reticleShown = true;
   private time = 0;
   private started = false;
   private consoleOpenAt = 0;
@@ -495,6 +496,14 @@ export class Game {
       if (this.phase === 'bsod' && this.sequences.mode === 'consume') this.phase = 'consume';
     }
 
+    // ---- physics
+    // Rapier has to be stepped every frame: the player capsule is kinematic,
+    // so `setNextKinematicTranslation` only takes effect inside world.step().
+    // Without this the collider stays at the spawn pose, the controller keeps
+    // reporting "grounded", and the camera sinks through the floor forever.
+    // Dynamic debris (collapse, falling fragments) needs it too.
+    this.physics.step(dt);
+
     // ---- room / world simulation
     this.room.update(dt, this.engine.fx.uGlitch.value);
 
@@ -514,8 +523,26 @@ export class Game {
       if (this.phase === 'world') this.checkSecret();
     }
 
+    // ---- spatial audio anchors
+    // The monument hum is a PannerNode: it has to follow the actual monument in
+    // world space, otherwise the sound sits at the bedroom origin (1.2 km away).
+    if (this.phase === 'world' || this.phase === 'collapse' || this.phase === 'epilogue') {
+      this.audio.setMonumentPosition(this.world.monumentPosition);
+    }
+    // the PC fan spins up as the screen corrupts, and drops away in the world
+    if (this.phase === 'room' || this.phase === 'bsod') {
+      this.audio.startRoomFanWhine(0.35 + this.room.monitorScreen.corruption * 1.1);
+    }
+
     // ---- glitch budget
     this.updateGlitch(dt);
+
+    // ---- crosshair visibility: only during free first-person play
+    const showReticle = this.isGameplay() && !this.sequences.active && !this.ui.consoleOpen && !this.ui.menuOpen;
+    if (showReticle !== this.reticleShown) {
+      this.reticleShown = showReticle;
+      this.ui.setReticle(showReticle);
+    }
 
     // ---- console / menu state
     if (this.consumeTimer > 0) {
@@ -691,7 +718,7 @@ export class Game {
         this.applyEnvironment('world');
         this.engine.scene.fog = WORLD_FOG;
         this.player.teleport(this.world.spawn.pos.clone().setY(this.world.spawn.pos.y + 0.1), 0, 0);
-        this.audio.startWorldAmbience();
+        this.audio.startWorldAmbience(this.world.monumentPosition);
         this.ui.setLetterbox(true);
         break;
       }
@@ -702,7 +729,7 @@ export class Game {
         this.applyEnvironment('world');
         this.engine.scene.fog = WORLD_FOG;
         this.player.teleport(new THREE.Vector3(0, 0.6, 16).add(WORLD_OFFSET), 0, 0.1);
-        this.audio.startWorldAmbience();
+        this.audio.startWorldAmbience(this.world.monumentPosition);
         break;
       }
       case 'collapse': {

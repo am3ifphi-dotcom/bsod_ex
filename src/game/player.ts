@@ -90,6 +90,9 @@ export class Player {
     this.addShake(strength * 0.5);
   }
 
+  /** Debug/telemetry: the kinematic capsule's actual world position. */
+  bodyTranslation() { return this.body.translation(); }
+
   get eyePosition() { return this.camera.position; }
   get flatForward() {
     return new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
