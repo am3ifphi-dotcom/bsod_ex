@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#070b16" />
+    <meta
+      name="description"
+      content="Sketchfab のフィードを浮島として探索する軽量3Dワールド。近くの島のサムネイルだけをストリーミングし、3Dモデルはフォーカスした1体だけを読み込みます。"
+    />
+    <title>SKETCHFAB ARCHIPELAGO · 3D探検世界</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23070b16'/%3E%3Cpath d='M16 5l9 5.5v11L16 27l-9-5.5v-11z' fill='none' stroke='%236ef0d0' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%236ef0d0'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="scene" aria-label="3D探検ワールド"></canvas>
+      <div class="grain" aria-hidden="true"></div>
+      <div class="vignette" aria-hidden="true"></div>
+
+      <!-- ───────── ヘッダー ───────── -->
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 40 44" fill="none">
+              <path d="M20 2l16 9.5v21L20 42 4 32.5v-21z" stroke="currentColor" stroke-width="1.6" />
+              <path d="M20 13l7 4.2v9.6L20 31l-7-4.2v-9.6z" stroke="currentColor" stroke-width="1.2" opacity=".7" />
+              <circle cx="20" cy="22" r="2" fill="currentColor" />
+            </svg>
+          </div>
+          <div class="brand-text">
+            <h1>SKETCHFAB<span>ARCHIPELAGO</span></h1>
+            <p>3D探検世界 · 近傍だけを読み込む軽量ビューア</p>
+          </div>
+        </div>
+
+        <div class="chips">
+          <button class="chip" id="feedChip" type="button" title="フィード接続の状態">
+            <span class="dot" id="feedDot"></span>
+            <span id="feedText">接続中…</span>
+          </button>
+          <div class="chip" title="発見した島">
+            <span class="label">発見</span>
+            <b id="discoverNum">0</b><span class="slash">/</span><span id="islandNum">12</span>
+          </div>
+          <button class="chip" id="fpsChip" type="button" title="パフォーマンス詳細">– fps</button>
+          <button class="chip ghost" id="qualityBtn" type="button" title="画質を切り替え">画質 標準</button>
+          <button class="chip ghost icon" id="soundBtn" type="button" title="環境音" aria-pressed="false">♪</button>
+          <button class="chip ghost icon" id="helpBtn" type="button" title="操作説明">?</button>
+        </div>
+      </header>
+
+      <!-- ───────── テーマ ───────── -->
+      <div class="themebar" id="themeBar" role="tablist" aria-label="フィードのテーマ"></div>
+
+      <!-- ───────── パフォーマンス / ストリーミング情報 ───────── -->
+      <section class="perfpanel" id="perfPanel" hidden aria-live="polite">
+        <h2>STREAMING</h2>
+        <dl>
+          <div><dt>サムネイル</dt><dd><b id="perfThumbs">0</b> / 12 読込</dd></div>
+          <div><dt>転送中</dt><dd><b id="perfInflight">0</b></dd></div>
+          <div><dt>3Dビューア</dt><dd><b id="perfViewer">0</b> 体</dd></div>
+          <div><dt>三角形</dt><dd><b id="perfTris">0</b></dd></div>
+          <div><dt>ドローコール</dt><dd><b id="perfCalls">0</b></dd></div>
+          <div><dt>解像度</dt><dd><b id="perfRatio">1.0</b>×</dd></div>
+        </dl>
+        <p class="note">近くの島だけを読み込み、離れると破棄します。</p>
+      </section>
+
+      <!-- ───────── 照準 ───────── -->
+      <div class="reticle" id="reticle" aria-hidden="true"><span></span></div>
+
+      <!-- ───────── 展示カード ───────── -->
+      <article class="card" id="card" aria-live="polite">
+        <div class="card-glow" aria-hidden="true"></div>
+        <div class="card-top">
+          <span class="card-tag" id="cardTag">LIVE FEED</span>
+          <button class="card-close" id="cardClose" type="button" aria-label="閉じる">×</button>
+        </div>
+        <h2 id="cardTitle">–</h2>
+        <p class="card-author" id="cardAuthor">–</p>
+        <div class="card-meta">
+          <span id="cardTheme">–</span>
+          <span class="sep">·</span>
+          <span id="cardViews">– views</span>
+          <span class="sep">·</span>
+          <span id="cardState">未調査</span>
+        </div>
+        <div class="card-actions">
+          <button class="btn primary" id="cardOpen" type="button">
+            <span class="btn-ico" aria-hidden="true">◈</span>3Dビューアで開く
+          </button>
+          <a class="btn ghost" id="cardLink" href="#" target="_blank" rel="noopener noreferrer">Sketchfab ↗</a>
+        </div>
+        <button class="card-next" id="cardNext" type="button">次の未発見の島へ →</button>
+      </article>
+
+      <!-- ───────── 操作ヒント ───────── -->
+      <div class="hint" id="hint">
+        <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 移動
+        <span class="hsep"></span>
+        <span class="mouse">ドラッグ</span> 視点
+        <span class="hsep"></span>
+        <kbd>Shift</kbd> 加速
+        <span class="hsep"></span>
+        <kbd>E</kbd> 島を開く
+        <span class="hsep"></span>
+        島をクリックで移動
+      </div>
+
+      <!-- ───────── ミニマップ ───────── -->
+      <div class="minimap-wrap" id="minimapWrap">
+        <canvas id="minimap" width="320" height="320"></canvas>
+        <div class="minimap-ring" aria-hidden="true"></div>
+        <div class="minimap-foot">
+          <span>RADAR</span>
+          <span id="camPos">0.0 , 0.0</span>
+        </div>
+      </div>
+
+      <!-- ───────── タッチスティック ───────── -->
+      <div class="joystick" id="joystick" aria-hidden="true">
+        <div class="joystick-base"><div class="joystick-knob" id="joystickKnob"></div></div>
+      </div>
+
+      <!-- ───────── ヘルプ ───────── -->
+      <div class="modal" id="help" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+        <div class="modal-inner">
+          <button class="modal-close" id="helpClose" type="button" aria-label="閉じる">×</button>
+          <h2 id="helpTitle">この世界の歩き方</h2>
+          <div class="help-grid">
+            <div>
+              <h3>移動</h3>
+              <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / 矢印キー、<kbd>Shift</kbd> で加速。<br />マウスドラッグで見回せます（<kbd>Space</kbd> 上昇 / <kbd>C</kbd> 下降）。</p>
+            </div>
+            <div>
+              <h3>島を調べる</h3>
+              <p>島をクリックすると自動航行します。近づくとカードが出るので <kbd>E</kbd> か「3Dビューアで開く」でモデルを読み込みます。</p>
+            </div>
+            <div>
+              <h3>軽さのしくみ</h3>
+              <p>サムネイルは近くの島だけ、3Dモデルは開いた1体だけ。<br />離れると破棄し、FPS に合わせて解像度も自動調整します。</p>
+            </div>
+            <div>
+              <h3>フィードについて</h3>
+              <p>Sketchfab の公開フィードから新着モデルを取得。<br />接続できない環境では、キュレーション済みのサンプル世界で遊べます。</p>
+            </div>
+          </div>
+          <p class="help-foot">Sketchfab のモデルは各作者のライセンスに従います。3Dビューアは Sketchfab の公式埋め込みを使用しています。</p>
+        </div>
+      </div>
+
+      <!-- ───────── 3Dビューア（1体だけマウント） ───────── -->
+      <div class="viewer" id="viewer" role="dialog" aria-modal="true" aria-labelledby="viewerTitle">
+        <div class="viewer-bar">
+          <div class="viewer-title">
+            <span id="viewerTitle">–</span>
+            <small id="viewerSub">SKETCHFAB 3D VIEWER</small>
+          </div>
+          <div class="viewer-actions">
+            <a class="btn ghost" id="viewerLink" href="#" target="_blank" rel="noopener noreferrer">Sketchfab ↗</a>
+            <button class="btn" id="viewerClose" type="button">閉じる <kbd>Esc</kbd></button>
+          </div>
+        </div>
+        <div class="viewer-frame" id="viewerFrame"></div>
+        <p class="viewer-foot">モデルはこのビューアを開いた時点で初めて読み込まれます。閉じると破棄されます。</p>
+      </div>
+
+      <!-- ───────── 起動画面 ───────── -->
+      <div class="boot" id="boot">
+        <div class="boot-inner">
+          <div class="boot-mark" aria-hidden="true">
+            <svg viewBox="0 0 40 44" fill="none">
+              <path d="M20 2l16 9.5v21L20 42 4 32.5v-21z" stroke="currentColor" stroke-width="1.2" />
+              <path d="M20 13l7 4.2v9.6L20 31l-7-4.2v-9.6z" stroke="currentColor" stroke-width="1" opacity=".6" />
+            </svg>
+          </div>
+          <h1>SKETCHFAB ARCHIPELAGO</h1>
+          <p id="bootMsg">世界を生成しています…</p>
+          <div class="boot-bar"><i id="bootBar"></i></div>
+          <span class="boot-note">近傍ストリーミング · 単一ビューア · 自動LOD</span>
+        </div>
+      </div>
+
+      <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
