@@ -95,9 +95,13 @@ export class TimeOfDay {
    * @param {THREE.WebGLRenderer} renderer
    * @param {object} refs room.js が返す refs
    * @param {object} dust DustField
+   * @param {{sunFlipX?:boolean}} [opts] sunFlipX: 太陽と反射光を x 反転させる。
+   *   プリセットの太陽は +X（手続き版の窓側）から差す。GLB 版は窓が -X にあるので、
+   *   反転させないと光が廊下側の壁に当たって室内に入ってこない。
    */
-  constructor(scene, renderer, refs, dust) {
+  constructor(scene, renderer, refs, dust, opts = {}) {
     this.scene = scene;
+    this.sunFlipX = !!opts.sunFlipX;
     this.renderer = renderer;
     this.refs = refs;
     this.dust = dust;
@@ -131,16 +135,17 @@ export class TimeOfDay {
     scene.add(this.sun.target);
     this.sun.target.position.set(-1.5, 0.6, 0.5);
 
-    // 窓からの反射光（弱い塗り光）
+    // 窓からの反射光（弱い塗り光）— 窓のある側から当てる
     this.bounce = new THREE.DirectionalLight(0xffe8c8, 0.35);
-    this.bounce.position.set(6, 2.2, 0);
+    this.bounce.position.set(this.sunFlipX ? -6 : 6, 2.2, 0);
     scene.add(this.bounce);
 
     /* ---- 光の柱：プリセットぶん用意して opacity でクロスフェード ---- */
     this.shafts = {};
     for (const name of MODE_ORDER) {
       const p = PRESETS[name];
-      const g = buildLightShafts(refs.windows, p.sunDir, p.shaftIntensity, p.shaftColor);
+      const sd = this.sunFlipX ? p.sunDir.clone().multiplyScalar(new THREE.Vector3(-1, 1, 1)) : p.sunDir;
+      const g = buildLightShafts(refs.windows, sd, p.shaftIntensity, p.shaftColor);
       g.visible = name === 'day';
       g.traverse((o) => {
         if (o.isMesh) o.material.opacity = name === 'day' ? 1 : 0;
@@ -203,6 +208,9 @@ export class TimeOfDay {
     s.sunColor = this.sun.color.getHex();
     s.sunIntensity = this.sun.intensity;
     s.sunDir = this.sun.position.clone().normalize().multiplyScalar(-1);
+    // sun.position は反転後の向きから作られるので、プリセット規約に戻してから保存する。
+    // 戻さないと次の遷移で「反転済み」と「未反転」を補間してしまい、さらに二重反転する。
+    if (this.sunFlipX) s.sunDir.x = -s.sunDir.x;
     s.ambientColor = this.ambient.color.getHex();
     s.ambientIntensity = this.ambient.intensity;
     s.shaftIntensity = this.to.shaftIntensity;
@@ -253,6 +261,7 @@ export class TimeOfDay {
     this.sun.color.copy(c(a.sunColor, b.sunColor));
     this.sun.intensity = lerp(a.sunIntensity, b.sunIntensity, k);
     const dir = a.sunDir.clone().lerp(b.sunDir, k).normalize();
+    if (this.sunFlipX) dir.x = -dir.x; // 窓のある側（-X）から差すようにする
     this.sun.position.copy(dir).multiplyScalar(-24);
     this.sun.shadow.camera.updateProjectionMatrix();
 

@@ -31,33 +31,68 @@ export function parseGLBHeader(buf) {
   return { json, binStart: 20 + jsonLen + 8 };
 }
 
+const READ = {
+  5120: (dv, p) => dv.getInt8(p),
+  5121: (dv, p) => dv.getUint8(p),
+  5122: (dv, p) => dv.getInt16(p, true),
+  5123: (dv, p) => dv.getUint16(p, true),
+  5125: (dv, p) => dv.getUint32(p, true),
+  5126: (dv, p) => dv.getFloat32(p, true),
+};
+
+/**
+ * アクセサ読み取り。Sketchfab の glTF 出力は POSITION/NORMAL/UV を
+ * 1 つの bufferView に byteStride 付きでインターリーブするので、
+ * 詰めて読める場合だけ TypedArray、そうでなければ DataView で 1 要素ずつ読む。
+ */
 function makeAccessor(json, buf, binStart) {
   const bin = buf.subarray ? buf.subarray(binStart) : buf.slice(binStart);
   const base = bin.byteOffset || 0;
+  const dv = new DataView(bin.buffer, base, bin.byteLength);
   return (i) => {
     const a = json.accessors[i];
     if (!a) return null;
     const bv = json.bufferViews[a.bufferView];
     const Ctor = COMP[a.componentType];
+    const n = NCOMP[a.type];
+    const ES = Ctor.BYTES_PER_ELEMENT;
     const off = (bv.byteOffset || 0) + (a.byteOffset || 0);
+    const stride = bv.byteStride || 0;
+    let arr = null;
+    if (!stride || stride === ES * n) {
+      try {
+        arr = new Ctor(bin.buffer, base + off, a.count * n);
+      } catch {
+        arr = null; // byteOffset のアラインメント不合致 → DataView 経由に落ちる
+      }
+    }
+    const reader = READ[a.componentType];
     return {
-      arr: new Ctor(bin.buffer, base + off, a.count * NCOMP[a.type]),
+      arr,
       count: a.count,
-      n: NCOMP[a.type],
+      n,
+      stride,
       min: a.min,
       max: a.max,
-      interleaved: !!bv.byteStride,
+      interleaved: !arr,
+      /** i 番目の要素の j 成分 */
+      at: arr ? (idx, j) => arr[idx * n + j] : (idx, j) => reader(dv, off + idx * (stride || ES * n) + j * ES),
     };
   };
 }
 
 /* ---------- 行列 ---------- */
+/**
+ * クォータニオン → 回転行列（**列優先**。mul() と頂点変換が column-major なので揃える）
+ * 行優先で返すと転置＝逆回転になり、Sketchfab 出力（-90X/+90X/120° の軸変換）で
+ * 上下と奥行きが入れ替わる。three.js の Matrix4.makeRotationFromQuaternion と同じ並び。
+ */
 function quatToMat(q) {
   const [x, y, z, w] = q;
   return [
-    1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w), 0,
-    2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w), 0,
-    2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y), 0,
+    1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w), 0,
+    2 * (x * y - z * w), 1 - 2 * (x * x + z * z), 2 * (y * z + x * w), 0,
+    2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y), 0,
     0, 0, 0, 1,
   ];
 }
@@ -96,28 +131,48 @@ export function analyzeGLB(buf, opts = {}) {
   const scene = json.scenes[json.scene ?? 0];
   for (const s of scene.nodes) walk(s, ID);
 
-  // メッシュごとのノード（1メッシュ1ノードを想定）
-  const meshNode = new Map();
-  json.nodes.forEach((n, i) => {
-    if (n.mesh != null && !meshNode.has(n.mesh)) meshNode.set(n.mesh, i);
+  // 「ノード×メッシュ」の組で走査する。
+  // 同じ mesh を複数の node が参照する（＝机を並べる）ケースで、
+  // メッシュ単位にすると 1 インスタンス分の行列しか当たらず形状が壊れる。
+  const pairs = [];
+  (json.nodes || []).forEach((n, i) => {
+    if (n.mesh != null) pairs.push({ node: i, mesh: n.mesh, m: world[i] || ID });
   });
-  const M = (mi) => {
-    const ni = meshNode.get(mi);
-    return ni != null ? world[ni] : ID;
-  };
+  if (!pairs.length) {
+    (json.meshes || []).forEach((_, mi) => pairs.push({ node: -1, mesh: mi, m: ID }));
+  }
 
   /* --- 1) スケールの推定 ---
      黒板（'Board' を含むマテリアル）の上下端、またはドア枠の高さから units/m を求める。 */
   const clusterRaw = new Map();
-  for (let mi = 0; mi < json.meshes.length; mi++) {
+  /* クラスタのキーは「メッシュ名・マテリアル名」。
+     メッシュ名は School blackboards / Book shell のように用途が分かりやすいが、
+     マテリアル名は light が二つあるように重複する。両方を繋いでおけば、
+     下の byName() がどちらの名前でも部品を拾える（ryoshi 側はマテリアル名、
+     Sketchfab 書き出し側はメッシュ名が頼りになる）。
+     Sketchfab が付ける "_Xxx_0" 形式の接尾辞は表示用に落とす。 */
+  const prettyMesh = (s) => String(s || '').replace(/_[^_]*_\d+$/, '').trim();
+  for (const { mesh: mi, m } of pairs) {
+    const meshName = prettyMesh(json.meshes[mi].name) || `mesh${mi}`;
     for (const p of json.meshes[mi].primitives) {
-      const name = (json.materials[p.material ?? 0] || {}).name || `(mat${p.material})`;
+      const matName = (json.materials[p.material ?? 0] || {}).name || `(mat${p.material})`;
+      const name = matName && matName !== meshName ? `${meshName}·${matName}` : meshName;
       const a = acc(p.attributes.POSITION);
-      if (!a || !a.min) continue;
+      if (!a) continue;
+      // min/max が無いアクセサは実データから求める
+      if (!a.min || !a.max) {
+        const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+        for (let q = 0; q < a.count; q++)
+          for (let c = 0; c < 3; c++) {
+            const val = a.at(q, c);
+            if (val < mn[c]) mn[c] = val;
+            if (val > mx[c]) mx[c] = val;
+          }
+        a.min = mn; a.max = mx;
+      }
       let e = clusterRaw.get(name);
       if (!e) { e = { tris: 0, lo: [1e9, 1e9, 1e9], hi: [-1e9, -1e9, -1e9] }; clusterRaw.set(name, e); }
       e.tris += (p.indices != null ? json.accessors[p.indices].count : a.count) / 3;
-      const m = M(mi);
       for (let cx = 0; cx < 2; cx++)
         for (let cy = 0; cy < 2; cy++)
           for (let cz = 0; cz < 2; cz++) {
@@ -136,25 +191,68 @@ export function analyzeGLB(buf, opts = {}) {
   }
   const byName = (re) => [...clusterRaw.entries()].filter(([n]) => re.test(n)).map(([, e]) => e);
 
+  // 全体の外接箱（モデル単位）
+  const bbox = { lo: [1e9, 1e9, 1e9], hi: [-1e9, -1e9, -1e9] };
+  for (const [, e] of clusterRaw)
+    for (let i = 0; i < 3; i++) {
+      bbox.lo[i] = Math.min(bbox.lo[i], e.lo[i]);
+      bbox.hi[i] = Math.max(bbox.hi[i], e.hi[i]);
+    }
+  const ext = [bbox.hi[0] - bbox.lo[0], bbox.hi[1] - bbox.lo[1], bbox.hi[2] - bbox.lo[2]];
+  const hgt = (e) => e.hi[1] - e.lo[1];
+  const tallest = (list) => list.slice().sort((p, q) => hgt(q) - hgt(p))[0];
+  const highest = (list) => list.slice().sort((p, q) => q.hi[1] - p.hi[1])[0];
+  const lowest = (list) => list.slice().sort((p, q) => p.lo[1] - q.lo[1])[0];
+
+  const boards = byName(/board|blackboard|kokuban/i);
+  const doors = byName(/door|tobira/i);
+  const desks = byName(/desk|table|sekii/i);
+  const roofs = byName(/roof|ceiling|tenjo/i);
+
+  /**
+   * units/m の候補。glTF の仕様上「1 単位 = 1 m」が既定なので、
+   * まずそれを試して、部屋として非常識な寸法になるときだけ部品の実寸から逆算する。
+   * 机は椅子と一体のことが多く高さが 1.0m 超になるので、弱い根拠として最後に置く。
+   */
+  const cand = [];
+  const addCand = (kk, why) => {
+    if (kk > 1e-4 && isFinite(kk) && !cand.some((c) => Math.abs(c.k - kk) < 1e-6)) cand.push({ k: kk, why });
+  };
+  addCand(1, 'glTF=metres');
+  if (boards.length) addCand(hgt(tallest(boards)) / 1.15, `board=${hgt(tallest(boards)).toFixed(2)}u/1.15m`);
+  if (doors.length) addCand(hgt(tallest(doors)) / 2.05, `door=${hgt(tallest(doors)).toFixed(2)}u/2.05m`);
+  if (roofs.length) addCand(lowest(roofs).lo[1] / 2.7, `ceiling=${lowest(roofs).lo[1].toFixed(2)}u/2.7m`);
+  if (desks.length) addCand(highest(desks).hi[1] / 0.72, `deskTop=${highest(desks).hi[1].toFixed(2)}u/0.72m`);
+  addCand(3.55, 'default');
+
+  /** その units/m で「教室として常識的な寸法」になるか */
+  const plausible = (kk) => {
+    const w = ext[0] / kk, h = ext[1] / kk, d = ext[2] / kk;
+    if (!(w > 2.5 && w < 25)) return false;
+    if (!(d > 2.5 && d < 25)) return false;
+    if (!(h > 1.8 && h < 6.0)) return false;
+    if (roofs.length) {
+      const ch = lowest(roofs).lo[1] / kk; // 天井裏ではなく天井の高さ
+      if (!(ch > 1.9 && ch < 4.6)) return false;
+    }
+    if (desks.length) {
+      const dh = highest(desks).hi[1] / kk; // 椅子込みで 1.0m 超もありうる
+      if (!(dh > 0.4 && dh < 1.6)) return false;
+    }
+    return true;
+  };
+
   let k = opts.unitsPerMeter || 0;
   const reason = [];
   if (!k) {
-    // 黒板の書き面（Board upper / Board）は実寸で約 1.1〜1.2m
-    const boards = byName(/board/i).filter((e) => e.hi[1] - e.lo[1] > 1 && e.hi[1] - e.lo[1] < 12);
-    if (boards.length) {
-      const b = boards.sort((a, b2) => (b2.hi[1] - b2.lo[1]) - (a.hi[1] - a.lo[1]))[0];
-      k = (b.hi[1] - b.lo[1]) / 1.15;
-      reason.push(`board=${(b.hi[1] - b.lo[1]).toFixed(1)}u/1.15m`);
+    const good = cand.find((c) => plausible(c.k));
+    if (good) {
+      k = good.k;
+      reason.push(good.why);
+    } else {
+      k = cand[0].k;
+      reason.push(`${cand[0].why}(寸法が非常識なので暫定)`);
     }
-    if (!k) {
-      const doors = byName(/door/i);
-      if (doors.length) {
-        const d = doors[0];
-        k = (d.hi[1] - d.lo[1]) / 2.3;
-        reason.push(`door=${(d.hi[1] - d.lo[1]).toFixed(1)}u/2.3m`);
-      }
-    }
-    if (!k) k = 3.55;
   }
 
   /* --- 2) 床の矩形（モデル空間） --- */
@@ -182,6 +280,56 @@ export function analyzeGLB(buf, opts = {}) {
     floorLo = [x0, z0]; floorHi = [x1, z1];
   }
 
+  /* --- 2b) 正面（黒板側）を -Z にする回転を推定 --- */
+  let suggestedRotY = -Math.PI / 2;
+  let rotReason = 'default(-90deg)';
+  {
+    // 窓が長く連続している軸＝教室の奥行き（前後）軸。
+    // 日本の教室は窓側の長手に机の列が並ぶので、これで 90° の曖昧さを潰す。
+    const wins = byName(/window|glass|mado/i);
+    let depthAxis = null;
+    if (wins.length) {
+      const acc0 = { lo0: 1e9, hi0: -1e9, lo2: 1e9, hi2: -1e9 };
+      for (const e of wins) {
+        acc0.lo0 = Math.min(acc0.lo0, e.lo[0]); acc0.hi0 = Math.max(acc0.hi0, e.hi[0]);
+        acc0.lo2 = Math.min(acc0.lo2, e.lo[2]); acc0.hi2 = Math.max(acc0.hi2, e.hi[2]);
+      }
+      const sx = acc0.hi0 - acc0.lo0, sz = acc0.hi2 - acc0.lo2;
+      if (sx > sz * 1.5) depthAxis = 'x';
+      else if (sz > sx * 1.5) depthAxis = 'z';
+    }
+
+    // 黒板があればそれ、無ければ教卓（前にある）を目印にする
+    const usingBoard = boards.length > 0;
+    const anchorList = usingBoard ? boards : byName(/teacher|lectern|podium|kyotaku/i);
+    if (anchorList.length) {
+      const a0 = highest(anchorList);
+      const ax = (a0.lo[0] + a0.hi[0]) / 2;
+      const az = (a0.lo[2] + a0.hi[2]) / 2;
+      const fcx = (floorLo[0] + floorHi[0]) / 2;
+      const fcz = (floorLo[1] + floorHi[1]) / 2;
+      const dx = (ax - fcx) / k; // メートル
+      const dz = (az - fcz) / k;
+      const label = usingBoard ? 'board' : 'teacher_desk';
+      if (Math.hypot(dx, dz) > 0.8) {
+        // world_z = -dx*sin(rot) + dz*cos(rot) が最小になる rot を選ぶ
+        let rot;
+        if (depthAxis === 'x') rot = dx > 0 ? Math.PI / 2 : -Math.PI / 2;
+        else if (depthAxis === 'z') rot = dz > 0 ? Math.PI : 0;
+        else {
+          let best = null;
+          for (const c of [0, -Math.PI / 2, Math.PI / 2, Math.PI]) {
+            const wz = -dx * Math.sin(c) + dz * Math.cos(c);
+            if (!best || wz < best.wz) best = { rot: c, wz };
+          }
+          rot = best.rot;
+        }
+        suggestedRotY = rot;
+        rotReason = `${label} dx=${dx.toFixed(2)} dz=${dz.toFixed(2)} depthAxis=${depthAxis || '?'} → ${(rot * 180 / Math.PI).toFixed(0)}deg`;
+      }
+    }
+  }
+
   /* --- 3) 占有グリッド（モデル空間・三角形ラスタライズ） --- */
   const cell = (opts.cell ?? 0.1) * k; // モデル単位でのセルサイズ
   const W = Math.max(2, Math.ceil((floorHi[0] - floorLo[0]) / cell) + 1);
@@ -192,10 +340,14 @@ export function analyzeGLB(buf, opts = {}) {
 
   const ix = (x) => Math.floor((x - floorLo[0]) / cell);
   const iz = (z) => Math.floor((z - floorLo[1]) / cell);
+  /* 点(px,pz) が三角形 abc の XZ 射影内にあるかの符号判定。
+     d1 は b 基準、d2 は c 基準、d3 は a 基準 — 基準点を取り違えると
+     小さい三角形では誤差が目立たないが、床のように数枚の巨大な三角形で
+     出来ている面はほとんど拾えなくなる（volvor 版で発覚）。 */
   const inTri = (px, pz, ax, az, bx, bz, cx, cz) => {
-    const d1 = (px - bx) * (az - bz) - (ax - bx) * (pz - bz);
-    const d2 = (px - cx) * (bz - az) - (bx - cx) * (pz - az);
-    const d3 = (px - ax) * (cz - bz) - (cx - ax) * (pz - bz);
+    const d1 = (px - bx) * (az - bz) - (pz - bz) * (ax - bx);
+    const d2 = (px - cx) * (bz - cz) - (pz - cz) * (bx - cx);
+    const d3 = (px - ax) * (cz - az) - (pz - az) * (cx - ax);
     const neg = d1 < 0 || d2 < 0 || d3 < 0;
     const pos = d1 > 0 || d2 > 0 || d3 > 0;
     return !(neg && pos);
@@ -203,21 +355,20 @@ export function analyzeGLB(buf, opts = {}) {
 
   const v = new Float64Array(9);
   let triTotal = 0;
-  for (let mi = 0; mi < json.meshes.length; mi++) {
+  for (const { mesh: mi, m } of pairs) {
     for (const p of json.meshes[mi].primitives) {
       const pos = acc(p.attributes.POSITION);
-      if (!pos || pos.interleaved) continue;
+      if (!pos) continue;
       const idx = p.indices != null ? acc(p.indices) : null;
-      const m = M(mi);
       const nTri = idx ? idx.count / 3 : pos.count / 3;
       triTotal += nTri;
       for (let t = 0; t < nTri; t++) {
-        const i0 = idx ? idx.arr[t * 3] : t * 3;
-        const i1 = idx ? idx.arr[t * 3 + 1] : t * 3 + 1;
-        const i2 = idx ? idx.arr[t * 3 + 2] : t * 3 + 2;
+        const i0 = idx ? idx.at(t * 3, 0) : t * 3;
+        const i1 = idx ? idx.at(t * 3 + 1, 0) : t * 3 + 1;
+        const i2 = idx ? idx.at(t * 3 + 2, 0) : t * 3 + 2;
         for (let q = 0; q < 3; q++) {
           const i = [i0, i1, i2][q];
-          const x = pos.arr[i * pos.n], y = pos.arr[i * pos.n + 1], z = pos.arr[i * pos.n + 2];
+          const x = pos.at(i, 0), y = pos.at(i, 1), z = pos.at(i, 2);
           v[q * 3] = m[0] * x + m[4] * y + m[8] * z + m[12];
           v[q * 3 + 1] = m[1] * x + m[5] * y + m[9] * z + m[13];
           v[q * 3 + 2] = m[2] * x + m[6] * y + m[10] * z + m[14];
@@ -292,6 +443,10 @@ export function analyzeGLB(buf, opts = {}) {
     floorY: floorSurface,
     unitsPerMeter: k,
     scaleReason: reason.join(','),
+    suggestedRotY,
+    rotReason,
+    bbox,
+    extentUnits: ext,
     triangles: triTotal,
     grid: { W, H, cell, floorLo, floorHi, obstacle, floorM },
     floorSurface,
@@ -358,7 +513,7 @@ export function gridRects(a, { step = 1, minCells = 1 } = {}) {
 
 export function makeTransform(a, opts = {}) {
   const k = 1 / a.unitsPerMeter;
-  const rot = opts.rotY ?? -Math.PI / 2;
+  const rot = opts.rotY ?? a.suggestedRotY ?? -Math.PI / 2;
   const c = Math.cos(rot), s = Math.sin(rot);
   // 床矩形の中心（モデル空間）
   const g = a.grid;

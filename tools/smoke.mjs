@@ -687,13 +687,18 @@ if (!existsSync(GLB_URL)) {
 
   console.log(`\n[11] GLB解析 — ${(glbBuf.length / 1e6).toFixed(1)} MB / ${A.triangles.toLocaleString()} 三角形`);
   ok('縮尺・部屋寸法・床面', () => {
-    if (!(A.unitsPerMeter > 2 && A.unitsPerMeter < 6)) throw new Error(`unitsPerMeter=${A.unitsPerMeter}`);
+    // 縮尺は「1単位=1m」の glTF も cm/FBX 由来も有り得るので、実寸が教室らしくなるかで見る
+    if (!(A.unitsPerMeter > 0.05 && A.unitsPerMeter < 20)) throw new Error(`unitsPerMeter=${A.unitsPerMeter}`);
     const w = rr.x1 - rr.x0, d = rr.z1 - rr.z0;
     if (!(w > 5 && w < 14)) throw new Error(`横幅 ${w.toFixed(2)} m`);
     if (!(d > 5 && d < 16)) throw new Error(`奥行 ${d.toFixed(2)} m`);
     if (Math.abs(A.floorY) > 0.6) throw new Error(`床面 y=${A.floorY}`);
     if (A.rawBoxes.length < 10) throw new Error(`塊 ${A.rawBoxes.length}`);
-    return `${A.unitsPerMeter.toFixed(3)} u/m (${A.scaleReason}) / ${w.toFixed(2)}×${d.toFixed(2)} m / 床y=${A.floorY.toFixed(2)} / 塊${A.rawBoxes.length}`;
+    const rotDeg = (T.rot * 180) / Math.PI;
+    // 解析が出す回転は 0 / ±90 / 180 のいずれか（部屋の軸に合わせるため）
+    const rem = ((rotDeg % 90) + 90) % 90;
+    if (!(rem < 1 || rem > 89)) throw new Error(`回転 ${rotDeg.toFixed(2)}deg が90°の倍数でない`);
+    return `${A.unitsPerMeter.toFixed(4)} u/m (${A.scaleReason}) / 回転${rotDeg.toFixed(0)}deg (${A.rotReason}) / ${w.toFixed(2)}×${d.toFixed(2)} m / 床y=${A.floorY.toFixed(2)} / 塊${A.rawBoxes.length}`;
   });
 
   console.log('\n[12] GLBワールド構築（Node上で buildGLBWorld を実行）');
@@ -711,10 +716,19 @@ if (!existsSync(GLB_URL)) {
     if (GW.colliders.count < 20) throw new Error(`colliders=${GW.colliders.count}`);
     if (!GW.blockers.length) throw new Error('blockers 0');
     if (!GW.tod || !GW.tod.sun) throw new Error('TimeOfDay が無い');
+    // モデル本体のメッシュ数（三角形数）は差し替えると変わるので、
+    // 「本体が入っているか」＋「照合プロキシが足りているか」で見る。
+    const holder = gScene.getObjectByName('glb-classroom');
+    if (!holder) throw new Error('glb-classroom が入っていない');
+    let modelMeshes = 0;
+    holder.traverse((o) => { if (o.isMesh) modelMeshes++; });
+    if (modelMeshes < 4) throw new Error(`モデルのメッシュ ${modelMeshes}`);
     let meshN = 0;
     gScene.traverse((o) => { if (o.isMesh) meshN++; });
-    if (meshN < 300) throw new Error(`シーン内メッシュ ${meshN}`);
-    return `${built}ms / メッシュ${meshN} / 当たり${GW.colliders.count} / 物${GW.hotspots.length} / かけら${GW.fragments.length} / ブロッカー${GW.blockers.length} / ガラス${GW.stats.glassCount}`;
+    if (meshN < modelMeshes + 20) throw new Error(`シーン内メッシュ ${meshN}`);
+    if (GW.colliders.count < 20) throw new Error(`colliders=${GW.colliders.count}`);
+    if (!GW.stats.lampMats) throw new Error('蛍光灯の発光マテリアルが拾えていない');
+    return `${built}ms / モデルのメッシュ${modelMeshes}（シーン計${meshN}） / 当たり${GW.colliders.count} / 物${GW.hotspots.length} / かけら${GW.fragments.length} / ブロッカー${GW.blockers.length} / ガラス${GW.stats.glassCount} / 発光${GW.stats.lampMats}`;
   });
 
   ok('スポーンと外周', () => {

@@ -195,23 +195,78 @@ CC-BY なら *公開 GitHub リポジトリへのリレーも合法* なので�
 
 候補の追加調査は `https://api.sketchfab.com/v3/search?type=models&downloadable=true&q=japanese classroom`
 （fetch_page 経由で叩ける。`archives.glb.size` で GLB の実サイズ、`license.label` で許諾が分かる）。
+
+### 3.0b 採用したのは volvor 版 — **1ホップすら不要だった**（実測の再現手順）
+
+ユーザーが上表から **volvor「The Japanese School Classroom」**
+（`d9fc039ba0b6433db91ec129abe86b52`, CC-BY-4.0, `isDownloadable:true`, `price:null`）を選択。
+ダウンロード API は使えないが、**同じモデルを再配布している GitHub リポジトリが既に複数あった**。
+CC-BY はクレジット表示を守れば再配布可なので、これを取得するのは正規ルート。
+
+1. **モデル UID で GitHub コード検索**（コード検索は認証必須。`gh api search` は偽の0件を返すので curl）
+   ```bash
+   curl -sS -H "Authorization: Bearer $(gh auth token)" \
+     "https://api.github.com/search/code?q=d9fc039ba0b6433db91ec129abe86b52"
+   ```
+   → `0Setsuna0/XVK_Ray:asset/model/classroom/`, `realDqt/Flower:assets/models/classroom/`,
+   `devesh-2002/EduAIx:client/public/classroom/` がヒット（`scene.gltf` / `scene.bin` /
+   `license.txt` / `textures/*` の一式）。**UID は Sketchfab 書き出しの `scene.gltf` に必ず残るので、
+   これが「同一モデルのミラー探し」の最強キーになる。**
+2. **blobs API で落とす**（`raw.githubusercontent.com` は遮断されているので使わない）
+   `GET /repos/{o}/{r}/contents/{path}` → `sha` → `GET /repos/{o}/{r}/git/blobs/{sha}`
+   with `Accept: application/vnd.github.raw+json`（100 MB まで）。`license.txt` も必ず取ること。
+3. **`@gltf-transform/cli`（devDependency）で .glb 化＋軽量化**
+   ```bash
+   ./node_modules/.bin/gltf-transform copy   scene.gltf classroom_raw.glb          # 44 MB
+   ./node_modules/.bin/gltf-transform resize classroom_raw.glb c1024.glb --width 1024 --height 1024
+   ./node_modules/.bin/gltf-transform webp   c1024.glb classroom.glb --quality 85 \
+     --slots "{baseColorTexture,emissiveTexture}"                                   # → 7.1 MB
+   ```
+   `--slots` で **baseColor/emissive だけ** WebP 化し、normal と metallicRoughness は PNG のまま残す
+   （非可逆圧縮は法線・MR に出る）。`npx gltf-transform` はリポジトリ外からだと `ENOVERSIONS`、
+   `copy --format glb` は未知のオプション（**出力形式は拡張子で決まる**）。
+   WebP を使うと `extensionsRequired: ["EXT_texture_webp"]` になる（three.js は対応済み）。
+4. 以降は §3 の手順（解析 → 再配置 → smoke/audit/build）。
+
 **差し替えたら §3 の手順（縮尺逆算 → 占有グリッド → 物/かけらの再配置 → smoke `[13][14]`）をやり直すこと。**
 CC-BY なのでクレジット（作者名・モデル名・ライセンス・元URL）を README とロード画面の両方に入れること。
+`license.txt` に**そのまま貼れるクレジット文**が入っているので、それを逐語で使うのが安全。
 
-- モデル: `public/models/classroom.glb` — © grep-many / Ryoshi, **MIT**
-  （`github.com/grep-many/ryoshi` の `web/public/models/classroom_alternative.glb`）
-- **縮尺はモデル非依存で逆算する**: `src/glb-collide.js` が「黒板の書き面＝実寸 1.15 m」から
-  `unitsPerMeter` を求める（現モデルは 4.1 u → **3.542 u/m**）。無ければ扉高さ 2.3 m でフォールバック。
-- 配置: 床クラスタの上面を `y=0`、床矩形の中心を原点、`rotation.y = -π/2` で黒板を **-Z** に。
+- モデル: `public/models/classroom.glb` — **“The Japanese School Classroom” by volvor, CC-BY-4.0**
+  （7.1 MB / 22,102 tris / 10 メッシュ / 8 マテリアル。取得手順は §3.0b と `public/models/README.md`）
+  - 実測: `unitsPerMeter = 1.0000`（**glTF=metres**）、`suggestedRotY = +90°`、
+    部屋 **7.10 × 7.86 m**、床 y=0、天井 y=2.90、窓の壁 **-X**、黒板 **-Z**、廊下側 **+X**
+  - 机 3列×3段（x=-2.25/-0.45/1.35、z=-1.12/0.78/2.68）、蛍光灯 2列×3列（x=-1.75/2.0、z=-2.5/0/2.5）
+  - **このモデルに扉は無い**（壁で閉じた箱）→ スポーンはうしろの席側 `(2.4, 3.4, yaw 0.15)`
+  - マテリアル名が `light` ×2 で黒板（`School blackboards`）と本棚（`Book shell`）が区別できないので、
+    クラスタのキーは **「メッシュ名・マテリアル名」** にしている（`byName()` はどちらでも拾える）
+- **縮尺はモデル非依存で逆算する**: まず `k=1`（glTF=metres）を試して、部屋として非常識な寸法のときだけ
+  部品の実寸から逆算（黒板の書き面 1.15 m / 扉 2.05 m / 天井 / 机 0.72 m）。
+  候補は `plausible()`（幅奥 2.5〜25 m、高さ 1.8〜6.0 m、天井裏 1.9〜4.6 m、机 0.4〜1.6 m）で門を通す。
+  *机の天板は椅子と同マテリアルのことがある（volvor 版は 1.21 m になった）ので根拠としては最下位に置く。*
+- 配置: 床クラスタの上面を `y=0`、床矩形の中心を原点、`rotation.y = suggestedRotY` で黒板を **-Z** に。
+  回転は「窓クラスタの長い軸＝奥行き軸」から決め、無ければ黒板/教卓アンカーの argmin(world_z) で決める。
 - **当たり判定は占有グリッドから作る**: 三角形を 0.1 m 格子に焼き、「床から 0.32〜1.28 m の帯」を占有とし、
-  `gridRects()`（横ラン→縦拡張）で矩形分解（現モデルで 392 個）。
+  `gridRects()`（横ラン→縦拡張）で矩形分解（現モデルで 31 個）。
   *連結成分の外接箱を使ってはいけない* — 壁のリングが部屋全体を覆い、プレイヤーが閉じ込められる。
-- **レイキャストはプロキシに撃つ**: 487k 三角形に毎フレーム撃てないので、調べられる物と遮蔽は
+- **`inTri()` の重心座標判定は基準点を間違えない**（d1=b基準, d2=c基準, d3=a基準）。
+  取り違えると小さい三角形では誤差が目立たず、**床のような数枚の巨大三角形をほぼ拾えなくなる**。
+- **レイキャストはプロキシに撃つ**: 三角形に毎フレーム撃てないので、調べられる物と遮蔽は
   `visible=false` の `BoxGeometry` で代用（three のレイキャスタは `visible` を見ないので正しく当たる）。
 - **体の半径**: GLB 教室は `0.16 m`（手続き版 `0.235 m`）。机間が実測 0.3〜0.6 m しかないため。
-- **IBL 必須**: 44 マテリアルのうち 6 つが `metalness>0.15`（未指定＝1.0 の既定を含む）。
-  `scene.environment`（PMREM 済み `RoomEnvironment`）が無いと金属が黒つぶれする。
-- ガラスは `transmission` を落として `castShadow=false` にする（本物の太陽光が窓から床に落ちる）。
+- **IBL**: `metallicFactor` を書かない glTF は既定 1.0 で metallicRoughness テクスチャと掛け合わされる。
+  `scene.environment`（PMREM 済み `RoomEnvironment`）を入れておかないと金属が黒つぶれする。
+  PMREM/RoomEnvironment は `renderer.isWebGLRenderer` でガードすること（smoke は偽 renderer を渡す）。
+- **ガラス（`alphaMode: BLEND`）は影の落とし方に注意**: 窓は「枠＋腰壁＋ガラス」が 1 メッシュ 1 マテリアル。
+  実測でガラス alpha≈0.25 / 枠 alpha≈1.0 なので、**影パスにだけ** `alphaTest:0.5` の
+  `customDepthMaterial`（`MeshDepthMaterial` + `RGBADepthPacking` + 同じ map）を差し込むと、
+  枠と桟だけが影を落として光はガラスを通る。`castShadow=false` にすると腰壁まで光が抜ける。
+  本体の描画は `alphaTest=0` のまま＝ガラスの透明感は残る。
+- **発光マテリアルの判定は emissive の有無で**: 名前の正規表現（`/light|lamp/i`）だと
+  volvor 版の黒板と本棚（マテリアル名が `light`）まで夜に光ってしまう。
+- **太陽は窓側から**: `PRESETS` の `sunDir` は手続き版（窓が +X）基準なので、GLB 版は
+  `new TimeOfDay(scene, renderer, refs, dust, { sunFlipX: true })` で x 反転する
+  （`_snapshot()` 側でも戻さないと二重反転＋補間が壊れる）。反転しないと室内に直射が入らない。
 - 物とかけらの座標は `src/glb-content.js`。**モデルを差し替えたら `tools/inspect-glb.mjs` の
   見取り図を見て置き直す**こと（`tools/smoke.mjs` の `[13][14]` が到達性と検知を保証する）。
 

@@ -33,15 +33,27 @@ npm run preview  # http://localhost:4173
 
 歩きまわれる教室は **本物の 3D モデル** です。
 
-- ファイル: `public/models/classroom.glb`（37 MB / 487,174 三角形）
-- 出典: [grep-many/ryoshi](https://github.com/grep-many/ryoshi) の `web/public/models/classroom_alternative.glb`
-- ライセンス: **MIT**（© grep-many）— ロード画面とこの README に明記
+- ファイル: `public/models/classroom.glb`（7.1 MB / 22,102 三角形）
+- 出典: [The Japanese School Classroom — volvor](https://sketchfab.com/3d-models/the-japanese-school-classroom-d9fc039ba0b6433db91ec129abe86b52)
+- ライセンス: **CC-BY-4.0**（作者表示が必須）— ロード画面・右下のパネル・この README に明記
 
-このサンドボックスからは Sketchfab / S3 / CloudFront に出られない（TLS の SNI で遮断）ため、
-モチーフの [Sketchfab「Old Classroom」](https://sketchfab.com/3d-models/old-classroom-be2db5bb488a4392abda0d36c7b46e71)
-の `.glb` 自体は取得できませんでした。代わりに **許可されている github.com 経由**で
-同等の教室モデルを自力で探し（`api.github.com` の検索とツリー走査）、blobs API から落として統合しています。
-Sketchfab の元モデルは右下のボタンから埋め込みビューアで見られます（あなたのブラウザから直接読み込み）。
+> This work is based on "The Japanese School Classroom"
+> (https://sketchfab.com/3d-models/the-japanese-school-classroom-d9fc039ba0b6433db91ec129abe86b52)
+> by volvor (https://sketchfab.com/volvor) licensed under CC-BY-4.0
+> (http://creativecommons.org/licenses/by/4.0/)
+
+このサンドボックスからは Sketchfab のダウンロード API に出られない（TLS の SNI で遮断、
+かつ `fetch_page` は `Authorization` を送れない）ため、**同じモデルを再配布していた GitHub リポジトリ**を
+`api.github.com` のコード検索（モデル UID で検索）で見つけ、blobs API から
+`scene.gltf` / `scene.bin` / `license.txt` / `textures/*` を取得しました。
+それを `@gltf-transform/cli` で `.glb` にまとめ、テクスチャを 2K→1024 に縮小、
+baseColor と emissive だけを WebP(q85) にして 44 MB → 7.1 MB にしています
+（normal と metallicRoughness は非可逆圧縮を避けて PNG のまま）。
+
+最初に依頼された [「Old Classroom」](https://sketchfab.com/3d-models/old-classroom-be2db5bb488a4392abda0d36c7b46e71)
+は Sketchfab Store の有料モデル（`isDownloadable: false` / 価格 499）で配布物には組み込めないため、
+代わりにこの CC-BY の日本の教室を採用しました。右下のボタンから、
+いま歩いている教室の Sketchfab ビューア（あなたのブラウザから直接読み込み）を開けます。
 
 モデルが無い環境では自動的に three.js の手続き生成教室にフォールバックします
 （`public/models/classroom.glb` が 404 ならそちら）。
@@ -131,8 +143,8 @@ src/
   audio.js            Web Audio だけの環境音・足音・ピアノ・チャイム
   ui.js               HUD・カード・ノート・トースト
   minimap.js          見取り図（実コライダーをそのまま描画）
-  sketchfab.js        右下ボタン → 元モデルの埋め込みビューア
-public/models/        教室モデル classroom.glb（MIT）と取得手順の README
+  sketchfab.js        右下ボタン → 教室モデルの Sketchfab ビューア（CC-BY 表記つき）
+public/models/        教室モデル classroom.glb（CC-BY-4.0 / volvor）と取得手順の README
 tools/
   fetch-model.mjs     GitHub から .glb を取得・検証・配置（npm run model:fetch）
   fixtures/tiny.glb   fetch-model.mjs の検証用（最小の glTF バイナリ）
@@ -187,8 +199,14 @@ node tools/audit.mjs   # 全メッシュの AABB を壁面と突き合わせ
 
 ## クレジット
 
-- 教室モデル: `classroom_alternative.glb` — © [grep-many / Ryoshi](https://github.com/grep-many/ryoshi), **MIT License**
-  （`public/models/classroom.glb` に収録。ロード画面にも表記）
-- モチーフ: [Old Classroom — Sketchfab](https://sketchfab.com/3d-models/old-classroom-be2db5bb488a4392abda0d36c7b46e71)
+- 教室モデル: **“The Japanese School Classroom” by [volvor](https://sketchfab.com/volvor) — CC-BY-4.0**
+  （`public/models/classroom.glb` に収録。ロード画面と右下のパネルにも表記）
+  - [The Japanese School Classroom](https://sketchfab.com/3d-models/the-japanese-school-classroom-d9fc039ba0b6433db91ec129abe86b52)
+  - [CC-BY-4.0](http://creativecommons.org/licenses/by/4.0/)
+  - テクスチャの縮小・WebP 化のみ実施（形状・マテリアルは改変なし）
+- モチーフ（未採用）: [Old Classroom — Sketchfab](https://sketchfab.com/3d-models/old-classroom-be2db5bb488a4392abda0d36c7b46e71)
+  は Sketchfab Store の有料・ダウンロード不可のため未組み込み
+- 以前の版で使っていた教室モデル: `classroom_alternative.glb` — © [grep-many / Ryoshi](https://github.com/grep-many/ryoshi), MIT License
+  （git 履歴に残存。現在は差し替え済み）
 - ライブラリ: [three.js](https://threejs.org/) / [Vite](https://vite.dev/)
 - 手続き生成教室のテクスチャ・効果音はこのプロジェクト内で生成しています（外部素材なし）

@@ -1,10 +1,12 @@
 /**
  * GLB 教室ワールド（public/models/classroom.glb）
  * -------------------------------------------------------------
- * モデル: Ryoshi "alternative classroom" — https://github.com/grep-many/ryoshi (MIT)
+ * モデル: "The Japanese School Classroom" by volvor — **CC-BY-4.0**
+ *   https://sketchfab.com/3d-models/the-japanese-school-classroom-d9fc039ba0b6433db91ec129abe86b52
+ *   （表示クレジットは index.html と README.md にも明記。CC-BY は作者表示が必須）
  *
  * 描画は GLTFLoader、論理（当たり判定/照合/配置）は src/glb-collide.js の
- * 占有解析から作る。48万三角形に毎フレームレイキャストを撃たないよう、
+ * 占有解析から作る。三角形に毎フレームレイキャストを撃たないよう、
  * ホットスポットとブロッカーは「見えないボックス」を照合ターゲットにする。
  */
 import * as THREE from 'three';
@@ -76,43 +78,68 @@ export async function buildGLBWorld({ scene, renderer, buffer, M, onProgress = (
   scene.add(holder);
   holder.add(model);
 
-  /* ---- マテリアル調整：ガラスは軽く、影は落とさない ---- */
+  /* ---- マテリアル調整：ガラスは光を通し、蛍光灯だけが発光する ---- */
   let glassCount = 0;
+  const lampMats = [];
+  let shadowlessGlass = 0;
   model.traverse((o) => {
     if (!o.isMesh) return;
     const mats = Array.isArray(o.material) ? o.material : [o.material];
     let glass = false;
+    let glassNoMap = false;
     for (const m of mats) {
       if (!m) continue;
-      if ((m.isMeshPhysicalMaterial && m.transmission > 0.05) || (m.transparent && m.opacity < 0.6)) {
+      const isGlass =
+        (m.isMeshPhysicalMaterial && m.transmission > 0.05) ||
+        m.transparent === true ||
+        /window|glass|mado/i.test(m.name || '');
+      if (isGlass) {
         glass = true;
         m.transmission = 0;
         m.transparent = true;
-        m.opacity = Math.min(m.opacity || 0.3, 0.3);
-        m.roughness = Math.max(m.roughness ?? 0.1, 0.08);
         m.depthWrite = true;
+        if (m.roughness != null) m.roughness = Math.max(m.roughness, 0.08);
+        /* 窓は「枠＋腰壁＋ガラス」が 1 メッシュ・1 マテリアルにまとまっている。
+           実測でガラスの alpha≈0.25、枠は alpha≈1.0 だったので、
+           影パスにだけ alphaTest=0.5 のデプスマテリアルを差し込む。
+           → 枠と桟だけがくっきり影を落とし、光はガラスを通って床に届く。
+           本体の描画は alphaTest=0 のままなので、ガラスの透明感は残る。 */
+        if (m.map) {
+          if (!m.customDepthMaterial) {
+            m.customDepthMaterial = new THREE.MeshDepthMaterial({
+              depthPacking: THREE.RGBADepthPacking,
+              map: m.map,
+              alphaTest: 0.5,
+            });
+          }
+        } else {
+          glassNoMap = true; // alpha を判別できないので影は諦める
+        }
       }
-      if (m.emissive && /light|lamp|032|031/i.test(m.name || '')) {
-        m.emissive = new THREE.Color(0xfff2d0);
-        m.emissiveIntensity = 0;
+      /* 発光しているマテリアル＝蛍光灯。
+         名前で判定すると、このモデルの 'light'（＝黒板と本棚）まで光ってしまうので
+         emissive の有無で決める。 */
+      const emits = m.emissiveMap != null || (m.emissive && m.emissive.getHex() !== 0);
+      if (emits && !lampMats.includes(m)) {
+        m.emissive = new THREE.Color(0xfff6e2);
+        m.emissiveIntensity = 0; // 昼は消灯。TimeOfDay が夜に上げる
+        lampMats.push(m);
       }
-      // metalness=1 のマテリアルは環境反射が無いと真っ黒になるので IBL を効かせる
+      // metalness が実質 1 のマテリアルは環境反射が無いと黒つぶれするので IBL を効かせる
       if (m.isMeshStandardMaterial || m.isMeshPhysicalMaterial) {
         m.envMapIntensity = (m.metalness ?? 0) > 0.5 ? 1.0 : 0.55;
       }
     }
-    if (glass) {
-      glassCount++;
-      o.castShadow = false;
-    } else {
-      o.castShadow = true;
-    }
+    if (glass) glassCount++;
+    // ガラスは枠の影だけ落とす（alpha を判別できない場合のみ影を切る）
+    o.castShadow = !(glass && glassNoMap);
+    if (glass && glassNoMap) shadowlessGlass++;
     o.receiveShadow = true;
   });
 
   /* ---- 環境光（IBL）---- */
-  // 44 マテリアルのうち 6 つが metalness>0.15（既定 1.0 込み）。
-  // 環境マップが無いと金属が黒つぶれするため、中くらいの強さで入れておく。
+  // metallicFactor を書かない glTF は既定値 1.0 になり、metallicRoughness テクスチャと
+  // 掛け合わされる。環境マップが無いと金属が黒つぶれするため、中くらいの強さで入れておく。
   if (renderer && renderer.isWebGLRenderer) {
     try {
       const pmrem = new THREE.PMREMGenerator(renderer);
@@ -186,7 +213,7 @@ export async function buildGLBWorld({ scene, renderer, buffer, M, onProgress = (
   // 廊下側のあかりとり（扉のそと）
   const corrWin = plane(2.2, 2.4, new THREE.MeshBasicMaterial({ color: 0xdfe8ea }), 1);
   corrWin.rotation.y = -Math.PI / 2;
-  corrWin.position.set(bounds.x1 + 1.4, 1.6, -3.05);
+  corrWin.position.set(bounds.x1 + 1.4, 1.6, 2.8);
   sky.add(corrWin);
   scene.add(sky);
 
@@ -198,18 +225,22 @@ export async function buildGLBWorld({ scene, renderer, buffer, M, onProgress = (
   onProgress(0.84, '光を入れています…');
   await nextFrame();
   const lampLights = [];
-  for (const [lx, lz] of [[-1.7, -2.4], [1.7, -2.4], [-1.7, 2.4], [1.7, 2.4]]) {
-    const pl = new THREE.PointLight(0xffeecb, 0, 9, 2);
-    pl.position.set(lx, 2.62, lz);
-    scene.add(pl);
-    lampLights.push(pl);
+  // 実測：蛍光灯は 2 列 × 3 列（x = -1.75 / 2.0、z = -2.5 / 0 / 2.5）、下面 y = 2.90
+  for (const lx of [-1.75, 2.0]) {
+    for (const lz of [-2.5, 0, 2.5]) {
+      const pl = new THREE.PointLight(0xffeecb, 0, 8, 2);
+      pl.position.set(lx, 2.72, lz);
+      scene.add(pl);
+      lampLights.push(pl);
+    }
   }
+  // 廊下側のあかり（このモデルに扉は無いので、壁の外に置く弱い光源として残す）
   const corridorLight = new THREE.PointLight(0xdfe8ea, 0, 6, 2);
-  corridorLight.position.set(bounds.x1 + 0.7, 2.0, -3.05);
+  corridorLight.position.set(bounds.x1 + 0.7, 2.0, 2.8);
   scene.add(corridorLight);
 
   const refs = {
-    lamps: [],
+    lamps: lampMats,
     lampLights,
     backdropMesh: bd,
     backdropMats: M.backdrop,
@@ -224,7 +255,8 @@ export async function buildGLBWorld({ scene, renderer, buffer, M, onProgress = (
   refs.shaftGroup.name = 'shafts';
   scene.add(refs.shaftGroup);
 
-  const tod = new TimeOfDay(scene, renderer, refs, dust);
+  // 窓は -X 側。プリセットの太陽は +X から差すので反転させる。
+  const tod = new TimeOfDay(scene, renderer, refs, dust, { sunFlipX: true });
   if (scene.environment) {
     const baseUpdate = tod.update.bind(tod);
     tod.update = (dt) => {
@@ -260,7 +292,14 @@ export async function buildGLBWorld({ scene, renderer, buffer, M, onProgress = (
     bounds,
     spawn: GLB_SPAWN,
     playerRadius: 0.16,
-    stats: { triangles: a.triangles, unitsPerMeter: a.unitsPerMeter, boxes: colliders.count, glassCount },
+    stats: {
+      triangles: a.triangles,
+      unitsPerMeter: a.unitsPerMeter,
+      boxes: colliders.count,
+      glassCount,
+      shadowlessGlass,
+      lampMats: lampMats.length,
+    },
   };
 }
 

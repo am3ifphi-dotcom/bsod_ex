@@ -1,12 +1,35 @@
 /**
- * 元の Sketchfab モデル（Old Classroom）を埋め込みビューアで表示する
+ * Sketchfab のモデルを埋め込みビューアで表示する
  * -------------------------------------------------------------
  * ビルド環境（サンドボックス）からは sketchfab.com に接続できないため、
  * この iframe は実行時にユーザーのブラウザから直接読み込まれる。
+ *
+ * SKETCHFAB       … いま歩いている教室そのもの（CC-BY-4.0 / volvor）。
+ *                   作者表示が必須なので、パネルと index.html にクレジットを出す。
+ * SKETCHFAB_MOTIF … 最初に依頼された「Old Classroom」。Sketchfab Store の有料（499）かつ
+ *                   isDownloadable:false なので配布物には組み込めない。参照用に残す。
  */
 export const SKETCHFAB = {
+  uid: 'd9fc039ba0b6433db91ec129abe86b52',
+  page: 'https://sketchfab.com/3d-models/the-japanese-school-classroom-d9fc039ba0b6433db91ec129abe86b52',
+  title: 'The Japanese School Classroom',
+  author: 'volvor',
+  authorPage: 'https://sketchfab.com/volvor',
+  license: 'CC-BY-4.0',
+  licensePage: 'http://creativecommons.org/licenses/by/4.0/',
+  credit:
+    'This work is based on "The Japanese School Classroom" ' +
+    '(https://sketchfab.com/3d-models/the-japanese-school-classroom-d9fc039ba0b6433db91ec129abe86b52) ' +
+    'by volvor (https://sketchfab.com/volvor) licensed under CC-BY-4.0 ' +
+    '(http://creativecommons.org/licenses/by/4.0/)',
+};
+
+export const SKETCHFAB_MOTIF = {
   uid: 'be2db5bb488a4392abda0d36c7b46e71',
   page: 'https://sketchfab.com/3d-models/old-classroom-be2db5bb488a4392abda0d36c7b46e71',
+  title: 'Old Classroom',
+  author: 'RafaelBR873D',
+  license: 'Sketchfab Store（Standard）',
 };
 
 const params = new URLSearchParams({
