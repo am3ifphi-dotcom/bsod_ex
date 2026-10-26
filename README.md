@@ -70,6 +70,10 @@ npm run model:fetch -- --npm some-pkg --npm-path models/room.glb
 
 手順・禁止事項・ライセンス明記のルールは [`AGENTS.md`](AGENTS.md)（エージェント向けの作業規約）。
 
+> **API トークンは不要・不受理。** 遮断はホスト名単位の TLS で起きるため、`Authorization` を送る前に
+> 接続が切られます（`api.sketchfab.com` にトークン付きで当てても `HTTP 000`）。
+> エージェントはユーザーの認証情報を要求せず、環境が用意した認証（`GH_TOKEN`）だけを使います。
+
 置き場所と手順は [`public/models/README.md`](public/models/README.md)。
 
 ## 操作方法
