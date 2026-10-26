@@ -9,6 +9,7 @@
  */
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { Colliders } from './colliders.js';
 import { DustField } from './dust.js';
 import { TimeOfDay } from './lighting.js';
@@ -95,6 +96,10 @@ export async function buildGLBWorld({ scene, renderer, buffer, M, onProgress = (
         m.emissive = new THREE.Color(0xfff2d0);
         m.emissiveIntensity = 0;
       }
+      // metalness=1 のマテリアルは環境反射が無いと真っ黒になるので IBL を効かせる
+      if (m.isMeshStandardMaterial || m.isMeshPhysicalMaterial) {
+        m.envMapIntensity = (m.metalness ?? 0) > 0.5 ? 1.0 : 0.55;
+      }
     }
     if (glass) {
       glassCount++;
@@ -104,6 +109,21 @@ export async function buildGLBWorld({ scene, renderer, buffer, M, onProgress = (
     }
     o.receiveShadow = true;
   });
+
+  /* ---- 環境光（IBL）---- */
+  // 44 マテリアルのうち 6 つが metalness>0.15（既定 1.0 込み）。
+  // 環境マップが無いと金属が黒つぶれするため、中くらいの強さで入れておく。
+  if (renderer && renderer.isWebGLRenderer) {
+    try {
+      const pmrem = new THREE.PMREMGenerator(renderer);
+      const roomEnv = new RoomEnvironment();
+      scene.environment = pmrem.fromScene(roomEnv, 0.04).texture;
+      scene.environmentIntensity = 0.46;
+      pmrem.dispose();
+    } catch (e) {
+      scene.environment = null;
+    }
+  }
 
   /* ---- 部屋の範囲 ---- */
   const bounds = T.rect(g.floorLo[0], g.floorLo[1], g.floorHi[0], g.floorHi[1]);
@@ -205,6 +225,14 @@ export async function buildGLBWorld({ scene, renderer, buffer, M, onProgress = (
   scene.add(refs.shaftGroup);
 
   const tod = new TimeOfDay(scene, renderer, refs, dust);
+  if (scene.environment) {
+    const baseUpdate = tod.update.bind(tod);
+    tod.update = (dt) => {
+      baseUpdate(dt);
+      const amb = ((tod.hemi?.intensity ?? 1) * 0.6 + (tod.ambient?.intensity ?? 0.5)) / 1.6;
+      scene.environmentIntensity = Math.max(0.07, Math.min(0.55, 0.62 * amb));
+    };
+  }
   // 部屋が手続き版より広いので影カメラを広げる
   const sc = tod.sun.shadow.camera;
   sc.left = -9.5; sc.right = 9.5; sc.top = 9.5; sc.bottom = -9.5; sc.far = 60;
