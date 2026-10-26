@@ -5,7 +5,7 @@
  *   node tools/smoke.mjs
  */
 import * as THREE from 'three';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 
 /* ---------------- Canvas 2D スタブ ---------------- */
 function makeCtx(canvas) {
@@ -117,7 +117,47 @@ function makeCanvas(w = 300, h = 150) {
 globalThis.document = {
   createElement(tag) {
     if (tag === 'canvas') return makeCanvas();
-    return { style: {}, appendChild() {}, addEventListener() {}, classList: { add() {}, remove() {}, toggle() {}, contains: () => false } };
+    const el = {
+      tagName: String(tag).toUpperCase(),
+      nodeName: String(tag).toUpperCase(),
+      style: {},
+      width: 0,
+      height: 0,
+      onload: null,
+      onerror: null,
+      _l: {},
+      appendChild() {},
+      addEventListener(type, fn) {
+        this._l[type] = fn;
+      },
+      removeEventListener(type) {
+        delete this._l[type];
+      },
+      dispatchEvent(ev) {
+        const fn = this._l[ev.type];
+        if (fn) fn(ev);
+        return true;
+      },
+      classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+      getAttribute: () => null,
+      setAttribute() {},
+    };
+    if (String(tag).toLowerCase() === 'img') {
+      let src = '';
+      Object.defineProperty(el, 'src', {
+        get: () => src,
+        set: (v) => {
+          src = v;
+          // TextureLoader は image.onload を待つので、即座に発火させて parse を進める
+          setTimeout(() => {
+            el.width = 4; el.height = 4; el.naturalWidth = 4; el.naturalHeight = 4; el.complete = true;
+            if (typeof el.onload === 'function') el.onload();
+            el.dispatchEvent({ type: 'load' });
+          }, 0);
+        },
+      });
+    }
+    return el;
   },
   createElementNS(ns, tag) {
     return this.createElement(tag);
@@ -136,6 +176,9 @@ globalThis.window = {
   requestAnimationFrame: (cb) => setTimeout(() => cb(performance.now()), 0),
 };
 globalThis.requestAnimationFrame = globalThis.window.requestAnimationFrame;
+// GLTFLoader が Blob URL 経由でテクスチャを読むための最小スタブ
+globalThis.window.URL = { createObjectURL: () => 'blob:stub', revokeObjectURL: () => {} };
+globalThis.self = globalThis.window;
 try { Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'node' }, configurable: true }); } catch {}
 
 /* ---------------- 本体 ---------------- */
@@ -600,6 +643,247 @@ ok('コードが参照する id / class は index.html に全部ある', () => {
   if (missing.length) throw new Error('HTML に無い参照: ' + [...new Set(missing)].join(' / '));
   return `${files.length} ファイルの参照すべて OK`;
 });
+
+/* ==================== [11]-[14] GLB 教室（本物のモデル） ==================== */
+const GLB_URL = new URL('../public/models/classroom.glb', import.meta.url);
+const freeAt = (colliders, x, z, r) => {
+  const p = colliders.resolve(x, z, r);
+  return Math.hypot(p.x - x, p.z - z) < 0.02;
+};
+const clearPath = (colliders, ax, az, bx, bz, r = 0.05) => {
+  // 終端は家具の中（黒板のチョーク受けなど）でもよいので手前 92% まで
+  for (let i = 1; i <= 13; i++) {
+    const t = i / 14;
+    if (!freeAt(colliders, ax + (bx - ax) * t, az + (bz - az) * t, r)) return false;
+  }
+  return true;
+};
+const findView = (GW, tx, tz, dists = [0.9, 1.2, 1.5]) => {
+  const B = GW.bounds;
+  for (const dist of dists) {
+    for (let ai = 0; ai < 32; ai++) {
+      const ang = (ai / 32) * Math.PI * 2;
+      const x = tx + Math.cos(ang) * dist;
+      const z = tz + Math.sin(ang) * dist;
+      if (x < B.x0 + 0.15 || x > B.x1 - 0.15 || z < B.z0 + 0.15 || z > B.z1 - 0.15) continue;
+      if (!freeAt(GW.colliders, x, z, GW.playerRadius || 0.2)) continue;
+      if (!clearPath(GW.colliders, x, z, tx, tz, 0.04)) continue;
+      return { x, z };
+    }
+  }
+  return null;
+};
+
+if (!existsSync(GLB_URL)) {
+  console.log('\n[11] GLB教室 — public/models/classroom.glb が無いのでスキップ');
+  console.log('     取得: npm run model:fetch（手順は public/models/README.md）');
+} else {
+  const gc = await import('../src/glb-collide.js');
+  const gcontent = await import('../src/glb-content.js');
+  const glbBuf = readFileSync(GLB_URL);
+  const A = gc.analyzeGLB(glbBuf, { cell: 0.1 });
+  const T = gc.makeTransform(A);
+  const rr = T.rect(A.grid.floorLo[0], A.grid.floorLo[1], A.grid.floorHi[0], A.grid.floorHi[1]);
+
+  console.log(`\n[11] GLB解析 — ${(glbBuf.length / 1e6).toFixed(1)} MB / ${A.triangles.toLocaleString()} 三角形`);
+  ok('縮尺・部屋寸法・床面', () => {
+    if (!(A.unitsPerMeter > 2 && A.unitsPerMeter < 6)) throw new Error(`unitsPerMeter=${A.unitsPerMeter}`);
+    const w = rr.x1 - rr.x0, d = rr.z1 - rr.z0;
+    if (!(w > 5 && w < 14)) throw new Error(`横幅 ${w.toFixed(2)} m`);
+    if (!(d > 5 && d < 16)) throw new Error(`奥行 ${d.toFixed(2)} m`);
+    if (Math.abs(A.floorY) > 0.6) throw new Error(`床面 y=${A.floorY}`);
+    if (A.rawBoxes.length < 10) throw new Error(`塊 ${A.rawBoxes.length}`);
+    return `${A.unitsPerMeter.toFixed(3)} u/m (${A.scaleReason}) / ${w.toFixed(2)}×${d.toFixed(2)} m / 床y=${A.floorY.toFixed(2)} / 塊${A.rawBoxes.length}`;
+  });
+
+  console.log('\n[12] GLBワールド構築（Node上で buildGLBWorld を実行）');
+  const { buildGLBWorld } = await import('../src/glbworld.js');
+  const gScene = new THREE.Scene();
+  const gRenderer = { toneMappingExposure: 1, capabilities: { getMaxAnisotropy: () => 8 } };
+  const gM = mats.createMaterials();
+  const t0 = Date.now();
+  const GW = await buildGLBWorld({ scene: gScene, renderer: gRenderer, buffer: glbBuf, M: gM, onProgress: () => {} });
+  const built = Date.now() - t0;
+  ok('ワールド生成', () => {
+    if (GW.mode !== 'glb') throw new Error(`mode=${GW.mode}`);
+    if (GW.hotspots.length !== gcontent.GLB_HOTSPOT_DEFS.length) throw new Error('hotspots 数不一致');
+    if (GW.fragments.length !== gcontent.GLB_FRAGMENT_DEFS.length) throw new Error('fragments 数不一致');
+    if (GW.colliders.count < 20) throw new Error(`colliders=${GW.colliders.count}`);
+    if (!GW.blockers.length) throw new Error('blockers 0');
+    if (!GW.tod || !GW.tod.sun) throw new Error('TimeOfDay が無い');
+    let meshN = 0;
+    gScene.traverse((o) => { if (o.isMesh) meshN++; });
+    if (meshN < 300) throw new Error(`シーン内メッシュ ${meshN}`);
+    return `${built}ms / メッシュ${meshN} / 当たり${GW.colliders.count} / 物${GW.hotspots.length} / かけら${GW.fragments.length} / ブロッカー${GW.blockers.length} / ガラス${GW.stats.glassCount}`;
+  });
+
+  ok('スポーンと外周', () => {
+    const SP = gcontent.GLB_SPAWN, B = GW.bounds, R = GW.playerRadius || 0.235;
+    if (!freeAt(GW.colliders, SP.x, SP.z, R)) throw new Error(`スポーン(${SP.x},${SP.z})が障害物の中`);
+    if (!(SP.x > B.x0 && SP.x < B.x1 && SP.z > B.z0 && SP.z < B.z1)) throw new Error('スポーンが部屋の外');
+    // 外周のすぐ外は壁帯の中なので必ず押し返される
+    for (const [x, z] of [[B.x0 - 0.12, 0], [B.x1 + 0.12, 0], [0, B.z0 - 0.12], [0, B.z1 + 0.12],
+                          [B.x0 - 0.12, B.z0 + 1], [B.x1 + 0.12, B.z1 - 1]]) {
+      if (freeAt(GW.colliders, x, z, R)) throw new Error(`外周が素通り (${x.toFixed(2)},${z.toFixed(2)})`);
+    }
+    return `bounds x[${B.x0.toFixed(2)},${B.x1.toFixed(2)}] z[${B.z0.toFixed(2)},${B.z1.toFixed(2)}] / 四方向ふさがりOK`;
+  });
+
+  console.log('\n[13] GLB 行きやすさ（洪水充填）');
+  ok('全かけら・全スポットに歩いて行ける', () => {
+    const step = 0.15, B = GW.bounds, R = GW.playerRadius || 0.235;
+    const xs = [], zs = [];
+    for (let x = B.x0 - 0.1; x <= B.x1 + 0.1; x += step) xs.push(x);
+    for (let z = B.z0 - 0.1; z <= B.z1 + 0.1; z += step) zs.push(z);
+    const W = xs.length, H = zs.length;
+    const free = new Uint8Array(W * H);
+    const idx = (i, j) => j * W + i;
+    let freeCount = 0;
+    for (let j = 0; j < H; j++)
+      for (let i = 0; i < W; i++) {
+        const f = freeAt(GW.colliders, xs[i], zs[j], R) ? 1 : 0;
+        free[idx(i, j)] = f;
+        freeCount += f;
+      }
+    const SP = gcontent.GLB_SPAWN;
+    let si = 0, sj = 0, best = 1e9;
+    for (let j = 0; j < H; j++)
+      for (let i = 0; i < W; i++) {
+        if (!free[idx(i, j)]) continue;
+        const d = Math.hypot(xs[i] - SP.x, zs[j] - SP.z);
+        if (d < best) { best = d; si = i; sj = j; }
+      }
+    const seen = new Uint8Array(W * H);
+    const q = [idx(si, sj)];
+    seen[q[0]] = 1;
+    while (q.length) {
+      const cur = q.pop();
+      const ci = cur % W, cj = (cur - ci) / W;
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+        const ni = ci + di, nj = cj + dj;
+        if (ni < 0 || nj < 0 || ni >= W || nj >= H) continue;
+        const n = idx(ni, nj);
+        if (seen[n] || !free[n]) continue;
+        seen[n] = 1;
+        q.push(n);
+      }
+    }
+    let reach = 0;
+    for (let i = 0; i < seen.length; i++) reach += seen[i];
+    if (reach < freeCount * 0.6) throw new Error(`到達 ${(reach / freeCount * 100).toFixed(0)}% (床 ${freeCount} / 到達 ${reach})`);
+
+    const nearest = (tx, tz) => {
+      let bd = 1e9;
+      for (let j = 0; j < H; j++)
+        for (let i = 0; i < W; i++) {
+          if (!seen[idx(i, j)]) continue;
+          const d = Math.hypot(xs[i] - tx, zs[j] - tz);
+          if (d < bd) bd = d;
+        }
+      return bd;
+    };
+    let fragMax = 0, hotMax = 0;
+    for (const f of GW.fragments) {
+      const d = nearest(f.pos[0], f.pos[2]);
+      fragMax = Math.max(fragMax, d);
+      if (d > 1.7) throw new Error(`${f.id}(${f.pos[0].toFixed(2)},${f.pos[2].toFixed(2)}) まで ${d.toFixed(2)} m（検知距離 1.7 m 超）`);
+    }
+    for (const h of GW.hotspots) {
+      const d = nearest(h.anchor.x, h.anchor.z);
+      hotMax = Math.max(hotMax, d);
+      if (d > h.reach + 0.6) throw new Error(`${h.id} まで ${d.toFixed(2)} m（reach ${h.reach}）`);
+    }
+    return `床 ${(freeCount / (W * H) * 100).toFixed(0)}% / 到達 ${(reach / freeCount * 100).toFixed(0)}% / かけら最遠 ${fragMax.toFixed(2)} m / 物最遠 ${hotMax.toFixed(2)} m`;
+  });
+
+  console.log('\n[14] GLB 検知（Interaction と同じルールで見つかるか）');
+  ok('かけら・物に立ち位置から気づける', () => {
+    const ray = new THREE.Raycaster();
+    const PR = GW.playerRadius || 0.235;
+    const EYES = [1.58, 0.94]; // 立つ / しゃがむ
+    const spots = (tx, tz, maxD) => {
+      const B = GW.bounds;
+      const out = [];
+      for (const dist of [0.5, 0.8, 1.1, 1.4, 1.7, 2.0, 2.4]) {
+        if (dist > maxD + 0.4) continue;
+        for (let ai = 0; ai < 32; ai++) {
+          const ang = (ai / 32) * Math.PI * 2;
+          const x = tx + Math.cos(ang) * dist;
+          const z = tz + Math.sin(ang) * dist;
+          if (x < B.x0 + 0.1 || x > B.x1 - 0.1 || z < B.z0 + 0.1 || z > B.z1 - 0.1) continue;
+          if (!freeAt(GW.colliders, x, z, PR)) continue;
+          out.push({ x, z });
+        }
+      }
+      return out;
+    };
+
+    let fragHit = 0;
+    for (const f of GW.fragments) {
+      const cands = spots(f.pos[0], f.pos[2], 1.7);
+      let good = null;
+      for (const c of cands) {
+        for (const eye of EYES) {
+          const d = Math.hypot(c.x - f.pos[0], eye - f.pos[1], c.z - f.pos[2]);
+          if (d <= 1.7) { good = { ...c, eye, d }; break; }
+        }
+        if (good) break;
+      }
+      if (!good) {
+        throw new Error(
+          `${f.id}(${f.pos[0].toFixed(2)},${f.pos[1].toFixed(2)},${f.pos[2].toFixed(2)}) の前に立てない（候補${cands.length}）`
+        );
+      }
+      fragHit++;
+    }
+
+    let hotHit = 0;
+    for (const h of GW.hotspots) {
+      const [x0, y0, z0, x1, y1, z1] = h.meshes[0].userData.box6;
+      const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, cz = (z0 + z1) / 2;
+      const reach = h.reach;
+      const cands = spots(cx, cz, reach);
+      let good = null;
+      for (const c of cands) {
+        for (const eye of EYES) {
+          const from = new THREE.Vector3(c.x, eye, c.z);
+          const cl = new THREE.Vector3(
+            Math.max(x0, Math.min(x1, from.x)),
+            Math.max(y0, Math.min(y1, from.y)),
+            Math.max(z0, Math.min(z1, from.z))
+          );
+          if (from.distanceTo(cl) > reach) continue; // Box3.clampPoint が reach 超
+          const dir = new THREE.Vector3(cx, cy, cz).sub(from).normalize();
+          ray.set(from, dir);
+          ray.far = reach;
+          const hits = ray.intersectObjects(h.meshes, false);
+          if (!hits.length || hits[0].distance > reach) continue;
+          ray.far = 30;
+          const bh = ray.intersectObjects(GW.blockers, false);
+          const blockDist = bh.length ? bh[0].distance : Infinity;
+          if (hits[0].distance > blockDist + 0.08) continue; // 壁ごしは不可
+          good = { ...c, eye, dist: hits[0].distance };
+          break;
+        }
+        if (good) break;
+      }
+      if (!good) {
+        throw new Error(
+          `${h.id}（中心 ${cx.toFixed(2)},${cy.toFixed(2)},${cz.toFixed(2)} / reach ${reach}）に気づける立ち位置が無い（候補${cands.length}）`
+        );
+      }
+      hotHit++;
+    }
+
+    // 前提：プロキシは visible=false でもレイキャストに当たる
+    for (const h of GW.hotspots) {
+      if (h.meshes[0].visible !== false) throw new Error(`${h.id} のプロキシが visible=false でない`);
+    }
+    return `かけら ${fragHit}/${GW.fragments.length} / 物 ${hotHit}/${GW.hotspots.length} 気づける（invisible プロキシでも命中）`;
+  });
+
+}
+
 
 console.log('');
 if (errors.length) {

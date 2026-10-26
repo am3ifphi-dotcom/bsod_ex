@@ -5,8 +5,10 @@ import * as THREE from 'three';
 import { ROOM as R } from './materials.js';
 
 export class DustField {
-  constructor(count = 900) {
+  constructor(count = 900, bounds = null) {
     this.count = count;
+    const B = bounds || { x0: R.X0, x1: R.X1, z0: R.Z0, z1: R.Z1, h: R.H };
+    const BW = B.x1 - B.x0, BD = B.z1 - B.z0, BH = B.h || R.H;
     const pos = new Float32Array(count * 3);
     this.base = new Float32Array(count * 3);
     this.phase = new Float32Array(count);

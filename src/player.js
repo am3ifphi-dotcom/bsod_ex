@@ -14,6 +14,10 @@ export class Player {
     this.colliders = colliders;
     this.audio = audio;
     this.dom = dom;
+    /** 体の半径（GLB 教室は机の間が狭いので細め） */
+    this.radius = dom.radius || RADIUS;
+    /** 行動範囲（無ければ手続き版の ROOM を使う） */
+    this.bounds = dom.bounds || null;
 
     this.pos = new THREE.Vector3(0, 0, 2.9);
     this.yaw = Math.PI; // 黒板の方を向いて始める
@@ -260,17 +264,24 @@ export class Player {
 
     let nx = this.pos.x + wx * dt;
     let nz = this.pos.z + wz * dt;
-    const fixed = this.colliders.resolve(nx, nz, RADIUS);
+    const r = this.radius;
+    const fixed = this.colliders.resolve(nx, nz, r);
     nx = fixed.x;
     nz = fixed.z;
-    // 部屋の外には出さない（廊下は別ルール）
-    const inCorridor = nx < R.X0;
-    if (inCorridor) {
-      nx = Math.max(R.X0 - 1.05, Math.min(R.X0 + 0.4, nx));
-      nz = Math.max(1.98, Math.min(2.84, nz));
+    // 部屋の外には出さない（手続き版は廊下だけ別ルール）
+    if (this.bounds) {
+      const B = this.bounds;
+      nx = Math.max(B.x0 + r, Math.min(B.x1 - r, nx));
+      nz = Math.max(B.z0 + r, Math.min(B.z1 - r, nz));
     } else {
-      nx = Math.max(R.X0 + RADIUS, Math.min(R.X1 - RADIUS, nx));
-      nz = Math.max(R.Z0 + RADIUS, Math.min(R.Z1 - RADIUS, nz));
+      const inCorridor = nx < R.X0;
+      if (inCorridor) {
+        nx = Math.max(R.X0 - 1.05, Math.min(R.X0 + 0.4, nx));
+        nz = Math.max(1.98, Math.min(2.84, nz));
+      } else {
+        nx = Math.max(R.X0 + r, Math.min(R.X1 - r, nx));
+        nz = Math.max(R.Z0 + r, Math.min(R.Z1 - r, nz));
+      }
     }
     this.pos.x = nx;
     this.pos.z = nz;

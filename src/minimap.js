@@ -5,10 +5,7 @@ import { ROOM as R } from './materials.js';
 import { WIN_SPANS, DOOR } from './room.js';
 
 const PAD = 12;
-const X0 = R.X0 - 1.4;
-const X1 = R.X1 + 0.3;
-const Z0 = R.Z0 - 0.3;
-const Z1 = R.Z1 + 0.3;
+const DEFAULT_BOUNDS = { x0: R.X0 - 1.4, x1: R.X1 + 0.3, z0: R.Z0 - 0.3, z1: R.Z1 + 0.3 };
 
 export class Minimap {
   constructor(canvas, opts = {}) {
@@ -17,9 +14,14 @@ export class Minimap {
     this.dpr = Math.min(2, window.devicePixelRatio || 1);
     this.cssW = Number(canvas.getAttribute('width')) || 190;
     this.cssH = Number(canvas.getAttribute('height')) || 170;
-    this.resize();
     this.fragments = opts.fragments || [];
     this.colliders = opts.colliders || null;
+    this.B = opts.bounds ? {
+      x0: opts.bounds.x0 - 0.6, x1: opts.bounds.x1 + 0.6,
+      z0: opts.bounds.z0 - 0.6, z1: opts.bounds.z1 + 0.6,
+    } : DEFAULT_BOUNDS;
+    this.mode = opts.mode || 'procedural';
+    this.resize();
     this.enabled = true;
     this._acc = 0;
     this.time = 0;
@@ -34,18 +36,18 @@ export class Minimap {
     this.cv.style.height = `${this.cssH}px`;
     this.w = this.cv.width;
     this.h = this.cv.height;
-    const sx = (this.w - PAD * 2 * d) / (X1 - X0);
-    const sy = (this.h - PAD * 2 * d) / (Z1 - Z0);
+    const sx = (this.w - PAD * 2 * d) / (this.B.x1 - this.B.x0);
+    const sy = (this.h - PAD * 2 * d) / (this.B.z1 - this.B.z0);
     this.s = Math.min(sx, sy);
-    this.ox = (this.w - (X1 - X0) * this.s) / 2;
-    this.oy = (this.h - (Z1 - Z0) * this.s) / 2;
+    this.ox = (this.w - (this.B.x1 - this.B.x0) * this.s) / 2;
+    this.oy = (this.h - (this.B.z1 - this.B.z0) * this.s) / 2;
   }
 
   px(x) {
-    return this.ox + (x - X0) * this.s;
+    return this.ox + (x - this.B.x0) * this.s;
   }
   py(z) {
-    return this.oy + (z - Z0) * this.s;
+    return this.oy + (z - this.B.z0) * this.s;
   }
 
   update(dt, player) {
@@ -68,32 +70,37 @@ export class Minimap {
     c.strokeStyle = 'rgba(233,181,99,0.5)';
     c.fillStyle = 'rgba(120,96,60,0.12)';
     c.beginPath();
-    c.rect(this.px(R.X0), this.py(R.Z0), (R.X1 - R.X0) * this.s, (R.Z1 - R.Z0) * this.s);
+    const rb = this.mode === 'glb'
+      ? { x0: this.B.x0 + 0.6, x1: this.B.x1 - 0.6, z0: this.B.z0 + 0.6, z1: this.B.z1 - 0.6 }
+      : { x0: R.X0, x1: R.X1, z0: R.Z0, z1: R.Z1 };
+    c.rect(this.px(rb.x0), this.py(rb.z0), (rb.x1 - rb.x0) * this.s, (rb.z1 - rb.z0) * this.s);
     c.fill();
     c.stroke();
 
-    // 廊下
-    c.fillStyle = 'rgba(120,96,60,0.08)';
-    c.beginPath();
-    c.rect(this.px(R.X0 - 1.15), this.py(DOOR.z0), 1.15 * this.s, (DOOR.z1 - DOOR.z0) * this.s);
-    c.fill();
-    c.stroke();
-
-    // 窓
-    c.strokeStyle = 'rgba(150,200,230,0.85)';
-    c.lineWidth = 2.6 * d;
-    for (const w of WIN_SPANS) {
+    if (this.mode !== 'glb') {
+      // 廊下
+      c.fillStyle = 'rgba(120,96,60,0.08)';
       c.beginPath();
-      c.moveTo(this.px(R.X1), this.py(w.z0 + 0.05));
-      c.lineTo(this.px(R.X1), this.py(w.z1 - 0.05));
+      c.rect(this.px(R.X0 - 1.15), this.py(DOOR.z0), 1.15 * this.s, (DOOR.z1 - DOOR.z0) * this.s);
+      c.fill();
+      c.stroke();
+
+      // 窓
+      c.strokeStyle = 'rgba(150,200,230,0.85)';
+      c.lineWidth = 2.6 * d;
+      for (const w of WIN_SPANS) {
+        c.beginPath();
+        c.moveTo(this.px(R.X1), this.py(w.z0 + 0.05));
+        c.lineTo(this.px(R.X1), this.py(w.z1 - 0.05));
+        c.stroke();
+      }
+      // ドア開口
+      c.strokeStyle = 'rgba(233,181,99,0.9)';
+      c.beginPath();
+      c.moveTo(this.px(R.X0), this.py(DOOR.z0 + 0.03));
+      c.lineTo(this.px(R.X0), this.py(DOOR.z1 - 0.03));
       c.stroke();
     }
-    // ドア開口
-    c.strokeStyle = 'rgba(233,181,99,0.9)';
-    c.beginPath();
-    c.moveTo(this.px(R.X0), this.py(DOOR.z0 + 0.03));
-    c.lineTo(this.px(R.X0), this.py(DOOR.z1 - 0.03));
-    c.stroke();
 
     // 家具＝実コライダーをそのまま描く（レイアウト変更しても自動で追従）
     if (this.colliders) {
@@ -112,8 +119,13 @@ export class Minimap {
     c.strokeStyle = 'rgba(120,180,140,0.9)';
     c.lineWidth = 3 * d;
     c.beginPath();
-    c.moveTo(this.px(-2.6), this.py(R.Z0));
-    c.lineTo(this.px(2.6), this.py(R.Z0));
+    if (this.mode === 'glb') {
+      c.moveTo(this.px(rb.x0 + 0.8), this.py(rb.z0 + 0.25));
+      c.lineTo(this.px(rb.x1 - 0.8), this.py(rb.z0 + 0.25));
+    } else {
+      c.moveTo(this.px(-2.6), this.py(R.Z0));
+      c.lineTo(this.px(2.6), this.py(R.Z0));
+    }
     c.stroke();
 
     // 記憶のかけら

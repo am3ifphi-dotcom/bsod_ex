@@ -10,6 +10,7 @@ import { DustField } from './dust.js';
 import { TimeOfDay } from './lighting.js';
 import { createFragments } from './interact.js';
 import { applyAnisotropy } from './textures.js';
+import { buildGLBWorld } from './glbworld.js';
 
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
 
@@ -18,6 +19,63 @@ export async function buildWorld({ scene, renderer, onProgress = () => {} }) {
   await nextFrame();
   const M = createMaterials();
   applyAnisotropy(renderer.capabilities.getMaxAnisotropy());
+
+  /* ---- 本物の教室（public/models/classroom.glb）があればそちらを使う ---- */
+  let glbBuffer = null;
+  try {
+    const res = await fetch('./models/classroom.glb');
+    if (res.ok) {
+      const total = Number(res.headers.get('content-length')) || 0;
+      if (res.body && total > 1e6) {
+        // 37MBあるので、ストリームで読みながら進捗を出す
+        const reader = res.body.getReader();
+        const chunks = [];
+        let got = 0;
+        let shown = -1;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          got += value.length;
+          const pct = Math.floor((got / total) * 100);
+          if (pct !== shown) {
+            shown = pct;
+            onProgress(0.02 + 0.18 * (got / total), `教室をよみこみ中… ${Math.round(got / 1e6)} / ${Math.round(total / 1e6)} MB`);
+            await nextFrame();
+          }
+        }
+        const all = new Uint8Array(got);
+        let off = 0;
+        for (const c of chunks) {
+          all.set(c, off);
+          off += c.length;
+        }
+        glbBuffer = all.buffer;
+      } else {
+        glbBuffer = await res.arrayBuffer();
+      }
+    }
+  } catch {
+    glbBuffer = null;
+  }
+  if (glbBuffer) {
+    onProgress(0.2, '本物の教室をほどいています…');
+    await nextFrame();
+    const w = await buildGLBWorld({
+      scene,
+      renderer,
+      buffer: glbBuffer,
+      M,
+      onProgress: (p, t) => onProgress(0.2 + p * 0.8, t),
+    });
+    scene.traverse((o) => {
+      if (o.isSprite || o.isPoints) {
+        o.castShadow = false;
+        o.receiveShadow = false;
+      }
+    });
+    return w;
+  }
 
   onProgress(0.42, '教室を組み立てています…');
   await nextFrame();

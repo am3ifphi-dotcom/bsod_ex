@@ -929,6 +929,16 @@ input[type='range']::-moz-range-thumb {
   color: var(--ink-faint);
 }
 
+.load-credit {
+  margin: 18px auto 0;
+  max-width: 34em;
+  font-size: 10px;
+  line-height: 1.75;
+  letter-spacing: 0.06em;
+  color: rgba(255, 244, 224, 0.3);
+  text-align: center;
+}
+
 /* ---------- レスポンシブ ---------- */
 @media (max-width: 720px) {
   .controls,

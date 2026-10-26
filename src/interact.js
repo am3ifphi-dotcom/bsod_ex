@@ -63,7 +63,7 @@ export const FRAGMENT_DEFS = [
   },
 ];
 
-export function createFragments(M, scene) {
+export function createFragments(M, scene, defs = FRAGMENT_DEFS) {
   const ringGeo = new THREE.TorusGeometry(0.085, 0.004, 6, 26);
   const coreGeo = new THREE.IcosahedronGeometry(0.045, 0);
   const spriteMat = (tex) =>
@@ -76,7 +76,7 @@ export function createFragments(M, scene) {
       opacity: 0.9,
     });
 
-  return FRAGMENT_DEFS.map((def, i) => {
+  return defs.map((def, i) => {
     const g = new THREE.Group();
     g.position.set(...def.pos);
     const core = new THREE.Mesh(coreGeo, M.fragment.clone());

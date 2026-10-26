@@ -61,8 +61,15 @@ async function boot() {
     canvas,
     stickZone: $('stickZone'),
     stickKnob: $('stickKnob'),
+    radius: world.playerRadius,
+    bounds: world.bounds,
   });
   player.touchMode = isTouch();
+  if (world.spawn) {
+    START.x = world.spawn.x;
+    START.z = world.spawn.z;
+    START.yaw = world.spawn.yaw;
+  }
   player.teleport(START.x, START.z, START.yaw);
 
   interact = new Interaction({
@@ -88,6 +95,10 @@ async function boot() {
         globeSpin = 4;
         audio.knock();
       },
+      lamp: () => {
+        audio.knock();
+        ui.toast('スイッチは、もう反応しない。');
+      },
       default: () => audio.knock(),
       onDiscover: (h, n) => {
         ui.notes(n, world.hotspots.length);
@@ -101,7 +112,12 @@ async function boot() {
     },
   });
 
-  minimap = new Minimap($('minimap'), { fragments: world.fragments, colliders: world.colliders });
+  minimap = new Minimap($('minimap'), {
+    fragments: world.fragments,
+    colliders: world.colliders,
+    bounds: world.bounds,
+    mode: world.mode,
+  });
   fab = new SketchfabPanel(ui);
 
   ui.notes(0, world.hotspots.length);
@@ -380,13 +396,15 @@ function onResize() {
 /* ------------------------------------------------------------------ */
 function animateProps(dt) {
   const r = world.refs;
-  const fr = world.furnRefs;
+  const fr = world.furnRefs || {};
 
-  // 扇風機
+  // 扇風機（GLB 版には無い）
   const f = r.fan;
-  const target = f.on ? 17 : 0;
-  f.speed += (target - f.speed) * Math.min(1, dt * (f.on ? 3.2 : 1.2));
-  f.blades.rotation.x += f.speed * dt;
+  if (f) {
+    const target = f.on ? 17 : 0;
+    f.speed += (target - f.speed) * Math.min(1, dt * (f.on ? 3.2 : 1.2));
+    f.blades.rotation.x += f.speed * dt;
+  }
 
   // 地球儀
   if (globeSpin > 0 && fr.globe) {

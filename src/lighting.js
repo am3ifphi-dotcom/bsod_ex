@@ -207,8 +207,8 @@ export class TimeOfDay {
     s.ambientIntensity = this.ambient.intensity;
     s.shaftIntensity = this.to.shaftIntensity;
     s.shaftColor = this.to.shaftColor;
-    s.lampEmissive = this.refs.lamps[0].emissiveIntensity;
-    s.lampLight = this.refs.lampLights[0].intensity;
+    s.lampEmissive = this.refs.lamps.length ? this.refs.lamps[0].emissiveIntensity : 0;
+    s.lampLight = this.refs.lampLights.length ? this.refs.lampLights[0].intensity : 0;
     s.corridorLight = this.refs.corridorLight.intensity;
     s.corridorWindow = this.refs.corridorWindow.material.color.getHex();
     s.exposure = this.renderer.toneMappingExposure;

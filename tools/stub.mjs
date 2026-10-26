@@ -116,7 +116,36 @@ function makeCanvas(w = 300, h = 150) {
 globalThis.document = {
   createElement(tag) {
     if (tag === 'canvas') return makeCanvas();
-    return { style: {}, appendChild() {}, addEventListener() {}, classList: { add() {}, remove() {}, toggle() {}, contains: () => false } };
+    const el = {
+      tagName: String(tag).toUpperCase(),
+      nodeName: String(tag).toUpperCase(),
+      style: {},
+      width: 0, height: 0,
+      onload: null, onerror: null,
+      appendChild() {},
+      addEventListener(type, fn) { (el._l ||= {})[type] = fn; },
+      removeEventListener() {},
+      dispatchEvent(ev) { const fn = el._l && el._l[ev.type]; if (fn) fn(ev); return true; },
+      classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+      getAttribute: () => null,
+      setAttribute() {},
+    };
+    if (String(tag).toLowerCase() === 'img') {
+      let src = '';
+      Object.defineProperty(el, 'src', {
+        get: () => src,
+        set: (v) => {
+          src = v;
+          // GLTFLoader の TextureLoader は image.onload を待つので発火させる
+          setTimeout(() => {
+            el.width = 4; el.height = 4; el.naturalWidth = 4; el.naturalHeight = 4; el.complete = true;
+            if (typeof el.onload === 'function') el.onload();
+            el.dispatchEvent({ type: 'load' });
+          }, 0);
+        },
+      });
+    }
+    return el;
   },
   createElementNS(ns, tag) {
     return this.createElement(tag);
