@@ -1,0 +1,30 @@
+{
+  "name": "omoide-classroom",
+  "version": "1.0.0",
+  "private": true,
+  "description": "思い出の教室 — three.js 製・一人称3D探検",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5173",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4173",
+    "model:fetch": "node tools/fetch-model.mjs",
+    "egress:probe": "node tools/probe-egress.mjs",
+    "model:inspect": "node tools/inspect-glb.mjs public/models/classroom.glb",
+    "test": "node tools/smoke.mjs"
+  },
+  "keywords": [
+    "threejs",
+    "3d",
+    "exploration",
+    "first-person"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@gltf-transform/cli": "^4.5.1",
+    "vite": "^8.3.5"
+  }
+}

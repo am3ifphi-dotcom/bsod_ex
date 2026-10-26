@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#1a140e" />
+    <title>思い出の教室 — 3D探検</title>
+    <meta
+      name="description"
+      content="three.js で作った古い教室を、一人称視点で歩き回って調べる3D探検。"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231f2b23'/%3E%3Crect x='4' y='7' width='24' height='15' rx='2' fill='%23243a2c' stroke='%23a98b5d' stroke-width='2'/%3E%3Cpath d='M8 12h9M8 16h13M8 19h6' stroke='%23f2ead6' stroke-width='1.4' stroke-linecap='round'/%3E%3Crect x='6' y='25' width='20' height='2' rx='1' fill='%23a98b5d'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="scene"></canvas>
+      <div id="vignette" aria-hidden="true"></div>
+      <div id="grain" aria-hidden="true"></div>
+    </div>
+
+    <!-- ===== HUD ===== -->
+    <div id="hud" class="hidden">
+      <div id="crosshair"><span></span></div>
+
+      <div id="prompt" class="hidden">
+        <kbd id="promptKey">E</kbd>
+        <span id="promptText">調べる</span>
+      </div>
+
+      <div id="topbar">
+        <div class="chip" id="chipMemories" title="集めた記憶のかけら">
+          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+            <path
+              d="M12 2l2.4 6.2L21 9.3l-4.8 4.3 1.4 6.6L12 16.9 6.4 20.2l1.4-6.6L3 9.3l6.6-1.1z"
+              fill="currentColor"
+            />
+          </svg>
+          <span id="memoryCount">0</span><i>/</i><span id="memoryTotal">8</span>
+        </div>
+        <div class="chip" id="chipNotes" title="見つけた思い出">
+          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+            <path
+              d="M5 3h9l5 5v13H5z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linejoin="round"
+            />
+            <path d="M8 12h8M8 16h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          </svg>
+          <span id="notesCount">0</span><i>/</i><span id="notesTotal">0</span>
+        </div>
+        <div class="chip" id="chipTime" title="F: 時間を変える">
+          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+            <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2" />
+            <path d="M12 8v4.5l3 1.8" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none" />
+          </svg>
+          <span id="timeLabel">昼</span>
+        </div>
+      </div>
+
+      <div id="minimapWrap">
+        <canvas id="minimap" width="190" height="170"></canvas>
+        <div id="minimapLabel">教室</div>
+      </div>
+
+      <div id="hintbar">
+        <span><kbd>W A S D</kbd> 移動</span>
+        <span><kbd>Shift</kbd> 走る</span>
+        <span><kbd>E</kbd> 調べる</span>
+        <span><kbd>F</kbd> 時間</span>
+        <span><kbd>J</kbd> ノート</span>
+        <span><kbd>P</kbd> 写真</span>
+        <span><kbd>Esc</kbd> メニュー</span>
+      </div>
+    </div>
+
+    <!-- ===== タッチ操作 ===== -->
+    <div id="touch" class="hidden">
+      <div id="stickZone"><div id="stick"><div id="stickKnob"></div></div></div>
+      <button id="touchAction" class="touchBtn">調べる</button>
+      <button id="touchRun" class="touchBtn small">走る</button>
+    </div>
+
+    <!-- ===== スタート画面 ===== -->
+    <div id="start" class="overlay">
+      <div class="panel start-panel">
+        <p class="eyebrow">three.js first-person exploration</p>
+        <h1>思い出の教室</h1>
+        <p class="lead">
+          誰もいない、古い教室。<br />
+          机の落書き、止まった時計、黒板の日直の字——<br />
+          歩き回って、<b>8つの「記憶のかけら」</b>を探してください。
+        </p>
+
+        <div class="controls">
+          <div class="col">
+            <h2>操作</h2>
+            <ul>
+              <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 移動（矢印キーも可）</li>
+              <li><kbd>Shift</kbd> 走る / <kbd>C</kbd> しゃがむ</li>
+              <li><kbd>マウス</kbd> 視線</li>
+              <li><kbd>E</kbd> 調べる・拾う</li>
+            </ul>
+          </div>
+          <div class="col">
+            <h2>&nbsp;</h2>
+            <ul>
+              <li><kbd>F</kbd> 時間を変える（昼／夕焼け／夜）</li>
+              <li><kbd>J</kbd> 思い出ノート</li>
+              <li><kbd>P</kbd> 写真モード（<kbd>Enter</kbd>で保存）</li>
+              <li><kbd>Esc</kbd> ポーズ・マウス解放</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button id="btnStart" class="primary">教室に入る</button>
+          <button id="btnSketchfabStart" class="ghost">元のSketchfabモデルを見る</button>
+        </div>
+
+        <p class="foot">
+          音が出ます（クリック後に有効化）。スマホではタッチ操作に自動で切り替わります。
+        </p>
+      </div>
+    </div>
+
+    <!-- ===== ポーズ ===== -->
+    <div id="pause" class="overlay hidden">
+      <div class="panel">
+        <h1 class="sm">ひと休み</h1>
+        <div class="actions column">
+          <button id="btnResume" class="primary">探検をつづける</button>
+          <button id="btnSketchfabPause" class="ghost">元のSketchfabモデルを見る</button>
+          <button id="btnTitle" class="ghost">タイトルにもどる</button>
+        </div>
+        <div class="sliders">
+          <label>
+            <span>明るさ</span>
+            <input id="sldExposure" type="range" min="0.6" max="1.8" step="0.05" value="1.05" />
+          </label>
+          <label>
+            <span>音量</span>
+            <input id="sldVolume" type="range" min="0" max="1" step="0.05" value="0.7" />
+          </label>
+          <label class="row">
+            <span>カメラの揺れ</span>
+            <input id="chkBob" type="checkbox" checked />
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 情報カード ===== -->
+    <div id="card" class="hidden">
+      <div class="card-inner">
+        <div class="card-head">
+          <span id="cardTag">思い出</span>
+          <button id="cardClose" aria-label="とじる">×</button>
+        </div>
+        <h2 id="cardTitle"></h2>
+        <p id="cardBody"></p>
+        <p id="cardExtra" class="card-extra"></p>
+      </div>
+    </div>
+
+    <!-- ===== ノート ===== -->
+    <div id="journal" class="overlay hidden">
+      <div class="panel wide">
+        <div class="panel-head">
+          <h1 class="sm">思い出ノート</h1>
+          <button id="journalClose" aria-label="とじる">×</button>
+        </div>
+        <p class="lead small">教室で見つけたものが、ここに増えていきます。</p>
+        <div id="journalList"></div>
+        <div class="actions">
+          <button id="btnJournalClose" class="primary">とじる</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== エンディング ===== -->
+    <div id="ending" class="overlay hidden">
+      <div class="panel">
+        <p class="eyebrow">all memories found</p>
+        <h1 class="sm">思い出を、全部みつけた</h1>
+        <p class="lead" id="endingText">
+          がらんとした教室に、チャイムが鳴った気がする。<br />
+          机の傷も、黒板の字も、あの頃のままで——。
+        </p>
+        <div class="actions">
+          <button id="btnEndingClose" class="primary">まだ見てまわる</button>
+          <button id="btnEndingPhoto" class="ghost">写真モード</button>
+          <button id="btnEndingSketchfab" class="ghost">Sketchfabの元モデル</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Sketchfab ===== -->
+    <div id="fab" class="overlay hidden">
+      <div class="panel wide fab-panel">
+        <div class="panel-head">
+          <h1 class="sm">The Japanese School Classroom — Sketchfab</h1>
+          <button id="fabClose" aria-label="とじる">×</button>
+        </div>
+        <div id="fabStage">
+          <div id="fabLoading">Sketchfab ビューアを読み込んでいます…</div>
+          <iframe
+            id="fabFrame"
+            title="The Japanese School Classroom by volvor — Sketchfab (CC-BY-4.0)"
+            frameborder="0"
+            allow="autoplay; fullscreen; xr-spatial-tracking"
+            allowfullscreen
+            xr-spatial-tracking
+            mozallowfullscreen
+            webkitallowfullscreen
+          ></iframe>
+        </div>
+        <div class="fab-foot">
+          <p>
+            いま歩いている教室のモデルそのもの。サンドボックスからはSketchfabに接続できないため、
+            こちらの埋め込みはあなたのブラウザから直接読み込まれます。<br />
+            “The Japanese School Classroom” by
+            <a href="https://sketchfab.com/volvor" target="_blank" rel="noopener noreferrer">volvor</a>
+            — <a href="http://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC-BY-4.0</a><br />
+            なお最初に依頼された
+            <a
+              href="https://sketchfab.com/3d-models/old-classroom-be2db5bb488a4392abda0d36c7b46e71"
+              target="_blank"
+              rel="noopener noreferrer"
+              >「Old Classroom」</a
+            >
+            は Sketchfab Store の有料（ダウンロード不可）のため組み込めず、
+            代わりにこの CC-BY の日本の教室を採用しました。
+          </p>
+          <a
+            id="fabLink"
+            href="https://sketchfab.com/3d-models/the-japanese-school-classroom-d9fc039ba0b6433db91ec129abe86b52"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Sketchfabで開く ↗</a
+          >
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== トースト ===== -->
+    <div id="toast" class="hidden"></div>
+
+    <!-- ===== ロード ===== -->
+    <div id="loading">
+      <div class="loader">
+        <div class="loader-bar"><span id="loadBar"></span></div>
+        <p id="loadText">教室を準備中…</p>
+        <p class="load-credit">
+          教室モデル: “The Japanese School Classroom” by volvor — CC-BY-4.0<br />
+          This work is based on "The Japanese School Classroom"
+          (<a href="https://sketchfab.com/3d-models/the-japanese-school-classroom-d9fc039ba0b6433db91ec129abe86b52"
+            target="_blank" rel="noopener noreferrer">sketchfab.com/3d-models/the-japanese-school-classroom-d9fc039ba0b6433db91ec129abe86b52</a>)
+          by <a href="https://sketchfab.com/volvor" target="_blank" rel="noopener noreferrer">volvor</a>
+          licensed under
+          <a href="http://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC-BY-4.0</a>
+        </p>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
