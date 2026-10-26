@@ -167,10 +167,36 @@ node tools/fetch-model.mjs --repo me/assets --path models/room.glb --ref main --
 
 → **トークンがあっても、URL変換でも、1ホップリレーでも取得できない**（購入が唯一の道で、
 購入しても Standard ライセンスの範囲。公開リポジトリへの再アップは不可）。
-したがって本プロジェクトは MIT の代替教室（grep-many/ryoshi）を使うのが正解。
-同じ作者に「Japanese Classroom」等があり、Sketchfab には **CC Attribution で DL 可能な日本の教室パーツ**
-（窓 16.6 MB GLB / カーテン / 机 1.35 MB GLB など）が実在する。フル部屋が欲しくなったら
-`/v3/search?type=models&downloadable=true&q=japanese classroom` を fetch_page で叩いて候補を出すこと。
+
+**Sketchfab の API 文書から確定した「トークンが使えない理由」**（再調査不要）：
+
+- Download API: 「100万以上の無料 CC モデルを glTF / GLB / USDZ で提供。**DL には Sketchfab アカウントでの
+  認証が必要**（＝エンドユーザーがアプリ内でログインする設計）」。FBX/OBJ は不可。
+- ところが本環境では (1) sandbox の curl は `api.sketchfab.com` に TLS で届かない、
+  (2) `fetch_page` は **URL しか渡せず `Authorization` ヘッダを付けられない**、
+  (3) `fetch_page` は**バイナリを運べない**（PNG → HTTP 500）。
+  → **認証情報を渡す手段そのものが無い。** トークンは「足りないピース」ではない。
+- OAuth2: アプリ登録は Sketchfab への問い合わせ（Client ID/Secret の発行）が必要で日数がかかる。
+  Username/Password グラントは**ユーザーのパスワードを要求することになるので絶対に使わない**。
+
+**代わりに使える正規ルート（実測で候補を確認済み）**：Sketchfab には
+**CC Attribution＝クレジット明記で再配布可**の無料DL可能な日本の教室がある。
+CC-BY なら *公開 GitHub リポジトリへのリレーも合法* なので、1ホップ（ユーザーがブラウザでDL →
+公開リポジトリへ置く → URLを貼る）で `npm run model:fetch -- <URL>` がそのまま効く。
+
+| モデル | UID | 規模 | DL数 | ライセンス |
+|---|---|---|---|---|
+| Japanese Classroom / T I A N (@Tian96) | `2a1e3b294c1e4e91bed794bfa520c4f4` | 326k tris / 169.9k verts | 25,273 | CC-BY |
+| The Japanese School Classroom / volvor | `d9fc039ba0b6433db91ec129abe86b52` | **22.1k tris** / 13.1k verts | 3,447 | CC-BY |
+| Japanese Classroom / davioly | `2930eb3931fd48778fb338252ae08599` | 259.5k tris / 135.2k verts | 3,969 | CC-BY |
+| Anime Classroom / ArielCastilleroV | `6e17b75780c044429323cd7ab6a5b83c` | — | — | CC-BY |
+| School Classroom / Alihan | `dbc97b1e744348bdb01f440bc5d472e2` | 76.8k tris | 1,749 | CC-BY |
+| Japanese Classroom / favorsLab（古い日本の教室・33 textures） | `e96f7511f84444ce93315436654d36b0` | 130,676 polys | — | **DL不可表記** |
+
+候補の追加調査は `https://api.sketchfab.com/v3/search?type=models&downloadable=true&q=japanese classroom`
+（fetch_page 経由で叩ける。`archives.glb.size` で GLB の実サイズ、`license.label` で許諾が分かる）。
+**差し替えたら §3 の手順（縮尺逆算 → 占有グリッド → 物/かけらの再配置 → smoke `[13][14]`）をやり直すこと。**
+CC-BY なのでクレジット（作者名・モデル名・ライセンス・元URL）を README とロード画面の両方に入れること。
 
 - モデル: `public/models/classroom.glb` — © grep-many / Ryoshi, **MIT**
   （`github.com/grep-many/ryoshi` の `web/public/models/classroom_alternative.glb`）
