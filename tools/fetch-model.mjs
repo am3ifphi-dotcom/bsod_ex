@@ -174,24 +174,36 @@ const order =
   via === 'auto' ? ['contents', 'blob', 'tarball'] : [via];
 
 let buf = null;
-let lastErr = null;
+const errs = [];
 for (const step of order) {
   try {
     console.log(`  経路: ${step}`);
     buf = step === 'contents' ? await viaContents() : step === 'blob' ? await viaBlob() : await viaTarball();
     if (buf && buf.length) break;
+    buf = null;
   } catch (e) {
-    lastErr = e;
-    console.log(`  ${step} 失敗: ${e.message.split('\n')[0]}`);
+    const msg = String(e.message);
+    errs.push(msg);
+    console.log(`  ${step} 失敗: ${msg.split('\n')[0]}`);
     buf = null;
   }
 }
 if (!buf) {
-  console.error(`\n✗ 取得できませんでした。最後に起きたエラー:\n  ${lastErr ? lastErr.message : '不明'}`);
-  console.error('\n  確認してほしいこと:');
-  console.error('   - そのリポジトリ／パス／ref が実在するか（大文字小文字も）');
-  console.error('   - .glb が Git LFS に入っていないか（LFS ポインタだと glTF になりません）');
-  console.error('   - private の場合は gh auth status が通っているか');
+  const notFound = errs.length > 0 && errs.every((m) => /404|Not found in archive/i.test(m));
+  console.error('\n✗ 取得できませんでした。');
+  if (notFound) {
+    console.error(`  → github.com/${repo} の "${ref}" に「${path}」がありません。`);
+    console.error('    そのパスへ .glb をコミットしてください。');
+    console.error('    ・25MB まで: github.com の Web UI へドラッグ＆ドロップ');
+    console.error('    ・それ以上: git add / push、またはこのチャットに添付');
+    console.error(`    確認コマンド: gh api repos/${repo}/contents/${path}?ref=${ref}`);
+  } else {
+    console.error(`  最後に起きたエラー: ${(errs[errs.length - 1] || '不明').split('\n')[0]}`);
+    console.error('  確認してほしいこと:');
+    console.error('   - リポジトリ名／パス／ref が実在するか（大文字小文字も）');
+    console.error('   - .glb が Git LFS に入っていないか（LFS ポインタだと glTF になりません）');
+    console.error('   - private リポジトリなら gh auth status が通っているか');
+  }
   process.exit(1);
 }
 
