@@ -102,6 +102,8 @@ const G = {
 };
 
 const tmpObj = new THREE.Object3D();
+const tmpVec = new THREE.Vector3();
+const tmpVec2 = new THREE.Vector3();
 const tmpColor = new THREE.Color();
 
 function jitter(geometry, amount, seed) {
@@ -916,7 +918,8 @@ export class World {
 
     if (this.focusIndex >= 0) {
       const entry = this.islands[this.focusIndex];
-      this.focusLight.position.copy(entry.root.position).add(new THREE.Vector3(0, 3, 0));
+      this.focusLight.position.copy(entry.root.position);
+      this.focusLight.position.y += 3;
       this.focusLight.intensity = 46 * entry.hover;
     } else {
       this.focusLight.intensity = 0;
@@ -937,9 +940,9 @@ export class World {
 
   /** 島のスクリーン座標と距離。HTML ビルボード用。 */
   project(entry, width, height) {
-    const pos = entry.root.position.clone();
-    pos.y += 6.4;
-    const vector = pos.clone().project(this.camera);
+    tmpVec.copy(entry.root.position);
+    tmpVec.y += 6.4;
+    const vector = tmpVec.project(this.camera);
     const distance = this.camera.position.distanceTo(entry.root.position);
     const behind = vector.z > 1 || vector.z < -1;
     return {
@@ -964,6 +967,7 @@ export class World {
   }
 
   getIslandAt(clientX, clientY) {
+    // レイキャストはクリック時のみ。毎フレームは行わない。
     const rect = this.canvas.getBoundingClientRect();
     this.pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
     this.pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;

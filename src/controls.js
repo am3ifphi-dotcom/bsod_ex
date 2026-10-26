@@ -7,6 +7,10 @@ import * as THREE from 'three';
  *  - 島をクリックすると自動航行
  */
 
+const tmpA = new THREE.Vector3();
+const tmpB = new THREE.Vector3();
+const tmpDir = new THREE.Vector3();
+
 const MIN_Y = 2.4;
 const MAX_Y = 64;
 const WORLD_RADIUS = 150;
@@ -55,9 +59,10 @@ export class Explorer {
 
     window.addEventListener('keydown', (event) => {
       if (event.target instanceof HTMLInputElement) return;
+      if (!event.repeat) this.onKey(event);
+      if (!this.enabled) return; // 3Dビューア表示中はワールド操作を止める
       if (blocked.has(event.code)) event.preventDefault();
       this.keys.add(event.code);
-      if (!event.repeat) this.onKey(event);
       if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) {
         this.cancelAutopilot(true);
       }
@@ -236,9 +241,9 @@ export class Explorer {
         this.onAutopilotEnd?.(ap.entry);
       }
     } else {
-      const forward = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
-      const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
-      const input = new THREE.Vector3();
+      const forward = tmpA.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+      const right = tmpB.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+      const input = tmpDir.set(0, 0, 0);
 
       if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) input.add(forward);
       if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) input.sub(forward);
@@ -291,26 +296,20 @@ export class Explorer {
   _applyCamera() {
     const camera = this.camera;
     camera.position.copy(this.position);
-    const dir = new THREE.Vector3(
-      Math.sin(this.yaw) * Math.cos(this.pitch),
-      Math.sin(this.pitch),
-      Math.cos(this.yaw) * Math.cos(this.pitch)
-    );
-    camera.lookAt(this.position.clone().add(dir));
+    const cp = Math.cos(this.pitch);
+    tmpA.set(Math.sin(this.yaw) * cp, Math.sin(this.pitch), Math.cos(this.yaw) * cp);
+    camera.lookAt(tmpB.copy(this.position).add(tmpA));
   }
 
   _updateFocus() {
-    const forward = new THREE.Vector3(
-      Math.sin(this.yaw) * Math.cos(this.pitch),
-      Math.sin(this.pitch),
-      Math.cos(this.yaw) * Math.cos(this.pitch)
-    );
+    const cp = Math.cos(this.pitch);
+    const forward = tmpA.set(Math.sin(this.yaw) * cp, Math.sin(this.pitch), Math.cos(this.yaw) * cp);
 
     let best = null;
     let bestScore = Infinity;
 
     for (const entry of this.world.islands) {
-      const to = entry.root.position.clone().sub(this.position);
+      const to = tmpB.copy(entry.root.position).sub(this.position);
       const distance = to.length();
       if (distance > 30 || distance < 0.5) continue;
       const dot = to.normalize().dot(forward);

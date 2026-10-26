@@ -108,10 +108,16 @@ async function init() {
   viewer = new ModelViewer({
     onOpen: () => {
       state.viewerOpen = true;
+      if (explorer) {
+        explorer.enabled = false;
+        explorer.keys.clear();
+        explorer.velocity.set(0, 0, 0);
+      }
       paintPerf();
     },
     onClose: () => {
       state.viewerOpen = false;
+      if (explorer) explorer.enabled = true;
       paintPerf();
     },
   });
@@ -454,6 +460,8 @@ function handleKey(event) {
     cardRetiredFor = state.focus ? state.focus.index : -1;
     return;
   }
+
+  if (viewer.isOpen) return;
 
   if (event.code === 'KeyE') {
     if (state.focus) openViewer(state.focus);
