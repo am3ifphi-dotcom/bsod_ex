@@ -1,0 +1,239 @@
+{
+  "generated": "2026-10-24T13:56:25.961Z",
+  "textures": [
+    {
+      "set": "woodfloor",
+      "maps": {
+        "color": "WoodFloor041_2K_Color.jpg",
+        "normal": "WoodFloor041_2K_Normal.jpg",
+        "rough": "WoodFloor041_2K_Roughness.jpg",
+        "ao": "WoodFloor041_2K_AmbientOcclusion.jpg"
+      },
+      "credit": "ambientCG — WoodFloor041 (CC0)"
+    },
+    {
+      "set": "wood",
+      "maps": {
+        "color": "Wood027_2K_Color.jpg",
+        "normal": "Wood027_2K_Normal.jpg",
+        "rough": "Wood027_2K_Roughness.jpg"
+      },
+      "credit": "ambientCG — Wood027 (CC0)"
+    },
+    {
+      "set": "fabric",
+      "maps": {
+        "color": "Fabric026_2K_Color.jpg",
+        "normal": "Fabric026_2K_Normal.jpg",
+        "rough": "Fabric026_2K_Roughness.jpg"
+      },
+      "credit": "ambientCG — Fabric026 (CC0)"
+    },
+    {
+      "set": "metal",
+      "maps": {
+        "color": "Metal035_2K_Color.jpg",
+        "normal": "Metal035_2K_Normal.jpg",
+        "rough": "Metal035_2K_Roughness.jpg",
+        "metal": "Metal035_2K_Metalness.jpg"
+      },
+      "credit": "ambientCG — Metal035 (CC0)"
+    },
+    {
+      "set": "metal_dark",
+      "maps": {
+        "color": "Metal009_2K_Color.jpg",
+        "normal": "Metal009_2K_Normal.jpg",
+        "rough": "Metal009_2K_Roughness.jpg",
+        "metal": "Metal009_2K_Metalness.jpg"
+      },
+      "credit": "ambientCG — Metal009 (CC0)"
+    },
+    {
+      "set": "plastic",
+      "maps": {
+        "color": "Plastic_basecolor.jpg",
+        "normal": "Plastic_normal.jpg",
+        "rough": "Plastic_roughness.jpg"
+      },
+      "credit": "ambientCG — Plastic (CC0)"
+    },
+    {
+      "set": "rock",
+      "maps": {
+        "color": "rock_05_diff_2k.jpg",
+        "normal": "rock_05_nor_2k.jpg",
+        "rough": "rock_05_rough_2k.jpg",
+        "ao": "rock_05_ao_2k.jpg"
+      },
+      "credit": "Poly Haven — rock_05 (CC0)"
+    },
+    {
+      "set": "sandstone",
+      "maps": {
+        "color": "sandstone_cracks_diff_2k.jpg",
+        "normal": "sandstone_cracks_nor_2k.jpg",
+        "rough": "sandstone_cracks_rough_2k.jpg",
+        "ao": "sandstone_cracks_AO_2k.jpg"
+      },
+      "credit": "Poly Haven — sandstone_cracks (CC0)"
+    },
+    {
+      "set": "snow",
+      "maps": {
+        "color": "Snow003_2K_Color.jpg",
+        "normal": "Snow003_2K_Normal.jpg",
+        "rough": "Snow003_2K_Roughness.jpg"
+      },
+      "credit": "ambientCG — Snow003 (CC0)"
+    },
+    {
+      "set": "planks",
+      "maps": {
+        "color": "brown_planks_04_diff_2k.jpg",
+        "normal": "brown_planks_04_nor_2k.jpg",
+        "rough": "brown_planks_04_rough_2k.jpg",
+        "ao": "brown_planks_04_ao_2k.jpg"
+      },
+      "credit": "Poly Haven — brown_planks_04 (CC0)"
+    }
+  ],
+  "hdris": [
+    {
+      "id": "dikhololo_night",
+      "credit": "Poly Haven — dikhololo_night (CC0)",
+      "file": "hdri/dikhololo_night.hdr"
+    },
+    {
+      "id": "large_corridor",
+      "credit": "Poly Haven — large_corridor (CC0)",
+      "file": "hdri/large_corridor.hdr"
+    },
+    {
+      "id": "night",
+      "credit": "Poly Haven — night (CC0, 512px EXR derivative via @pmndrs/assets)",
+      "file": "hdri/night.exr"
+    },
+    {
+      "id": "apartment",
+      "credit": "Poly Haven — apartment (CC0, 512px EXR derivative via @pmndrs/assets)",
+      "file": "hdri/apartment.exr"
+    },
+    {
+      "id": "city",
+      "credit": "Poly Haven — city (CC0, 512px EXR derivative via @pmndrs/assets)",
+      "file": "hdri/city.exr"
+    },
+    {
+      "id": "warehouse",
+      "credit": "Poly Haven — warehouse (CC0, 512px EXR derivative via @pmndrs/assets)",
+      "file": "hdri/warehouse.exr"
+    },
+    {
+      "id": "hall",
+      "credit": "Poly Haven — hall (CC0, 512px EXR derivative via @pmndrs/assets)",
+      "file": "hdri/hall.exr"
+    },
+    {
+      "id": "lab",
+      "credit": "Poly Haven — lab (CC0, 512px EXR derivative via @pmndrs/assets)",
+      "file": "hdri/lab.exr"
+    }
+  ],
+  "models": [
+    {
+      "id": "column",
+      "credit": "Poly Haven — column (CC0)",
+      "file": "models/column.glb",
+      "bytes": 10076
+    },
+    {
+      "id": "pillar",
+      "credit": "Poly Haven — pillar (CC0)",
+      "file": "models/pillar.glb",
+      "bytes": 291888
+    },
+    {
+      "id": "rock",
+      "credit": "Poly Haven — rock (CC0)",
+      "file": "models/rock.glb",
+      "bytes": 749700
+    },
+    {
+      "id": "stone",
+      "credit": "Poly Haven — stone (CC0)",
+      "file": "models/stone.glb",
+      "bytes": 27612
+    },
+    {
+      "id": "sheen_chair",
+      "credit": "CC0-1.0 — Khronos glTF Sample Assets",
+      "file": "models/sheen_chair.glb",
+      "bytes": 1636664
+    },
+    {
+      "id": "lantern",
+      "credit": "CC0-1.0 — Khronos glTF Sample Assets",
+      "file": "models/lantern.glb",
+      "bytes": 521120
+    },
+    {
+      "id": "sofa",
+      "credit": "CC-BY-4.0 — Khronos glTF Sample Assets",
+      "file": "models/sofa.glb",
+      "bytes": 580540
+    },
+    {
+      "id": "helmet",
+      "credit": "CC-BY-NC-4.0 — Khronos glTF Sample Assets (non-commercial only)",
+      "file": "models/helmet.glb",
+      "bytes": 985340
+    }
+  ],
+  "fonts": [
+    {
+      "id": "inter_bold",
+      "credit": "Inter by Rasmus Andersson (SIL OFL 1.1) via @pmndrs/assets",
+      "file": "fonts/inter_bold.json"
+    }
+  ],
+  "licenses": [
+    {
+      "id": "licence_sheen_chair",
+      "file": "licenses/licence_sheen_chair.md",
+      "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/blob/main/Models/SheenChair/LICENSE.md"
+    },
+    {
+      "id": "licence_lantern",
+      "file": "licenses/licence_lantern.md",
+      "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/blob/main/Models/Lantern/LICENSE.md"
+    },
+    {
+      "id": "licence_sofa",
+      "file": "licenses/licence_sofa.md",
+      "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/blob/main/Models/GlamVelvetSofa/LICENSE.md"
+    },
+    {
+      "id": "licence_helmet",
+      "file": "licenses/licence_helmet.md",
+      "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/blob/main/Models/DamagedHelmet/LICENSE.md"
+    }
+  ],
+  "optimized": "2026-10-24T13:57:02.459Z",
+  "audio": [
+    {
+      "id": "all-sound",
+      "credit": "Original procedural synthesis (Web Audio API), made for this project"
+    }
+  ],
+  "engine": [
+    {
+      "id": "three",
+      "credit": "three.js r186 — MIT License"
+    },
+    {
+      "id": "vite",
+      "credit": "Vite — MIT License"
+    }
+  ]
+}

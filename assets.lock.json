@@ -1,0 +1,44 @@
+{
+  "files": {
+    "enviropacks": {
+      "sha256": "ce5772095da479c237e311cbd4a364f24e7bdacc00a7f7a1d22eb48aa9f139bd",
+      "bytes": 90171385
+    },
+    "pmndrs-assets": {
+      "sha256": "152bd218a3390703f184f0c6ce16e73c8f0a87f32d38530d418a09d33d8208dc",
+      "bytes": 13774995
+    },
+    "gh:sheen_chair": {
+      "sha256": "f0af2a2b102d28d540236306ae19f8fb36842df76bd38cf76f063f9bd2853399",
+      "bytes": 4125648
+    },
+    "gh:lantern": {
+      "sha256": "a79458c4b02d695187a952f23a63b8bf278e7bc3d316a3c2a314f2d6974181f1",
+      "bytes": 9564264
+    },
+    "gh:sofa": {
+      "sha256": "67202c74a1a33377771f162dc7fad612a6c9bd51ee15124c488e9851d9ac5266",
+      "bytes": 3149844
+    },
+    "gh:helmet": {
+      "sha256": "a1e3b04de97b11de564ce6e53b95f02954a297f0008183ac63a4f5974f6b32d8",
+      "bytes": 3773916
+    },
+    "gh:licence_sheen_chair": {
+      "sha256": "52912ef39b0f19a2bf816de4fc5a161d058c334a912633f5470cf2c83e9c10c5",
+      "bytes": 773
+    },
+    "gh:licence_lantern": {
+      "sha256": "59fcd6131454dd17312ff9671094bfe9139f3b301d0c3e3b1a5a7e4ee1b0c75a",
+      "bytes": 911
+    },
+    "gh:licence_sofa": {
+      "sha256": "b9a0328334d3597cf438846bd14eac5cf07a70cc93746cd8b8b569806d1b8c7f",
+      "bytes": 782
+    },
+    "gh:licence_helmet": {
+      "sha256": "9ee9b071d55c4529173af454db46811b631de2f37182e58106e21865366cf865",
+      "bytes": 951
+    }
+  }
+}

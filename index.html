@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#02030a" />
+    <title>BSOD:EX</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="scene"></canvas>
+      <div id="vignette-safe"></div>
+
+      <!-- in-game minimal HUD -->
+      <div id="hud" class="hidden">
+        <div id="reticle"></div>
+        <div id="prompt" class="prompt hidden"><span class="key">E</span><span id="prompt-label">調べる</span></div>
+        <div id="subtitle" class="subtitle"></div>
+        <div id="toast" class="toast"></div>
+        <div id="fps" class="fps hidden"></div>
+        <div id="chapter" class="chapter"></div>
+      </div>
+
+      <!-- title / warning -->
+      <div id="title-screen">
+        <div class="title-wrap">
+          <div class="kicker">A SHORT FIRST-PERSON HORROR</div>
+          <h1 class="logo" data-text="BSOD:EX">BSOD:EX</h1>
+          <div class="logo-sub">青い画面に、食べられる。</div>
+          <div class="warn">
+            <strong>⚠ 光敏感性に関する注意</strong>
+            <p>
+              本作には点滅・画面の乱れ・強い光の表現が含まれます。光に敏感な方、てんかんの既往のある方はご注意ください。
+              設定で「グリッチ演出」「カメラ揺れ」を弱めることができます。
+            </p>
+          </div>
+          <div class="controls-grid">
+            <div><span>WASD</span> 移動</div>
+            <div><span>SHIFT</span> ダッシュ</div>
+            <div><span>マウス</span> 視点</div>
+            <div><span>E / クリック</span> 調べる</div>
+            <div><span>F</span> ライト</div>
+            <div><span>C</span> コンソール</div>
+            <div><span>ESC</span> メニュー</div>
+            <div><span>F3</span> パフォーマンス</div>
+          </div>
+          <div class="title-actions">
+            <button id="start-btn" class="primary">開始する</button>
+            <button id="title-settings-btn" class="ghost">設定</button>
+          </div>
+          <div class="tiny">ヘッドホン推奨 ／ 所要時間 15–25分 ／ 途中でEscから設定・中断できます</div>
+          <div id="load-status" class="load-status">初期化中…</div>
+        </div>
+      </div>
+
+      <!-- pause / settings -->
+      <div id="menu" class="hidden">
+        <div class="menu-panel">
+          <div class="menu-head">
+            <div class="menu-title">PAUSE <span>//</span> SYSTEM</div>
+            <div class="menu-sub">Escで閉じる</div>
+          </div>
+          <div class="menu-tabs">
+            <button class="tab active" data-tab="settings">設定</button>
+            <button class="tab" data-tab="credits">クレジット</button>
+            <button class="tab" data-tab="help">操作</button>
+          </div>
+          <div class="tab-body" data-panel="settings">
+            <label class="row">
+              <span>マウス感度 <em id="sens-val">1.00</em></span>
+              <input id="sens" type="range" min="0.2" max="3" step="0.05" value="1" />
+            </label>
+            <label class="row">
+              <span>音量 <em id="vol-val">70</em></span>
+              <input id="vol" type="range" min="0" max="100" step="1" value="70" />
+            </label>
+            <label class="row">
+              <span>グリッチ演出の強度 <em id="glitch-val">100</em></span>
+              <input id="glitch" type="range" min="0" max="100" step="5" value="100" />
+            </label>
+            <label class="row">
+              <span>カメラ揺れ / ヘッドボブ <em id="shake-val">100</em></span>
+              <input id="shake" type="range" min="0" max="100" step="5" value="100" />
+            </label>
+            <label class="row">
+              <span>画質プリセット</span>
+              <select id="quality">
+                <option value="low">低 (省電力 / 内蔵GPU)</option>
+                <option value="medium" selected>中 (GTX 1650 / M1)</option>
+                <option value="high">高 (RTX 3050 / M1 Pro)</option>
+                <option value="ultra">最高 (RTX 3060+)</option>
+              </select>
+            </label>
+            <label class="row inline">
+              <span>動的解像度 (60fps維持)</span>
+              <input id="dynamic" type="checkbox" checked />
+            </label>
+            <div class="menu-actions">
+              <button id="resume-btn" class="primary">再開</button>
+              <button id="restart-btn" class="ghost">はじめから</button>
+            </div>
+          </div>
+          <div class="tab-body hidden" data-panel="credits">
+            <div id="credits-list" class="credits"></div>
+          </div>
+          <div class="tab-body hidden" data-panel="help">
+            <div class="help">
+              <p><span>WASD</span> 歩く / <span>SHIFT</span> ダッシュ / <span>マウス</span> 見回す</p>
+              <p><span>E</span> または <span>左クリック</span> 調べる / 画面の「:(」をクリック</p>
+              <p><span>F</span> スマホライト / <span>C</span> コンソール / <span>F3</span> パフォーマンス</p>
+              <p>エスケープでこのメニュー。進行状況は自動保存されません。</p>
+              <p class="muted">※ 本作はブラウザゲームです。ブラウザの開発者ツールではなく、ゲーム内コンソール(C)をご利用ください。</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- in-game console -->
+      <div id="console" class="hidden">
+        <div class="console-frame">
+          <div class="console-head">
+            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            <span class="console-title">RECOVERY_CONSOLE — pid 0x0000 — C:\SYSTEM\MEMORY</span>
+            <span class="console-hint">ESC / C で閉じる</span>
+          </div>
+          <div id="console-log" class="console-log"></div>
+          <div class="console-inputline">
+            <span class="caret">&gt;</span>
+            <input id="console-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" maxlength="96" />
+            <span id="console-ime" class="ime">日本語入力</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- click to resume after a pointer-lock drop -->
+      <div id="resume-overlay" class="hidden">
+        <div>クリックして再開</div>
+      </div>
+
+      <div id="blackout"></div>
+      <div id="iris"></div>
+      <div id="loading-veil"><span>LOADING MEMORY…</span></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
