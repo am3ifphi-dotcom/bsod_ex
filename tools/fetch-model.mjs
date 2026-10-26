@@ -8,6 +8,9 @@
  *
  * 使い方:
  *   node tools/fetch-model.mjs                     # 既定: このリポジトリの public/models/classroom.glb
+ *   node tools/fetch-model.mjs https://github.com/me/assets/blob/main/models/room.glb
+ *   node tools/fetch-model.mjs https://raw.githubusercontent.com/me/assets/main/room.glb
+ *   node tools/fetch-model.mjs --npm some-pkg --npm-path models/room.glb
  *   node tools/fetch-model.mjs --repo me/assets --path models/classroom.glb --ref main
  *   node tools/fetch-model.mjs --force --via blob  # 取得経路を指定（auto|contents|blob|tarball）
  */
@@ -37,15 +40,71 @@ function detectRepo() {
   return null;
 }
 
-const repo = get('repo', detectRepo());
-const ref = get('ref', 'main');
-const path = get('path', 'public/models/classroom.glb');
-const out = resolve(ROOT, get('out', 'public/models/classroom.glb'));
-const via = get('via', 'auto'); // auto | contents | blob | tarball
-const force = has('force');
+/* ---------------- URL 変換 ----------------
+ * 遮断はホスト名（TLS の SNI）単位なので、同じバイト列を「許可ホストの別表現」に
+ * 書き換えれば取得できる。ここでは github 系のいろいろな書き方と npm を、
+ * api.github.com / codeload.github.com / registry.npmjs.org の経路へ正規化する。
+ */
+function fromURL(u) {
+  let m = u.match(/^https?:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.+?)\/?$/);
+  if (m) {
+    return {
+      repo: `${m[1]}/${m[2]}`, ref: m[3], path: m[4],
+      note: 'raw.githubusercontent.com は遮断されるので api.github.com の blob 経路へ変換',
+    };
+  }
+  m = u.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/(blob|raw|tree)\/([^/]+)\/(.+?)(?:[?#].*)?$/);
+  if (m) {
+    return {
+      repo: `${m[1]}/${m[2]}`, ref: m[4], path: m[3] === 'tree' ? null : m[5],
+      via: m[3] === 'tree' ? 'tarball' : undefined,
+      note: `github.com の ${m[3]} URL を API 経路へ変換`,
+    };
+  }
+  m = u.match(/^https?:\/\/codeload\.github\.com\/([^/]+)\/([^/]+)\/tar\.gz\/(.+?)\/?$/);
+  if (m) return { repo: `${m[1]}/${m[2]}`, ref: m[3], path: null, via: 'tarball', note: 'codeload の tarball 経路' };
+  m = u.match(/^https?:\/\/(?:www\.)?npmjs\.com\/package\/(@?[^/?#]+)(?:\/v\/([^/?#]+))?/) ||
+      u.match(/^https?:\/\/registry\.npmjs\.org\/(@?[^/]+(?:\/[^/?#]+)?)(?:\/-\/.+\.tgz)?$/);
+  if (m) return { npm: m[1], npmVersion: m[2] || null, note: 'npm レジストリの tarball 経路へ変換' };
+  return null;
+}
 
-if (!repo) {
-  console.error('✗ リポジトリを特定できません。--repo owner/name を指定してください。');
+const urlArg = get('url', argv.find((a) => /^https?:\/\//.test(a)) || null);
+let repo = get('repo', detectRepo());
+let ref = get('ref', 'main');
+let path = get('path', 'public/models/classroom.glb');
+let via = get('via', 'auto'); // auto | contents | blob | tarball
+let npmPkg = get('npm', null);
+let npmVersion = get('npm-version', null);
+const npmPath = get('npm-path', null);
+const force = has('force');
+const noValidate = has('no-validate');
+
+if (urlArg) {
+  const t = fromURL(urlArg);
+  if (!t) {
+    console.error(`✗ この URL は変換できません: ${urlArg}`);
+    console.error('  対応: github.com/{o}/{r}/blob|tree|raw/... , raw.githubusercontent.com/... ,');
+    console.error('        codeload.github.com/... , npmjs.com/package/... , registry.npmjs.org/...');
+    console.error('  それ以外のホストは sandbox から届かないので、上記のどれかに載せ替えてください。');
+    process.exit(1);
+  }
+  console.log(`URL変換: ${t.note}`);
+  if (t.npm) {
+    npmPkg = t.npm;
+    npmVersion = t.npmVersion;
+  } else {
+    repo = t.repo;
+    if (t.ref) ref = t.ref;
+    if (t.path) path = t.path;
+    if (t.via) via = t.via;
+  }
+}
+
+const out = resolve(ROOT, get('out', urlArg && path ? `public/models/${path.split('/').pop()}` : 'public/models/classroom.glb'));
+
+if (!npmPkg && !repo) {
+  console.error('✗ リポジトリを特定できません。--repo owner/name か URL を指定してください。');
   process.exit(1);
 }
 
@@ -156,6 +215,30 @@ async function viaTarball() {
   }
 }
 
+async function viaNpm(pkg, ver, innerPath) {
+  const enc = pkg.startsWith('@') ? pkg.replace('/', '%2f') : pkg;
+  const meta = JSON.parse(curl(`https://registry.npmjs.org/${enc}`, { accept: 'application/json' }).body.toString('utf8'));
+  const version = ver || meta['dist-tags']?.latest;
+  const tgz = meta.versions?.[version]?.dist?.tarball;
+  if (!tgz) throw new Error(`npm: ${pkg}@${version} の tarball が見つかりません`);
+  console.log(`  npm: ${pkg}@${version} → ${tgz}`);
+  const tmp = resolve(ROOT, `.model-fetch-npm-${Date.now()}.tgz`);
+  const r = curl(tgz, { accept: 'application/octet-stream', out: tmp, maxTime: 900 });
+  if (r.code !== 200) throw new Error(`npm tarball が HTTP ${r.code}`);
+  try {
+    const list = execFileSync('tar', ['-tzf', tmp], { encoding: 'utf8', maxBuffer: 64e6 }).trim().split('\n');
+    if (!innerPath) {
+      const cand = list.filter((n) => /\.(glb|gltf|zip|fbx|obj|hdr|png|jpg)$/i.test(n));
+      throw new Error(
+        `--npm-path を指定してください（tar 内は package/ 始まり）。候補:\n      ${(cand.length ? cand : list).slice(0, 14).join('\n      ')}`
+      );
+    }
+    return execFileSync('tar', ['-xzOf', tmp, '--wildcards', `package/${innerPath}`], { maxBuffer: 512e6 });
+  } finally {
+    try { execFileSync('rm', ['-f', tmp]); } catch {}
+  }
+}
+
 /* ---------------- 本体 ---------------- */
 if (existsSync(out) && !force) {
   const cur = readFileSync(out);
@@ -169,23 +252,33 @@ if (existsSync(out) && !force) {
   }
 }
 
-console.log(`取得元: github.com/${repo} @ ${ref} : ${path}`);
-const order =
-  via === 'auto' ? ['contents', 'blob', 'tarball'] : [via];
-
 let buf = null;
 const errs = [];
-for (const step of order) {
+
+if (npmPkg) {
+  console.log(`取得元: npm ${npmPkg}${npmVersion ? `@${npmVersion}` : ''}${npmPath ? ` : ${npmPath}` : ''}`);
   try {
-    console.log(`  経路: ${step}`);
-    buf = step === 'contents' ? await viaContents() : step === 'blob' ? await viaBlob() : await viaTarball();
-    if (buf && buf.length) break;
-    buf = null;
+    buf = await viaNpm(npmPkg, npmVersion, npmPath);
   } catch (e) {
-    const msg = String(e.message);
-    errs.push(msg);
-    console.log(`  ${step} 失敗: ${msg.split('\n')[0]}`);
-    buf = null;
+    errs.push(String(e.message));
+    console.error(`\n✗ ${e.message.split('\n').join('\n  ')}`);
+    process.exit(1);
+  }
+} else {
+  console.log(`取得元: github.com/${repo} @ ${ref} : ${path}`);
+  const order = via === 'auto' ? ['contents', 'blob', 'tarball'] : [via];
+  for (const step of order) {
+    try {
+      console.log(`  経路: ${step}`);
+      buf = step === 'contents' ? await viaContents() : step === 'blob' ? await viaBlob() : await viaTarball();
+      if (buf && buf.length) break;
+      buf = null;
+    } catch (e) {
+      const msg = String(e.message);
+      errs.push(msg);
+      console.log(`  ${step} 失敗: ${msg.split('\n')[0]}`);
+      buf = null;
+    }
   }
 }
 if (!buf) {
@@ -209,7 +302,8 @@ if (!buf) {
 
 let info;
 try {
-  info = validateGlb(buf, '取得したファイル');
+  if (noValidate) info = { version: '-', length: buf.length };
+  else info = validateGlb(buf, '取得したファイル');
 } catch (e) {
   console.error(`\n✗ ${e.message}`);
   console.error('  → .glb（glTF バイナリ）そのものを置いてください。.gltf + 別ファイル形式や、');

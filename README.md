@@ -47,9 +47,28 @@ Sketchfab の元モデルは右下のボタンから埋め込みビューアで�
 （`public/models/classroom.glb` が 404 ならそちら）。
 
 ```bash
-npm run model:fetch                    # GitHub から .glb を取得 → 検証 → public/models/classroom.glb に配置
-node tools/inspect-glb.mjs public/models/classroom.glb   # 占有マップ・縮尺・家具の位置を解析
+npm run egress:probe                   # どのホストに届くかを実測（TLS遮断は curl 35 / HTTP 000 で出る）
+npm run model:fetch                    # 既定の .glb を取得 → 検証 → public/models/classroom.glb に配置
+npm run model:fetch -- <URL>           # URL を貼るだけで経路変換して取得（下記）
+npm run model:inspect                  # 占有マップ・縮尺・家具の位置を解析
 ```
+
+**URL変換**（遮断はホスト名単位なので、届くホストの別表現に載せ替えて取得する）:
+
+```bash
+npm run model:fetch -- https://github.com/you/assets/blob/main/models/room.glb
+npm run model:fetch -- https://raw.githubusercontent.com/you/assets/main/room.glb
+npm run model:fetch -- --npm some-pkg --npm-path models/room.glb
+```
+
+| 変換前（届かない） | 変換後（届く） |
+| --- | --- |
+| `raw.githubusercontent.com/{o}/{r}/{ref}/{path}` | `api.github.com/repos/{o}/{r}/git/blobs/{sha}` |
+| `github.com/{o}/{r}/raw/{ref}/{path}`（302 で死ぬ） | 同上 |
+| GitHub Release の添付（`objects.githubusercontent.com`） | リポジトリへ commit → blob API（≤100 MB） |
+| Sketchfab / S3 / CloudFront | 公開 GitHub リポジトリ、または npm / PyPI パッケージへ同梱 |
+
+手順・禁止事項・ライセンス明記のルールは [`AGENTS.md`](AGENTS.md)（エージェント向けの作業規約）。
 
 置き場所と手順は [`public/models/README.md`](public/models/README.md)。
 

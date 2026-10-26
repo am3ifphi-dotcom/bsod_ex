@@ -8,7 +8,10 @@
     "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0 --port 4173",
-    "model:fetch": "node tools/fetch-model.mjs"
+    "model:fetch": "node tools/fetch-model.mjs",
+    "egress:probe": "node tools/probe-egress.mjs",
+    "model:inspect": "node tools/inspect-glb.mjs public/models/classroom.glb",
+    "test": "node tools/smoke.mjs"
   },
   "keywords": [
     "threejs",
