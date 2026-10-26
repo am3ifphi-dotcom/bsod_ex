@@ -29,6 +29,18 @@ npm run preview  # http://localhost:4173
 壁のシミ、木目、黒板の字、チョークの粉、外の景色、足音まで、
 すべて実行時に Canvas 2D と Web Audio で生成します。
 
+## 元モデル（.glb）を使う
+
+この環境からは Sketchfab に接続できないため、教室は three.js で手続き生成しています。
+[Sketchfab の Old Classroom](https://sketchfab.com/3d-models/old-classroom-be2db5bb488a4392abda0d36c7b46e71)
+の `.glb` を GitHub のリポジトリに置いてもらえれば、こちらで取得して差し替えます。
+
+```bash
+npm run model:fetch   # GitHub から .glb を取得 → 検証 → public/models/classroom.glb に配置
+```
+
+置き場所と手順は [`public/models/README.md`](public/models/README.md)。
+
 ## 操作方法
 
 | 操作 | キー |
@@ -79,7 +91,10 @@ src/
   ui.js               HUD・カード・ノート・トースト
   minimap.js          見取り図（実コライダーをそのまま描画）
   sketchfab.js        右下ボタン → 元モデルの埋め込みビューア
+public/models/        元モデル(.glb)の置き場所（README 付き）
 tools/
+  fetch-model.mjs     GitHub から .glb を取得・検証・配置（npm run model:fetch）
+  fixtures/tiny.glb   fetch-model.mjs の検証用（最小の glTF バイナリ）
   smoke.mjs           ブラウザなしで通すスモークテスト（node tools/smoke.mjs）
   audit.mjs           形状監査：壁・床・天井をめり込んでいないか（node tools/audit.mjs）
   stub.mjs            上記のための Canvas 2D / DOM スタブ
