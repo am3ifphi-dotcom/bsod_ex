@@ -53,6 +53,22 @@ TLS ハンドシェイクの失敗（`curl: (35) SSL_ERROR_SYSCALL` / HTTP code 
 | PyPI パッケージ内のファイル | `pypi.org/pypi/{pkg}/json` → `urls[].url`（`files.pythonhosted.org`） | wheel / sdist どちらも可 |
 | GitHub 上のコード検索 | `api.github.com/search/code`（要 Bearer） | `gh api search` は 0 件を返すことがあるので curl 推奨 |
 
+### 1.3b 第2の経路：環境提供ツール（fetch_page / web_search）は egress 制限を通らない
+
+サンドボックスの curl が TLS で切られるホストでも、**Arena が提供するページ取得・検索ツールは
+別のネットワーク経路**なので届くことがある。実測：
+
+| 対象 | 結果 |
+|---|---|
+| `api.sketchfab.com/v3/models/{uid}`（JSON） | ✓ **取れた**（curl だと HTTP 000 のホスト） |
+| `api.sketchfab.com/v3/search?type=models&downloadable=true&q=…` | ✓ 取れた（`archives` の GLB サイズや license まで見える） |
+| `raw.githubusercontent.com/…/screenshot.png`（バイナリ） | ✗ HTTP 500 |
+| `.glb`（バイナリ） | ✗ プロキシ署名エラー |
+
+**使い分け**：メタデータ・API レスポンス・ドキュメント・検索＝ツール経由で読む。
+**バイト列（.glb / .png / .zip）は運べない**ので、実体は必ず §1.3 の輸送路（GitHub / npm / PyPI）へ載せ替える。
+つまり「ツールで当たりを付けて（ライセンス・サイズ・DL可否を確認）、実体は許可ホストから落とす」が最強の組み合わせ。
+
 **このリポジトリでは `node tools/fetch-model.mjs <URL>` がこの変換を自動でやる。**
 
 ```bash
@@ -142,6 +158,20 @@ node tools/fetch-model.mjs --repo me/assets --path models/room.glb --ref main --
 
 ## 3. 教室 GLB の統合メモ（差し替えるときに読む）
 
+### 3.0 モチーフの Sketchfab「Old Classroom」は**取得不能**（再調査不要）
+
+`api.sketchfab.com/v3/models/be2db5bb488a4392abda0d36c7b46e71`（fetch_page 経由で実測）：
+
+- `isDownloadable: **false**` / `price: 499`（＝ストアの有料商品 $4.99）/ license `Standard`
+- 作者 Rafael Rodrigues（@RafaelBR873D）、56.5k faces / 31.7k verts / 19 textures、tags: school, abandoned, b3d, blender, noai
+
+→ **トークンがあっても、URL変換でも、1ホップリレーでも取得できない**（購入が唯一の道で、
+購入しても Standard ライセンスの範囲。公開リポジトリへの再アップは不可）。
+したがって本プロジェクトは MIT の代替教室（grep-many/ryoshi）を使うのが正解。
+同じ作者に「Japanese Classroom」等があり、Sketchfab には **CC Attribution で DL 可能な日本の教室パーツ**
+（窓 16.6 MB GLB / カーテン / 机 1.35 MB GLB など）が実在する。フル部屋が欲しくなったら
+`/v3/search?type=models&downloadable=true&q=japanese classroom` を fetch_page で叩いて候補を出すこと。
+
 - モデル: `public/models/classroom.glb` — © grep-many / Ryoshi, **MIT**
   （`github.com/grep-many/ryoshi` の `web/public/models/classroom_alternative.glb`）
 - **縮尺はモデル非依存で逆算する**: `src/glb-collide.js` が「黒板の書き面＝実寸 1.15 m」から
@@ -172,7 +202,9 @@ node tools/fetch-model.mjs --repo me/assets --path models/room.glb --ref main --
 取得物は magic/サイズ/sha256 で検証し、ライセンスを確認したうえで、出典とライセンスを README とアプリ内の両方に明記する。
 目的のものが無く別物で代用した場合は必ずそう言うこと。どうしても人間の1ホップが必要なときだけ、
 「どのホストの・どのパスへ・何MBまで・何形式で」置けばよいかを具体的に指示してほしい。
-なおAPIトークンやパスワードは私に要求しないこと（貼らせない・保存しない）。環境が用意した認証だけを使い、
+なお環境が提供するページ取得・検索ツール（fetch_page / web_search 等）はサンドボックスのegress制限を通らない別経路なので、
+ブロックされたホストのJSON/API/文書はそれで読んでよい（ただしバイナリは運べないので実体は上記の輸送路から落とす）。
+APIトークンやパスワードは私に要求しないこと（貼らせない・保存しない）。環境が用意した認証だけを使い、
 鍵が無ければ「不可」と報告して1ホップ案を出すこと。ホスト単位のTLS遮断はトークンでは越えられない。
 ```
 
@@ -201,10 +233,14 @@ node tools/fetch-model.mjs --repo me/assets --path models/room.glb --ref main --
 6. 委任の限界: どの経路にも無いときだけ、最小の1ホップを私に依頼する。
    その際は「どのホストの・どのパスへ・何MBまで・何形式で」を具体的に書くこと。
 7. 代替の明示: 目的のものと別物で代用した場合は、必ず何を代わりに使ったかを報告する。
-8. 認証: トークン/パスワード/OAuthコード/2FAを私に要求しない（貼らせない・保存しない・コミットしない）。
+8. ツール経路: 環境提供の fetch_page / web_search は sandbox の egress 制限を通らない別経路。
+   ブロックされたホストの JSON/APIレスポンス/HTML/文書はこれで読む（実測: api.sketchfab.com の JSON は取れた）。
+   ただしバイナリ（.glb/.png/.zip）は運べない（実測: PNG は HTTP 500）ので、実体は 3. の輸送路から落とす。
+   → 「ツールで当たりを付け（ライセンス・サイズ・DL可否）、実体は許可ホストから取得」が最速。
+9. 認証: トークン/パスワード/OAuthコード/2FAを私に要求しない（貼らせない・保存しない・コミットしない）。
    環境が用意した認証（例: GH_TOKEN）だけを使う。鍵が必要なAPIで鍵が無ければ「不可」と報告し1ホップ案を出す。
    ホスト単位のTLS遮断は正しいトークンでも越えられない（ハンドシェイクで切れるのでヘッダを送れない）。
-9. 禁止: アクセス制御の回避工作、検証なしの配置、巨大ファイルの不用意なcommit、別物への無断差し替え。
+10. 禁止: アクセス制御の回避工作、検証なしの配置、巨大ファイルの不用意なcommit、別物への無断差し替え。
 ```
 
 ### 4.3 どこに置くか
