@@ -8,7 +8,15 @@ const noteEl = document.getElementById('loading-note');
 const titleEl = document.getElementById('title');
 const startBtn = document.getElementById('start-btn');
 
-const game = new Game(canvas);
+let game;
+try {
+  game = new Game(canvas);
+} catch (err) {
+  console.error(err);
+  noteEl.textContent = 'WebGLを初期化できません。対応ブラウザで再読み込みしてください。';
+  noteEl.style.color = '#ff6b86';
+  throw err;
+}
 
 const NOTES = ['corrupting memory…', 'unpacking blue screen…', 'waking the room…', 'feeding the :('];
 let noteIdx = 0;

@@ -330,7 +330,11 @@ export class Game {
       arr.needsUpdate = true;
       pts.material.opacity = Math.max(0, 0.7 - age * 0.5);
       if (age < 2.2 && this.activeScene === this.sceneRoom) requestAnimationFrame(tick);
-      else this.sceneRoom.remove(pts);
+      else {
+        this.sceneRoom.remove(pts);
+        pts.geometry.dispose();
+        pts.material.dispose();
+      }
     };
     tick();
   }
