@@ -33,6 +33,10 @@ export class Walker {
     this.dragging = false;
     this.sensitivity = 0.0024;
 
+    // レイキャスト用（毎フレーム作らない）
+    this._ray = new THREE.Raycaster();
+    this._ndc = new THREE.Vector2();
+
     this._touch = { moveId: null, lookId: null, mx: 0, my: 0, lx: 0, ly: 0, sx: 0, sy: 0, dx: 0, dy: 0, active: false };
 
     this.bind();
@@ -49,11 +53,8 @@ export class Walker {
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());
 
-    // ポインタロック（クリックで入る）
-    this.dom.addEventListener('click', () => {
-      if (!this.enabled || this.locked) return;
-      if (this.dom.requestPointerLock) this.dom.requestPointerLock();
-    });
+    // ポインタロックは main 側の「クリックの意味」が決まってから要求する
+    // （人物を押したときはカードを出すので、ロックしない）
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === this.dom;
       this.dom.classList.toggle('is-locked', this.locked);
@@ -255,11 +256,24 @@ export class Walker {
     this.camera.rotation.set(this.pitch, this.yaw, 0);
   }
 
-  /** 画面中心のレイ */
-  raycaster() {
-    const rc = new THREE.Raycaster();
-    rc.setFromCamera(new THREE.Vector2(0, 0), this.camera);
-    return rc;
+  /** ポインタロックを要求する（ユーザー操作の中から呼ぶこと） */
+  lock() {
+    if (!this.enabled || this.locked) return;
+    if (!this.dom.requestPointerLock) return;
+    try {
+      const p = this.dom.requestPointerLock();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch {
+      /* タッチ端末など非対応環境では何もしない */
+    }
+  }
+
+  /** 画面中心（ndc 指定可）から出るレイ */
+  raycaster(ndcX = 0, ndcY = 0) {
+    this.camera.updateWorldMatrix(true, false);
+    this._ndc.set(ndcX, ndcY);
+    this._ray.setFromCamera(this._ndc, this.camera);
+    return this._ray;
   }
 
   distToXZ(p) {

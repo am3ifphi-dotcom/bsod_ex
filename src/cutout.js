@@ -422,6 +422,7 @@ export class Cast {
   }
 
   pick(raycaster) {
+    if (!raycaster || typeof raycaster.intersectObjects !== 'function') return null;
     // 描画前でも判定できるようにワールド行列を更新しておく
     this.group.updateWorldMatrix(true, true);
     const objs = this.active.filter((c) => c.group.visible).map((c) => c.mesh);

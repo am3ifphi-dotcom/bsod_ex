@@ -318,6 +318,18 @@ ok('画面中央の人物をクリック判定できる', () => {
   cast.highlight(null);
 });
 
+ok('画面座標からもレイを飛ばせる（クリック判定の経路）', () => {
+  const rc = walker.raycaster(0, 0);
+  if (!rc || typeof rc.intersectObjects !== 'function') throw new Error('Raycaster が返らない');
+  // 同じインスタンスを使い回す（毎フレーム生成しない）
+  if (walker.raycaster(0.95, 0.95) !== rc) throw new Error('レイキャスタが使い回されていない');
+  // 画面の隅を向いたレイは人物に当たらない
+  const corner = cast.pick(walker.raycaster(0.98, 0.98));
+  const center = cast.pick(walker.raycaster(0, 0));
+  if (!center) throw new Error('中央で人物に当たらない');
+  if (corner) throw new Error('画面隅で人物に当たってしまう');
+});
+
 ok('操作ボタンが全部押せる', () => {
   for (const id of ['btn-toc', 'btn-style', 'btn-audio', 'btn-credits', 'toc-close', 'credits-close', 'cc-close', 'dlg-auto', 'dlg-next', 'enter']) {
     const el = dom.window.document.getElementById(id);

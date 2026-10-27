@@ -402,8 +402,14 @@ async function toggleAudio() {
 }
 
 /* クリック：人物カード / 本文送り / ポインタロック */
+let downAt = null;
+canvas.addEventListener('pointerdown', (e) => {
+  downAt = { x: e.clientX, y: e.clientY };
+});
 canvas.addEventListener('pointerup', (e) => {
   if (!state.started) return;
+  const moved = downAt ? Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) : 0;
+  downAt = null;
   if (state.locked) {
     if (state.playing) nextLine();
     return;
@@ -411,7 +417,7 @@ canvas.addEventListener('pointerup', (e) => {
   const rect = canvas.getBoundingClientRect();
   const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
   const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-  const hit = cast.pick(walker.raycaster().setFromCamera(new THREE.Vector2(ndcX, ndcY), camera));
+  const hit = cast.pick(walker.raycaster(ndcX, ndcY));
   if (hit) {
     cast.highlight(hit.def.id);
     ui.showCard(hit.def);
@@ -421,7 +427,12 @@ canvas.addEventListener('pointerup', (e) => {
     ui.closeCard();
     return;
   }
-  if (state.playing) nextLine();
+  if (state.playing) {
+    nextLine();
+    return;
+  }
+  // 何も無いところを「押しただけ」なら視点操作に入る（ドラッグで見回した後は入らない）
+  if (moved < 6) walker.lock();
 });
 
 document.addEventListener('pointerlockchange', () => {
