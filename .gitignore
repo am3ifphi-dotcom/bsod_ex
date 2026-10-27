@@ -1,0 +1,4 @@
+# raw sources pulled from Google Drive (runtime serves web/assets instead)
+google_drive/
+# node/npm scratch
+node_modules/

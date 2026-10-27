@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BSOD_EX — a small glitch horror experience</title>
+<link rel="stylesheet" href="./style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/build/three.module.js",
+    "three/addons/": "./vendor/three/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="vignette"></div>
+<div id="flash"></div>
+
+<div id="loading" class="overlay">
+  <div class="load-inner">
+    <div class="load-title">BSOD_EX</div>
+    <div class="load-bar"><div id="load-fill"></div></div>
+    <div id="load-label">アセット読み込み中…</div>
+  </div>
+</div>
+
+<div id="title" class="overlay hidden">
+  <div class="title-inner">
+    <div class="title-mark">:(</div>
+    <h1>BSOD_EX</h1>
+    <p class="title-sub">— ひとりで、しずかな夜に。</p>
+    <button id="btn-start" class="btn">開始する</button>
+    <p class="title-credits">WASD / マウスで移動 ・ Eで調べる ・ Cでコンソール</p>
+  </div>
+</div>
+
+<div id="hint" class="hidden"><span id="hint-text"></span></div>
+<div id="subtitle" class="hidden"><span id="subtitle-text"></span></div>
+<div id="lock-hint" class="overlay hidden">
+  <div class="lock-inner">
+    <div class="lock-mark">CLICK</div>
+    <div>クリックして操作を再開</div>
+  </div>
+</div>
+
+<div id="console-wrap" class="hidden">
+  <div id="console-box">
+    <div id="console-log"></div>
+    <div id="console-input-line">
+      <span class="console-prompt">guest@bsod:~$</span>
+      <input id="console-input" type="text" autocomplete="off" spellcheck="false">
+    </div>
+  </div>
+</div>
+
+<div id="restart-hint" class="hidden">R — 最初からやり直す</div>
+
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>
