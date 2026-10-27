@@ -94,10 +94,10 @@ export class Cinematics {
       const pos = c.startPos.clone().addScaledVector(dir, dist0 * P);
       // subtle resistance wobble on the way in
       const wob = sway(t * 1.7, 0.012 + 0.02 * (1 - P), 0.010 + 0.02 * (1 - P));
-      cam.position.copy(pos);
+      ctl.position.copy(pos);   // syncCamera() will copy this onto the camera
 
       // aim at the mouth
-      const aim = new THREE.Vector3().subVectors(c.screenWorld, cam.position);
+      const aim = new THREE.Vector3().subVectors(c.screenWorld, ctl.position);
       const yaw = Math.atan2(-aim.x, -aim.z);
       const pitch = Math.atan2(aim.y, Math.sqrt(aim.x * aim.x + aim.z * aim.z));
       ctl.yaw = yaw + wob.yaw * 2.4;

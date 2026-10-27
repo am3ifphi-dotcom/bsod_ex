@@ -68,8 +68,11 @@ export async function buildRoom(bsodCanvas, onProgress) {
   scene.add(bedside);
 
   // ------------------------------------------------------- monitor (CRT)
+  // window-bench surface is at y≈0.685 (where the MacBook sits);
+  // the CRT model's base bottom is at local y=-0.254 → lift the group so it rests on the bench
   const monitor = new THREE.Group();
-  monitor.position.set(2.42, 0.685, -0.62);
+  // bench free gap: z -0.77..-0.26 (between the glass container and the MacBook)
+  monitor.position.set(2.42, 1.003, -0.51);
   monitor.rotation.y = -Math.PI / 2 - 0.22;
   monitor.scale.setScalar(1.25);
   crt.traverse((o) => {
@@ -95,11 +98,12 @@ export async function buildRoom(bsodCanvas, onProgress) {
   scene.add(monLight);
 
   // --------------------------------------------------------------- PC tower
+  // on the floor beside the desk (rug area), clear of the bench & radiator
   const towerG = new THREE.Group();
   tower.rotation.x = -Math.PI / 2;       // model is Z-up
   towerG.add(tower);
   normalize(towerG, 0.52);
-  towerG.position.set(2.58, 0, -1.02);
+  towerG.position.set(1.78, 0, 0.62);
   towerG.rotation.y = -Math.PI / 2 + 0.35;
   towerG.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   scene.add(towerG);
@@ -115,12 +119,12 @@ export async function buildRoom(bsodCanvas, onProgress) {
 
   // ------------------------------------------------------------------ cables
   const cable1 = cables.clone(true);
-  cable1.position.set(2.30, 0.02, -1.32);
+  cable1.position.set(1.98, 0.03, 0.32);
   cable1.rotation.y = 0.8;
   cable1.scale.setScalar(0.9);
   scene.add(cable1);
   const cable2 = cables.clone(true);
-  cable2.position.set(2.05, 0.02, -0.98);
+  cable2.position.set(1.42, 0.03, 0.08);
   cable2.rotation.y = -1.9;
   cable2.scale.setScalar(0.7);
   scene.add(cable2);
@@ -151,8 +155,8 @@ export async function buildRoom(bsodCanvas, onProgress) {
   return {
     scene, screen, tex, monLight, monitor, lamp, bedside,
     screenWorld, screenNormal,
-    spawn: { pos: new THREE.Vector3(0.35, 1.62, 0.35), yaw: -1.0, pitch: -0.04 },
-    interactPos: new THREE.Vector3(1.95, 1.05, -0.52),
+    spawn: { pos: new THREE.Vector3(0.35, 1.62, 0.35), yaw: -1.18, pitch: -0.02 },
+    interactPos: new THREE.Vector3(1.95, 1.12, -0.45),
     colliders: [
       { min: { x: -2.4, z: -3.4 }, max: { x: -1.95, z: 2.0 } },   // left wall
       { min: { x: -2.4, z: -3.4 }, max: { x: 3.2, z: -2.98 } },   // back wall
@@ -161,6 +165,7 @@ export async function buildRoom(bsodCanvas, onProgress) {
       { min: { x: -1.62, z: -2.98 }, max: { x: 1.42, z: -1.02 } },// bed
       { min: { x: 1.92, z: -1.28 }, max: { x: 2.62, z: 0.88 } },  // desk / window ledge
       { min: { x: 1.95, z: 0.36 }, max: { x: 2.66, z: 1.02 } },   // storage box
+      { min: { x: 1.52, z: 0.38 }, max: { x: 2.04, z: 0.88 } },   // pc tower
     ],
     dust,
     update(t, dt) {

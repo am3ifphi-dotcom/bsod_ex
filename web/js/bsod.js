@@ -105,18 +105,24 @@ export class BsodScreen {
   // ---------------------------------------------------------------- desktop
   _drawDesktop(ctx, aftermath) {
     const g = ctx.createLinearGradient(0, 0, W, H);
-    g.addColorStop(0, '#0b2038');
-    g.addColorStop(0.55, '#123055');
-    g.addColorStop(1, '#07182c');
+    g.addColorStop(0, '#123253');
+    g.addColorStop(0.55, '#1c4476');
+    g.addColorStop(1, '#0c213e');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
     // faint window-light shapes
     ctx.save();
-    ctx.globalAlpha = 0.10;
+    ctx.globalAlpha = 0.18;
     ctx.fillStyle = '#9fd0ff';
     ctx.fillRect(W * 0.12, H * 0.18, W * 0.30, H * 0.42);
     ctx.fillRect(W * 0.52, H * 0.30, W * 0.22, H * 0.30);
     ctx.restore();
+    // soft wallpaper glow so the monitor is clearly "on" across the room
+    const wg = ctx.createRadialGradient(W * 0.5, H * 0.42, 40, W * 0.5, H * 0.42, W * 0.62);
+    wg.addColorStop(0, 'rgba(130,190,255,0.22)');
+    wg.addColorStop(1, 'rgba(130,190,255,0)');
+    ctx.fillStyle = wg;
+    ctx.fillRect(0, 0, W, H);
     // clock
     ctx.fillStyle = 'rgba(210,230,255,0.9)';
     ctx.font = '300 84px "Segoe UI", "Helvetica Neue", Arial, sans-serif';

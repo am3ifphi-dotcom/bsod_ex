@@ -376,7 +376,7 @@ canvas.addEventListener('click', (e) => {
   if (state === 'room' && !cino.busy && !zoomAnim) {
     // interact when close & roughly looking at the PC
     const d = controls.position.distanceTo(room.interactPos);
-    if (d < 2.15) {
+    if (d < 2.6) {
       const toPC = new THREE.Vector3().subVectors(room.interactPos, controls.position).normalize();
       const fwd = new THREE.Vector3(0, 0, -1).applyEuler(camera.rotation);
       if (fwd.dot(toPC) > 0.42) enterPCZoom();
@@ -388,7 +388,7 @@ controls.onInteract = () => {
   if (gameConsole && gameConsole.opened) return;
   if (state === 'room' && !cino.busy && !zoomAnim) {
     const d = controls.position.distanceTo(room.interactPos);
-    if (d < 2.2) enterPCZoom();
+    if (d < 2.8) enterPCZoom();
   }
 };
 
@@ -414,7 +414,9 @@ function loop() {
     zoomAnim.t += dt;
     const k = Math.min(1, zoomAnim.t / zoomAnim.dur);
     const e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
-    camera.position.lerpVectors(zoomAnim.from, zoomAnim.to, e);
+    // NOTE: write controls.position (syncCamera copies it to the camera)
+    controls.position.lerpVectors(zoomAnim.from, zoomAnim.to, e);
+    controls.bobAmount = 0;
     if (zoomAnim.back) {
       // blend gaze from the screen back to the player's own look direction
       const aim = new THREE.Vector3().subVectors(room.screenWorld, camera.position);
@@ -470,10 +472,10 @@ function loop() {
   }
   if (state === 'room' && !cino.busy) {
     const d = controls.position.distanceTo(room.interactPos);
-    if (d < 1.75 && hintTimer <= 0) {
+    if (d < 2.35 && hintTimer <= 0) {
       $('hint-text').textContent = 'クリック / E — パソコンを調べる';
       $('hint').classList.remove('hidden');
-    } else if (d >= 1.95 && hintTimer <= 0 && $('hint-text').textContent.includes('調べる')) {
+    } else if (d >= 2.55 && hintTimer <= 0 && $('hint-text').textContent.includes('調べる')) {
       hideHint();
     }
   }
