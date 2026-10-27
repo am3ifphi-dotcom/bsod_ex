@@ -256,6 +256,10 @@ export class BsodScreen {
     const fontBase = '"Segoe UI", "Helvetica Neue", Arial, sans-serif';
     const size = 150 * (1 + s * 1.9);
     const rnd = mulberry32((t * 10 | 0) + 7);
+    const sm = (a, b, v) => {
+      const k = Math.max(0, Math.min(1, (v - a) / (b - a)));
+      return k * k * (3 - 2 * k);
+    };
 
     if (s < 0.04) {
       // pristine ":(" — the real glyph, nothing else
@@ -269,15 +273,28 @@ export class BsodScreen {
     const jx = (rnd() - 0.5) * 14 * s, jy = (rnd() - 0.5) * 10 * s;
     cx += jx; cy += jy;
 
+    // crossfade: the glyph IS the face — it dissolves while the drawn face grows out of it
+    const glyphAlpha = 1 - sm(0.10, 0.40, s);
+
     // RGB fringes early on
-    if (s > 0.04) {
+    if (s > 0.04 && glyphAlpha > 0.02) {
       ctx.save();
-      ctx.globalAlpha = 0.5 * s;
+      ctx.globalAlpha = 0.5 * s * glyphAlpha;
       ctx.font = `300 ${size}px ${fontBase}`;
       ctx.fillStyle = '#ff3b6b';
       ctx.fillText(':(', cx - size * 0.32 - 6 * s, cy + size * 0.36);
       ctx.fillStyle = '#2bfff0';
       ctx.fillText(':(', cx - size * 0.32 + 6 * s, cy + size * 0.36);
+      ctx.restore();
+    }
+
+    // the original glyph itself — fades out as the drawn face fades in
+    if (glyphAlpha > 0.015) {
+      ctx.save();
+      ctx.globalAlpha = glyphAlpha;
+      ctx.font = `300 ${size}px ${fontBase}`;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(':(', cx - size * 0.32, cy + size * 0.36);
       ctx.restore();
     }
 
@@ -331,7 +348,11 @@ export class BsodScreen {
       ctx.restore();
     }
 
-    // ---- eyes
+    // ---- eyes (fade in as the glyph's colon fades out)
+    const eyeAlpha = sm(0.10, 0.34, s);
+    if (eyeAlpha > 0.02) {
+    ctx.save();
+    ctx.globalAlpha = eyeAlpha;
     for (const [ex, ey] of [[lx, ly], [rx2, ry2]]) {
       // socket
       const sg = ctx.createRadialGradient(ex, ey, dotR * 0.1, ex, ey, dotR * (2.2 + s * 1.6));
@@ -371,9 +392,12 @@ export class BsodScreen {
         ctx.stroke();
       }
     }
+    ctx.restore();
+    }
 
     // ---- mouth: the "(" itself, thickening, curving open, becoming the cavity
     ctx.save();
+    ctx.globalAlpha = Math.max(sm(0.03, 0.15, s), 0.02);
     if (s < 0.3) {
       // still recognisably the frown arc, just heavier / wobbling
       ctx.lineWidth = 16 + s * 42;
