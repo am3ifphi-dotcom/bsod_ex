@@ -38,7 +38,7 @@ window.addEventListener('unhandledrejection', (e) => showFatal(e.reason));
 /* ------------------------------------------------------------------ */
 const canvas = document.getElementById('stage');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false });
-const PR = Math.min(window.devicePixelRatio || 1, 1.7);
+const PR = Math.min(window.devicePixelRatio || 1, 1.4);
 renderer.setPixelRatio(PR);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -54,7 +54,7 @@ const camera = new THREE.PerspectiveCamera(56, window.innerWidth / window.innerH
 const size = new THREE.Vector2(window.innerWidth, window.innerHeight);
 const rt = new THREE.WebGLRenderTarget(size.x * PR, size.y * PR, {
   type: THREE.HalfFloatType,
-  samples: 4,
+  samples: 2,
 });
 const composer = new EffectComposer(renderer, rt);
 composer.setSize(size.x, size.y);
