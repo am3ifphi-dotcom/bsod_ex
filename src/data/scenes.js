@@ -29,7 +29,7 @@ const SHOTS = {
   // 掲示板ホログラム
   holo: { pos: [-0.1, 1.72, -0.95], tgt: [-0.15, 1.78, 1.3], fov: 40, drift: [0.05, 0.02, 0] },
   // 自販機
-  vending: { pos: [-1.35, 1.32, 1.1], tgt: [-3.5, 1.15, 1.6], fov: 44 },
+  vending: { pos: [-1.55, 1.34, 2.80], tgt: [-3.45, 1.06, 1.15], fov: 48 },
   // ノート
   notebook: { pos: [0.92, 1.36, -1.95], tgt: [1.9, 1.14, 0.74], fov: 44 },
   // 引き
@@ -287,7 +287,7 @@ export const SCENES = [
     cast: [
       { id: 'mie', pose: 'silence', spot: 'A2' },
       { id: 'terachi', pose: 'normal', spot: 'A3' },
-      { id: 'ryoma', pose: 'grin', spot: 'A4' },
+      { id: 'ryoma', pose: 'grin', spot: 'A6' },
       { id: 'rei', spot: 'A5' },
     ],
     lines: [

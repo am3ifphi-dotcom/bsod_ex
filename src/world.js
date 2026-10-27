@@ -608,7 +608,7 @@ export class World {
       });
     }
     inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    this.props.glyphs = { inst, seeds, dummy: new THREE.Object3D() };
+    this.props.glyphs = { inst, seeds, dummy: new THREE.Object3D(), q: new THREE.Quaternion(), roll: new THREE.Quaternion(), axis: new THREE.Vector3(0, 0, 1) };
     this.root.add(inst);
   }
 
@@ -665,6 +665,8 @@ export class World {
 
     this.night = !!e.night;
     this.sunColor = new THREE.Color(e.sunColor || (this.night ? '#8fa6d8' : '#ffe4c4'));
+    this.nightFog = new THREE.Color(this.night ? 0x0a0c12 : 0x121319);
+    this.nightHemi = new THREE.Color(this.night ? 0x9fb4e0 : 0xdfe9ff);
     this.extras = e.extras || null;
 
     if (e.extras === 'comments') this.spawnComments();
@@ -711,7 +713,7 @@ export class World {
     if (this.sunColor) this.sun.color.lerp(this.sunColor, k);
     if (this.targets.hemi !== undefined) {
       this.hemi.intensity += (this.targets.hemi - this.hemi.intensity) * k;
-      this.hemi.color.lerp(this.night ? new THREE.Color(0x9fb4e0) : new THREE.Color(0xdfe9ff), k);
+      this.hemi.color.lerp(this.nightHemi || new THREE.Color(0xdfe9ff), k);
     }
     if (this.targets.window !== undefined) {
       this.windowLight.intensity += (this.targets.window - this.windowLight.intensity) * k;
@@ -724,7 +726,7 @@ export class World {
     if (this.targets.fog !== undefined) {
       this.scene.fog.density += (this.targets.fog - this.scene.fog.density) * k;
     }
-    this.scene.fog.color.lerp(this.night ? new THREE.Color(0x0a0c12) : new THREE.Color(0x121319), k);
+    this.scene.fog.color.lerp(this.nightFog || new THREE.Color(0x121319), k);
 
     // 黒板
     const bm = this.props.board.material;
@@ -774,7 +776,11 @@ export class World {
         d.position.set(0.3 + s.x + Math.sin(t * 0.7 + s.phase) * 0.2, y, 3.9 + s.z * 0.7);
         d.rotation.set(0, 0, Math.sin(t * 0.9 + s.phase) * 0.6);
         d.scale.setScalar(s.size * (0.5 + strength));
-        if (camera) d.quaternion.copy(camera.quaternion).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.sin(t + s.phase) * 0.3));
+        if (camera) {
+          gl.roll.setFromAxisAngle(gl.axis, Math.sin(t + s.phase) * 0.35);
+          gl.q.copy(camera.quaternion).multiply(gl.roll);
+          d.quaternion.copy(gl.q);
+        }
         d.updateMatrix();
         gl.inst.setMatrixAt(i, d.matrix);
       });

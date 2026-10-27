@@ -228,6 +228,9 @@ export class CharacterCutout {
     this.visibleTarget = 0;
     this.seed = Math.random();
     this.loading = new Map();
+    this._q = new THREE.Quaternion();
+    this._roll = new THREE.Quaternion();
+    this._up = new THREE.Vector3(0, 0, 1);
   }
 
   async ensurePose(key) {
