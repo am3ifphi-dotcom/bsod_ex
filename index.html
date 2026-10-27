@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>:( BSOD_EX — 短編ホラー</title>
+<link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+<div id="app">
+  <canvas id="game-canvas"></canvas>
+
+  <!-- post fx (cheap CSS layers, no WebGL post-processing) -->
+  <div id="vignette"></div>
+  <div id="bluewash"></div>
+  <div id="flash"></div>
+  <div id="grain"></div>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div id="crosshair"></div>
+    <div id="prompt" class="hidden"></div>
+    <div id="objective"></div>
+    <div id="subtitle"></div>
+    <div id="hint-corner"></div>
+  </div>
+
+  <!-- in-game console -->
+  <div id="console" class="hidden">
+    <div id="console-head">C:\WINDOWS\SYSTEM32&gt; KERNEL_CONSOLE — build 0xDEAD</div>
+    <div id="console-log"></div>
+    <div id="console-input-row">
+      <span id="console-prompt">&gt;</span>
+      <input id="console-input" type="text" autocomplete="off" spellcheck="false" maxlength="48" placeholder="">
+    </div>
+    <div id="console-foot">Enter: 実行　/　C または Esc: 閉じる</div>
+  </div>
+
+  <!-- loading -->
+  <div id="loading-screen">
+    <div class="load-inner">
+      <div class="load-face">:(</div>
+      <div class="load-title">BSOD_EX</div>
+      <div class="load-bar-wrap"><div id="load-bar"></div></div>
+      <div id="load-status">アセットを読み込んでいます…</div>
+    </div>
+  </div>
+
+  <!-- title -->
+  <div id="title-screen" class="hidden">
+    <div class="title-inner">
+      <div class="title-face">:(</div>
+      <h1>BSOD<span>_EX</span></h1>
+      <p class="title-sub">一人称・短編ホラー／グリッチ体験</p>
+      <p class="title-desc">深夜2時47分。自室のPCが、青い画面のまま固まった。<br>近づいて、画面を調べることから始まる。</p>
+      <button id="start-btn">体験をはじめる</button>
+      <div class="controls-box">
+        <div><kbd>W A S D</kbd> 移動　<kbd>Mouse</kbd> 視点　<kbd>Shift</kbd> 走る</div>
+        <div><kbd>E</kbd> 調べる　<kbd>C</kbd> コンソール（異世界）　<kbd>Esc</kbd> 戻る／ポーズ</div>
+        <div class="warn">※ ヘッドホン推奨。点滅表現を含みます。デスクトップ＋マウス／キーボード向けです。</div>
+      </div>
+      <div class="credits">3D: modern_stylized_bedroom (Google Drive) / Sketchfab GLB群 (GitHub) を Meshopt 最適化して使用<br>Audio: CC0 Public Domain Sounds (GitHub: lavenderdotpet) + WebAudio合成　|　Three.js</div>
+    </div>
+  </div>
+
+  <!-- pause -->
+  <div id="pause-screen" class="hidden">
+    <div class="pause-inner">
+      <div class="pause-face">:(</div>
+      <p>一時停止中</p>
+      <button id="resume-btn">クリックで再開</button>
+    </div>
+  </div>
+
+  <!-- ending toast (after return) -->
+  <div id="ending-toast" class="hidden">
+    <div class="ending-inner">
+      <div class="ending-title">— 帰還 —</div>
+      <p id="ending-text">目が覚めた。…はずだ。<br>部屋は元通り。でも、モニターの隅で何かが瞬いている。</p>
+      <p class="ending-small">そのまま部屋を歩けます。もう一度PCを調べれば、また「向こう」へ行けます。</p>
+      <button id="ending-close">部屋に戻る</button>
+    </div>
+  </div>
+</div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
