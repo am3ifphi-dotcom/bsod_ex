@@ -92,7 +92,7 @@ async function loadAll() {
 const roomGroup = new THREE.Group(); roomScene.add(roomGroup);
 let monitorPos = new THREE.Vector3(0, 1.05, -1.6), monitorFront = new THREE.Vector3(0, 0, 1), glassMesh = null;
 let deskAnchor = new THREE.Vector3(), roomBounds = { minX: -2, maxX: 2, minZ: -2.6, maxZ: 1.4 };
-let lampLight, monitorLight, chairObj, clockHands = {}, roomDust;
+let lampLight, monitorLight, chairObj, clockHands = {}, roomDust, roomObstacles = [];
 let roomSpawn = { pos: new THREE.Vector3(0, EYE, 2), yaw: 0 };
 
 function buildRoom() {
@@ -472,7 +472,10 @@ function startFocus() {
   savedTransform = { pos: player.position.clone(), yaw, pitch };
   const targetPos = monitorPos.clone().addScaledVector(monitorFront, 0.66); targetPos.y = monitorPos.y + 0.02;
   const dir = monitorPos.clone().sub(targetPos);
-  const tYaw = Math.atan2(-dir.x, -dir.z), tPitch = Math.atan2(dir.y, Math.hypot(dir.x, dir.z));
+  let tYaw = Math.atan2(-dir.x, -dir.z); const tPitch = Math.atan2(dir.y, Math.hypot(dir.x, dir.z));
+  while (tYaw - yaw > Math.PI) tYaw -= Math.PI * 2;
+  while (tYaw - yaw < -Math.PI) tYaw += Math.PI * 2;
+  if (bsod.mode !== 'bsod') { bsod.mode = 'bsod'; corruption = 0; bsod.setLevel(0); bsod.draw(0, clockTime); bsodTex.needsUpdate = true; monitorLight.color.set(0x2f7fe0); }
   focusAnim = { fromPos: player.position.clone(), toPos: targetPos, fromYaw: yaw, toYaw: tYaw, fromPitch: pitch, toPitch: tPitch, back: false };
   setState(S.TO_FOCUS);
   document.exitPointerLock();
