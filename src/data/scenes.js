@@ -1,0 +1,528 @@
+/**
+ * 12の場面。
+ *   shots  … カメラ（教室座標・メートル。GLB の cm を 1/100 した値）
+ *   cast   … 誰がどこに立つか（spot は characters.js の SPOTS）
+ *   env    … 環境（黒板の板書、窓の外、小道具、光、演出）
+ *   lines  … 本文。原作の台詞を引用・要約。
+ */
+
+const SHOTS = {
+  // 俯瞰
+  wide: { pos: [-0.5, 2.62, -4.55], tgt: [0.5, 1.05, 2.4], fov: 58, drift: [0.45, 0.1, 0] },
+  wide2: { pos: [2.5, 2.4, -4.3], tgt: [-0.6, 1.0, 2.8], fov: 55, drift: [-0.3, 0.08, 0] },
+  // 通路
+  aisle: { pos: [0.13, 1.6, -3.95], tgt: [0.3, 1.3, 3.4], fov: 52, drift: [0, 0.05, 0] },
+  aisleBack: { pos: [1.94, 1.55, -4.2], tgt: [1.9, 1.2, 0.5], fov: 46 },
+  // 黒板
+  title: { pos: [2.85, 1.78, 4.32], tgt: [-0.15, 1.18, -1.6], fov: 56, drift: [0.2, 0.05, -0.15] },
+  board: { pos: [2.35, 2.12, -0.9], tgt: [-0.2, 1.56, 4.9], fov: 52 },
+  boardLow: { pos: [-1.62, 1.24, 1.15], tgt: [0.3, 1.5, 4.88], fov: 48 },
+  teacher: { pos: [0.2, 1.6, -0.9], tgt: [-1.45, 1.5, 4.1], fov: 42 },
+  // 窓
+  windowSeat: { pos: [1.42, 1.42, -2.1], tgt: [3.7, 1.2, -3.3], fov: 44 },
+  windowOut: { pos: [2.6, 1.5, -2.9], tgt: [12, 1.45, -5.2], fov: 42, drift: [0, 0.03, 0] },
+  windowBack: { pos: [3.2, 1.55, 1.6], tgt: [0.2, 1.15, -2.6], fov: 48 },
+  // 教卓・配信
+  podium: { pos: [0.55, 1.30, 4.12], tgt: [0.55, 1.12, 2.58], fov: 34 },
+  podiumWide: { pos: [2.95, 1.62, 4.55], tgt: [0.52, 1.12, 2.72], fov: 46 },
+  streamCam: { pos: [0.55, 1.44, 4.36], tgt: [0.55, 1.20, 2.48], fov: 38 },
+  // 掲示板ホログラム
+  holo: { pos: [-0.1, 1.72, -0.95], tgt: [-0.15, 1.78, 1.3], fov: 40, drift: [0.05, 0.02, 0] },
+  // 自販機
+  vending: { pos: [-1.35, 1.32, 1.1], tgt: [-3.5, 1.15, 1.6], fov: 44 },
+  // ノート
+  notebook: { pos: [0.92, 1.36, -1.95], tgt: [1.9, 1.14, 0.74], fov: 44 },
+  // 引き
+  pullback: { pos: [0.3, 1.9, -2.4], tgt: [0.4, 1.15, 3.6], fov: 52, drift: [0, 0.05, -0.5] },
+  door: { pos: [-1.2, 1.58, -0.4], tgt: [-3.6, 1.5, 2.9], fov: 46 },
+  // 三年・最後
+  final: { pos: [0.4, 2.2, -3.6], tgt: [0.5, 1.15, 3.2], fov: 56, drift: [0.2, 0.12, -0.6] },
+};
+
+const SCHOOL = { outside: 'school', chalk: 'contour', holo: null, booth: false, vending: 'normal', notebook: false, petals: 0, leak: 0.32, sun: 1.0, amb: 0.55, fog: 0.05, bloom: 0.55, night: false };
+
+export const SCENES = [
+  /* 01 ------------------------------------------------------------------ */
+  {
+    id: 'prologue',
+    no: '01',
+    chapter: '序',
+    title: '桐葉高校という二重構造',
+    accent: '#ffb35c',
+    env: { ...SCHOOL },
+    shots: { wide: SHOTS.wide, aisle: SHOTS.aisle },
+    cast: [
+      { id: 'ryoma', spot: 'A4' },
+      { id: 'mie', pose: 'normal', spot: 'A2' },
+      { id: 'izaki', spot: 'A1' },
+      { id: 'terachi', spot: 'A3' },
+      { id: 'rei', spot: 'A5' },
+      { id: 'satou', pose: 'game', spot: 'W1' },
+      { id: 'katsuya', spot: 'B1', ry: 178 },
+    ],
+    lines: [
+      { shot: 'wide', spk: 'narr', text: '桐葉高校には国境がある。\n見えないが、ある。' },
+      { spk: 'narr', text: '南棟。中高一貫コース。偏差値七十。中学受験で入った人間が六年を過ごす。教室は広い。廊下の照明はLED。' },
+      { shot: 'aisle', spk: 'narr', text: '北棟。理数科。偏差値六十。教室はやや狭い。\nエアコンの室外機が窓の真横にあるので、窓際の生徒は二つの音を聞く——授業の声と、室外機の唸り。' },
+      { spk: 'narr', text: '自販機はあるが、コーンスープが三ヶ月前から補充されていない。なぜかは誰も知らない。' },
+      { shot: 'wide', spk: 'narr', text: 'そして、この学校の北棟の、理数科B組の、その教室に、✝本質✝がある。' },
+      { spk: 'ryoma', pose: 'grin', text: '「これまじ✝本質✝」' },
+      { spk: 'mie', pose: 'ha', text: '「は？」' },
+    ],
+  },
+
+  /* 02 ------------------------------------------------------------------ */
+  {
+    id: 'ecology',
+    no: '02',
+    chapter: '第一章',
+    title: '両馬二郎の生態系と、✝本質✝の発生',
+    accent: '#ffb35c',
+    env: {
+      ...SCHOOL,
+      holo: [
+        { no: '02', name: '名無しの地形図好き', body: '今日のヘイカツまじやばかった。味噌の分布が地殻変動で決まるって。\n朝飯が何億年前の地面で決まってるって。\nこれまじ✝本質✝', mark: true },
+        { no: '02', name: '名無しの生徒', body: '電線に本質感があるとは何なのか', mark: false },
+        { no: '02', name: 'みえみえしい受験生✝', body: '絶対合格して、みえみえしい高校生活を送るんだ！　✝', mark: true },
+      ],
+    },
+    shots: { board: SHOTS.board, holo: SHOTS.holo, teacher: SHOTS.teacher },
+    cast: [
+      { id: 'ryoma', spot: 'A4' },
+      { id: 'mie', pose: 'normal', spot: 'A2' },
+      { id: 'izaki', spot: 'A1' },
+      { id: 'terachi', spot: 'A3' },
+      { id: 'katsuya', spot: 'B1', ry: 150 },
+    ],
+    lines: [
+      { shot: 'board', spk: 'narr', text: '両馬二郎を説明するには、まずインターネット上で何をしているかを説明しなければならない。\n両馬の書き込みは、三つの層に分類できる。' },
+      { spk: 'narr', text: '第一層：✝本質✝系。両馬は匿名掲示板やグループラインに「これまじ✝本質✝」と不定期に投下する。' },
+      { shot: 'holo', spk: 'narr', text: '二郎系ラーメンの写真に「この脂の浮き方まじ✝本質✝」。教室の窓から撮った電線の写真に「今日の電線✝本質✝感ある」。' },
+      { spk: 'ryoma', pose: 'grin', text: '「いま道歩いてたらすごい✝本質✝が降りてきた」' },
+      { spk: 'narr', text: 'これを初めて見た人間は例外なく「は？」と言う。三重県臣は学期中に推定二十回は「は？」と言っている。' },
+      { spk: 'mie', pose: 'ha', text: '「いや、だから何が本質なんだよ」' },
+      { spk: 'ryoma', text: '「文法の✝本質✝を超えたところに本質があるんだよ」' },
+      { spk: 'mie', pose: 'ha', text: '「日本語やめろ」' },
+      { spk: 'narr', text: '第二層：三重県臣を用いた創作活動。両馬は三重の名前を、ありとあらゆる場所に紛れ込ませる。\n「三重県産の松阪牛が臣下に伝えた味、それがこのスーパーの肉売り場です」——姓名がある。' },
+      { shot: 'teacher', spk: 'mie', pose: 'normal', text: '「やめろ」' },
+      { spk: 'ryoma', text: '「俺じゃないかもしれない」' },
+      { spk: 'mie', text: '「✝がついてるんだよ。お前以外に✝つけるやつがいるか」' },
+      { spk: 'ryoma', pose: 'grin', text: '「✝は人類共通の記号だから」' },
+      { spk: 'narr', text: '人類共通ではない。' },
+    ],
+  },
+
+  /* 03 ------------------------------------------------------------------ */
+  {
+    id: 'miso',
+    no: '03',
+    chapter: '第二章',
+    title: '火曜三限、味噌の地政学',
+    accent: '#ffd4a0',
+    env: { ...SCHOOL, chalk: 'miso', leak: 0.22, sun: 1.15 },
+    shots: { boardLow: SHOTS.boardLow, teacher: SHOTS.teacher, board: SHOTS.board },
+    cast: [
+      { id: 'katsuya', spot: 'B1', ry: 182 },
+      { id: 'izumi', spot: 'A5' },
+      { id: 'izaki', spot: 'A1' },
+      { id: 'mie', spot: 'A2' },
+      { id: 'satou', pose: 'game', spot: 'W1' },
+      { id: 'terachi', spot: 'A3' },
+      { id: 'rei', spot: 'A4' },
+    ],
+    lines: [
+      { shot: 'boardLow', spk: 'narr', text: '火曜三限。地理。理数科B組にとって、地理は「時間割にある」科目だ。弁当で言えばバランの位置にある。' },
+      { spk: 'katsuya', pose: 'normal', text: '「糸魚川-静岡構造線。聞いたことあるか」' },
+      { shot: 'teacher', spk: 'katsuya', text: '「ここを境に日本列島の地質が変わる。石が違うと土壌が違う。土壌が違うと作物が違う。作物が違うと——」' },
+      { shot: 'board', spk: 'katsuya', text: '「味噌が違う」' },
+      { spk: 'narr', text: '教室がわずかにざわついた。' },
+      { spk: 'katsuya', text: '「味噌の分布が地質境界線と重なってる。お前らが今朝飲んだ味噌汁は、地殻変動が決めてる」' },
+      { spk: 'ryoma', pose: 'grin', text: '「まじ？」' },
+      { spk: 'izumi', text: '「え、餅の形って地域で違うんですか」' },
+      { spk: 'izaki', pose: 'smile', text: '「朝飯が何億年前の地面で決まってるって、冷静に考えるとやばくないか」' },
+      { spk: 'mie', pose: 'normal', text: '「まあ」' },
+      { spk: 'izaki', text: '「すごくない？」' },
+      { spk: 'mie', text: '「……まあ」' },
+      { shot: 'teacher', spk: 'narr', text: '三重が「まあ」を二回言った。三重は「まあ」を二回言うとき、内心では面白いと思っている。これは三重の冷笑システムの隙間であり、伊崎はそこを正確に突いている。自覚はない。' },
+    ],
+  },
+
+  /* 04 ------------------------------------------------------------------ */
+  {
+    id: 'stream',
+    no: '04',
+    chapter: '第三章',
+    title: '本質配信、始動',
+    accent: '#b48bff',
+    env: { ...SCHOOL, chalk: 'honnshitsu', booth: true, leak: 0.62, sun: 0.7, amb: 0.42, bloom: 0.75, night: true },
+    shots: { streamCam: SHOTS.streamCam, podium: SHOTS.podium, podiumWide: SHOTS.podiumWide },
+    cast: [
+      { id: 'terachi', pose: 'stream', spot: 'P1' },
+      { id: 'ryoma', spot: 'A4' },
+      { id: 'mie', pose: 'silence', spot: 'A2' },
+    ],
+    lines: [
+      { shot: 'streamCam', spk: 'narr', text: '初回のライブ配信は、視聴者七人で始まった。うち三人は両馬の複数アカウントの可能性があった。' },
+      { spk: 'terachi', text: '「本質配信、第一回。LINEオープンチャット『✝本質✝募集所』に本質を送ってください。紙に書いて読みます」' },
+      { shot: 'podium', spk: 'terachi', text: '「えー……『本質を追えば追うほど、本質は遠くなる』。追ってる時点でもう本質から離れてるってことか。本質って、向かうものじゃなくて、気づくものなのかもしれない」' },
+      { spk: 'terachi', text: '「『コーンスープは、あるときより、ないときの方が本質である』。……なんか知ってる感じがするな、このコーンスープ。北棟の自販機ですか？」' },
+      { shot: 'podiumWide', spk: 'narr', text: '配信が終わった後、グループラインに寺地が投稿した。\n「本質配信やったんだけど、なんかすごい疲れた」' },
+      { spk: 'ryoma', pose: 'grin', text: '「見てた。なんで俺に先に言わなかったんだよ」' },
+      { spk: 'terachi', pose: 'normal', text: '「先に言ったら両馬がしゃしゃり出てくるから」' },
+      { spk: 'ryoma', text: '「しゃしゃり出ないよ」' },
+      { spk: 'mie', pose: 'ha', text: '「絶対しゃしゃり出る」' },
+      { spk: 'ryoma', text: '「……まあ出るかもしれないけど」' },
+    ],
+  },
+
+  /* 05 ------------------------------------------------------------------ */
+  {
+    id: 'friday',
+    no: '05',
+    chapter: '第四章',
+    title: '金曜五限はいつも死んでいる',
+    accent: '#c9bda8',
+    env: { ...SCHOOL, chalk: 'terrace', leak: 0.12, sun: 1.35, amb: 0.34, fog: 0.075, bloom: 0.4 },
+    shots: { boardLow: SHOTS.boardLow, aisleBack: SHOTS.aisleBack, teacher: SHOTS.teacher, pullback: SHOTS.pullback },
+    cast: [
+      { id: 'katsuya', pose: 'gaze', spot: 'B1', ry: 178 },
+      { id: 'rei', spot: 'A4' },
+      { id: 'izaki', spot: 'A5' },
+      { id: 'satou', pose: 'game', spot: 'W1' },
+      { id: 'mie', pose: 'silence', spot: 'A2' },
+      { id: 'izumi', spot: 'A6' },
+      { id: 'terachi', pose: 'normal', spot: 'A3' },
+    ],
+    lines: [
+      { shot: 'aisleBack', spk: 'narr', text: '金曜五限。一週間の最後の授業。地理。\n教室の空気は死んでいる。窓際は午後の日差しで焼かれ、廊下側はモップの匂いが微かに漂う。' },
+      { shot: 'boardLow', spk: 'katsuya', text: '「今日は河岸段丘の話をする」' },
+      { spk: 'narr', text: '誰も反応しない。勝也は気にしない。' },
+      { spk: 'katsuya', text: '「まず、今お前らが立ってる地面がここだ。その下にもう一段ある。もう一段古い地面。さらにその下にもう一段。時間を掘ってると思ってくれ」' },
+      { shot: 'teacher', spk: 'rei', text: '「上から描くんだって思って。今がわかってると、過去が見えやすい」' },
+      { spk: 'rei', pose: 'smile', text: '「なんか、面白いな」' },
+      { spk: 'narr', text: '砂糖がゲーム画面から目を上げて黒板を一瞬見た。見てから、また下げた。' },
+      { shot: 'pullback', spk: 'narr', text: '勝也がまた窓の外を見た。五秒くらい。口が動いた。何を言っているのかは聞こえない。\n教室の誰もそのことに触れない。ただ、勝也が窓の外を見ているとき、教室が少しだけ静かになる。' },
+    ],
+  },
+
+  /* 06 ------------------------------------------------------------------ */
+  {
+    id: 'window',
+    no: '06',
+    chapter: '第五章',
+    title: '砂糖東洋は窓の外を見ない',
+    accent: '#5fe0c0',
+    env: { ...SCHOOL, chalk: 'terrace', leak: 0.1, sun: 1.45, amb: 0.5, fog: 0.06, bloom: 0.5 },
+    shots: { windowSeat: SHOTS.windowSeat, windowOut: SHOTS.windowOut, windowBack: SHOTS.windowBack },
+    cast: [
+      { id: 'satou', pose: 'game', spot: 'W1' },
+      { id: 'mie', pose: 'normal', spot: 'A5' },
+      { id: 'rei', spot: 'A3' },
+    ],
+    lines: [
+      { shot: 'windowSeat', spk: 'narr', text: '砂糖東洋は毎朝五時五十分に起きる。自転車で十五分、各駅停車、一回乗り換えて、片道一時間十分。この時間を、砂糖はゲームに使っている。' },
+      { spk: 'narr', text: '十月の第三週。砂糖は通学の電車でゲームをやらなかった。充電が切れたからだ。\nスマートフォンが使えない一時間十分。' },
+      { shot: 'windowOut', spk: 'satou', pose: 'look', text: '「田んぼ。山。川。送電線。トンネル。」' },
+      { spk: 'narr', text: '一年半、毎朝毎夕見ている。見ているが「見て」はいなかった。景色は通学の背景で、前景にはゲーム画面があった。' },
+      { spk: 'narr', text: 'しかしこの日、砂糖は景色を見た。山の稜線が、勝也が見せた地形図の等高線と、なんとなく対応しているように見えた。' },
+      { shot: 'windowBack', spk: 'mie', text: '「は？　急にどうした」' },
+      { spk: 'satou', pose: 'look', text: '「等高線って、横から見たら稜線になるの？」' },
+      { spk: 'satou', text: '「地理の話じゃない。ゲームの充電切れただけ」' },
+      { spk: 'mie', pose: 'silence', text: '「それで窓の外見たのか」' },
+      { spk: 'satou', text: '「見るだろ。他にやることないし」' },
+    ],
+  },
+
+  /* 07 ------------------------------------------------------------------ */
+  {
+    id: 'stream4',
+    no: '07',
+    chapter: '第八章',
+    title: '本質配信 #4 —— 寺地が壊れる',
+    accent: '#b48bff',
+    env: { ...SCHOOL, chalk: 'honnshitsu', booth: true, leak: 0.8, sun: 0.6, amb: 0.38, bloom: 0.85, night: true },
+    shots: { streamCam: SHOTS.streamCam, podium: SHOTS.podium },
+    cast: [
+      { id: 'terachi', pose: 'stream', spot: 'P1' },
+      { id: 'ryoma', spot: 'A4' },
+      { id: 'mie', pose: 'silence', spot: 'A2' },
+    ],
+    lines: [
+      { shot: 'streamCam', spk: 'narr', text: '本質配信の第四回。登録者は四百人を超えていた。LINEオープンチャットから届いた✝本質✝は二十一件。過去最多だった。' },
+      { shot: 'podium', spk: 'terachi', text: '「『本質は、黙っているときに来る』。……ちょっと今黙ってみます」' },
+      { spk: 'narr', text: '寺地は十秒黙った。' },
+      { spk: 'terachi', text: '「……来なかったです」' },
+      { spk: 'narr', text: 'コメント欄が「草」で埋まった。' },
+      { spk: 'terachi', text: '「『ヘイカツ先生の窓を見る目。あそこに全部ある』。……わかります。わかる。あの人は地形図の向こう側を見てる。地形図って、今の地面の写しじゃないですか。でも同時に、何億年分の時間も見てる」' },
+      { spk: 'terachi', text: '「え、俺なんか良いこと言った？」' },
+      { spk: 'narr', text: 'コメント欄に「言った」「言ったよ」「それが✝本質✝だよ」が流れた。' },
+      { shot: 'streamCam', spk: 'terachi', text: '「『みえけんじんの将来』。……三重って、冷笑してるように見えて、実は一番ちゃんと聞いてるんですよね。否定しながら聞いてる。ずっとそばにいる。それが三重の✝本質✝だと思う」' },
+      { spk: 'mie', pose: 'ha', text: '「俺の✝本質✝はない。俺に✝本質✝をつけるな」' },
+    ],
+  },
+
+  /* 08 ------------------------------------------------------------------ */
+  {
+    id: 'archaeology',
+    no: '08',
+    chapter: '第十章',
+    title: '掲示板の考古学',
+    accent: '#8fd4ff',
+    env: {
+      ...SCHOOL,
+      chalk: 'terrace',
+      leak: 0.28,
+      sun: 0.55,
+      amb: 0.4,
+      fog: 0.09,
+      night: true,
+      bloom: 0.66,
+      holo: [
+        { no: '08', name: '名無しの地形図好き', body: 'ヘイカツが地形図を上から描くの、今日気づいた。\n普通は下から描くのに。今から過去を掘っていくって描き方。\nあれ、地形図の話してるんじゃなくて、時間の話してると思う。✝', mark: true },
+        { no: '08', name: '名無しの地形図好き', body: '>>101\nそれ、ずっと思ってた。ヘイカツは地形の話を通じて、\n時間と人間の話をしてる。地理の授業なのに', mark: true },
+        { no: '08', name: '名無しの生徒', body: 'このスレ、五人しかいないのに濃い', mark: false },
+      ],
+    },
+    shots: { holo: SHOTS.holo, boardLow: SHOTS.boardLow, aisleBack: SHOTS.aisleBack },
+    cast: [
+      { id: 'mie', pose: 'silence', spot: 'A2' },
+      { id: 'terachi', pose: 'normal', spot: 'A3' },
+      { id: 'ryoma', pose: 'grin', spot: 'A4' },
+      { id: 'rei', spot: 'A5' },
+    ],
+    lines: [
+      { shot: 'aisleBack', spk: 'narr', text: '十二月末。冬休み直前。両馬の匿名掲示板での活動は、年末に向けてさらに加速していた。' },
+      { shot: 'holo', spk: 'narr', text: '寺地が、ヘイカツスレに書き込んだ。' },
+      { spk: 'terachi', text: '「スレに他人が書き込んでた。102番」' },
+      { spk: 'narr', text: '自演ではない。両馬に確認した。「俺じゃない」という返事が来た。「スレの五人目」だ。' },
+      { shot: 'boardLow', spk: 'narr', text: '三重は102の書き込みをもう一度読んだ。\n——地形の話を通じて、時間と人間の話をしてる。' },
+      { spk: 'narr', text: '三重が感じていたことを、知らない誰かが言葉にしていた。✝本質✝と寺地と両馬がいる過疎スレで。\n三重はスクリーンショットを撮って、閉じた。なぜ撮ったのかは、自分でもわからなかった。' },
+      { shot: 'holo', spk: 'rei', text: '「同意は相手に寄せることで、そう思うのは自分が考えた結果だから」' },
+      { spk: 'mie', pose: 'silence', text: '「何が違うんだよ」' },
+      { spk: 'ryoma', pose: 'grin', text: '「零まじ✝本質✝」' },
+      { spk: 'mie', pose: 'ha', text: '「うるさい」' },
+    ],
+  },
+
+  /* 09 ------------------------------------------------------------------ */
+  {
+    id: 'corn',
+    no: '09',
+    chapter: '第十二章',
+    title: '三学期・コーンスープの帰還',
+    accent: '#ffc65c',
+    env: { ...SCHOOL, chalk: 'contour', vending: 'returned', leak: 0.22, sun: 1.0, amb: 0.5, bloom: 0.6 },
+    shots: { vending: SHOTS.vending, wide2: SHOTS.wide2, door: SHOTS.door },
+    cast: [
+      { id: 'ryoma', pose: 'grin', spot: 'VM' },
+      { id: 'mie', pose: 'normal', spot: 'VM2' },
+      { id: 'satou', pose: 'look', spot: 'C3', ry: 120 },
+      { id: 'rei', pose: 'smile', spot: 'C2', ry: 160 },
+      { id: 'izumi', spot: 'C4' },
+    ],
+    lines: [
+      { shot: 'vending', spk: 'narr', text: '一月。三学期。始業式の日、北棟の自販機にコーンスープが補充されていた。六ヶ月ぶりだ。' },
+      { spk: 'izumi', text: '「コーンスープ復活してる」' },
+      { spk: 'ryoma', text: '「これまじ✝本質✝」' },
+      { spk: 'mie', text: '「コーンスープが戻ってきたことは✝本質✝じゃない。業者が補充しただけだろ」' },
+      { spk: 'ryoma', text: '「六ヶ月なかったものが戻ってくること、普通か？」' },
+      { spk: 'mie', text: '「普通だよ」' },
+      { spk: 'satou', text: '「✝本質✝が北棟にコーンスープを呼び戻した可能性」' },
+      { spk: 'mie', pose: 'ha', text: '「ない」' },
+      { shot: 'wide2', spk: 'rei', text: '「因果関係はないけど、砂糖が✝本質✝として〈コーンスープ〉を提出した二ヶ月後にコーンスープが戻ってきた。時系列的には一致してる」' },
+      { spk: 'mie', text: '「時系列が一致してるだけで因果じゃないだろ」' },
+      { spk: 'rei', text: '「そうだよ。でもロマンない？」' },
+      { spk: 'mie', pose: 'silence', text: '「ロマンで因果関係を語るな」' },
+    ],
+  },
+
+  /* 10 ------------------------------------------------------------------ */
+  {
+    id: 'lava',
+    no: '10',
+    chapter: '第九章（二年）',
+    title: 'ハワイの✝本質✝',
+    accent: '#ff7a45',
+    env: {
+      ...SCHOOL,
+      outside: 'lava',
+      chalk: 'contour',
+      leak: 0.18,
+      sun: 1.5,
+      amb: 0.5,
+      fog: 0.03,
+      bloom: 0.75,
+      sunColor: '#ffd8b0',
+    },
+    shots: { windowOut: SHOTS.windowOut, windowBack: SHOTS.windowBack, wide: SHOTS.wide },
+    cast: [
+      { id: 'katsuya', pose: 'gaze', spot: 'W2', ry: 250 },
+      { id: 'rei', spot: 'A4' },
+      { id: 'izaki', spot: 'A1' },
+      { id: 'satou', pose: 'camera', spot: 'W1' },
+      { id: 'ryoma', spot: 'A5' },
+      { id: 'mie', spot: 'A2' },
+    ],
+    lines: [
+      { shot: 'windowOut', spk: 'narr', text: '十月。理数科の海外研修旅行。ハワイ。\nキラウエア火山の溶岩台地。固まった溶岩が、黒い波のように広がっている。空気が違う。地面の質感が違う。' },
+      { spk: 'katsuya', text: '「ここの地面は新しい。数年前にできた地面だ。お前らが立ってるこの場所は、数年前には存在しなかった」' },
+      { spk: 'narr', text: '零が小声で「すごいな」と言った。' },
+      { shot: 'windowBack', spk: 'rei', text: '「地面が新しい。日本で見てた地形図は、何万年も前の地面の上に描いてある。ここは数年。等高線を引こうとしたら毎年変わる。地図が追いつかない地面」' },
+      { spk: 'rei', pose: 'smile', text: '「ヘイカツの言う〈地図の向こう側〉って、こういうことなのかもしれない。地図が追いつかない場所に立つと、地図の向こう側が見える」' },
+      { spk: 'narr', text: '砂糖が溶岩台地の写真を撮った。何枚も。通学路の車窓から山を撮ったときと同じように。' },
+      { spk: 'satou', text: '「記録だ。景色の話じゃない。記録」' },
+      { spk: 'mie', pose: 'ha', text: '「記録を景色と言う」' },
+      { spk: 'satou', text: '「うるさい」' },
+    ],
+  },
+
+  /* 11 ------------------------------------------------------------------ */
+  {
+    id: 'wife',
+    no: '11',
+    chapter: '第五章（二年）',
+    title: '人妻の✝本質✝',
+    accent: '#ff9f43',
+    env: {
+      ...SCHOOL,
+      chalk: 'honnshitsu',
+      leak: 0.42,
+      sun: 0.95,
+      amb: 0.5,
+      bloom: 0.62,
+      holo: [
+        { no: '11', name: '✝本質✝募集所', body: '人妻の✝本質✝について追加考察。\n封印の刻印たる結婚指輪は、保有者の〈手の届かなさ〉を可視化する装置である。\nしかし問題は、✝本質✝が〈手が届かないこと〉にあるのか、\n〈手が届かないと知りながら手を伸ばすこと〉にあるのか、という二項対立だ。', mark: true },
+        { no: '11', name: '名無し', body: 'これ召野だろ', mark: false },
+      ],
+    },
+    shots: { teacher: SHOTS.teacher, aisle: SHOTS.aisle, holo: SHOTS.holo, board: SHOTS.board },
+    cast: [
+      { id: 'meshino', spot: 'A4', ry: 24 },
+      { id: 'futami', pose: 'normal', spot: 'B1', ry: 180 },
+      { id: 'mie', pose: 'normal', spot: 'A2', ry: 22 },
+      { id: 'rei', spot: 'A5' },
+      { id: 'izumi', spot: 'A6' },
+      { id: 'ryoma', pose: 'grin', spot: 'A1', ry: 30 },
+    ],
+    lines: [
+      { shot: 'teacher', spk: 'narr', text: '五月。中間考査前。\n召野の英語の成績は学年十二位まで上がっていた。一年のときは学年百三十位付近だった。百十八人抜き。理由は二見への恋心、以上。' },
+      { shot: 'aisle', spk: 'meshino', text: '「人妻は美しい。他者に所有されているという事実が輪郭を際立たせている。自由に手に入らないからこそ光っている。あの結婚指輪は封印だ」' },
+      { spk: 'mie', pose: 'ha', text: '「お前、それ犯罪の一歩手前の発想だぞ」' },
+      { spk: 'meshino', text: '「犯罪じゃない。愛だ」' },
+      { spk: 'mie', pose: 'normal', text: '「愛でもやめろ」' },
+      { shot: 'teacher', spk: 'futami', text: '「はーい、二見です。今年から皆さんの副担任をやります。英語担当です。よろしくね」' },
+      { spk: 'narr', text: '明るい声。笑顔。ショートカット。三十二歳。左手薬指に銀の結婚指輪。\n召野はこの「すごい」を脳内で四十七回リピートした（本人談）。' },
+      { spk: 'rei', pose: 'normal', text: '「それ、櫻さんのシュレディンガーの好意と同じことじゃない？　観測したら崩壊するから観測しない」' },
+      { shot: 'board', spk: 'meshino', text: '「告白したら関係が変わる。今の〈英語を教えてくれる先生と頑張る生徒〉の関係が壊れる。俺はこの関係の中にいたい」' },
+      { spk: 'izumi', text: '「怖いのと好きなの、どっちが大きいの？」' },
+      { spk: 'meshino', text: '「……好きの方が大きい。だけど、二見先生は人妻だから。告白の意味がない」' },
+      { shot: 'holo', spk: 'narr', text: 'その夜、寺地の配信にこんな投稿が届いた。\n二項対立で語り始めると学術論文みたいになる、と寺地は言った。' },
+      { spk: 'terachi', text: '「……でもまあ、〈手が届かないと知りながら手を伸ばすこと〉に本質がある、って書いてある。それ、召野がやったことそのままだよね。本当のことをやった。それだけで十分だと思う」' },
+    ],
+  },
+
+  /* 12 ------------------------------------------------------------------ */
+  {
+    id: 'theory',
+    no: '12',
+    chapter: '第十四章',
+    title: '櫻優の理論崩壊（最終局面）',
+    accent: '#ff8fb1',
+    env: { ...SCHOOL, chalk: 'honnshitsu', notebook: true, leak: 0.55, sun: 0.85, amb: 0.44, bloom: 0.7 },
+    shots: { notebook: SHOTS.notebook, aisleBack: SHOTS.aisleBack, wide2: SHOTS.wide2 },
+    cast: [
+      { id: 'sakura', pose: 'research', spot: 'A4' },
+      { id: 'naitou', spot: 'A5' },
+      { id: 'ryoma', spot: 'A2' },
+      { id: 'mie', pose: 'silence', spot: 'A1' },
+    ],
+    lines: [
+      { shot: 'notebook', spk: 'narr', text: '二月の末。櫻優の研究ノートは、もはや原形を留めていなかった。' },
+      { spk: 'sakura', text: '「恋愛発生の第十三法則（暫定）：恋愛は✝本質✝の一形態である可能性。」' },
+      { spk: 'sakura', text: '「つまり、恋愛とは✝本質✝であり、✝本質✝とは恋愛である。\n……何を言っているかわからない。わからないが、わからないことこそが✝本質✝であるとすれば、この理論崩壊自体が✝本質✝的に正しいことになる。」' },
+      { shot: 'aisleBack', spk: 'sakura', pose: 'smile', text: '「助けて。」' },
+      { spk: 'narr', text: '最後の「助けて。」を書いてから、櫻は理数科に行った。\n「✝本質✝は、私の理論を壊しに来たんですか」' },
+      { shot: 'wide2', spk: 'ryoma', pose: 'grin', text: '「壊しに行ってない。✝本質✝は壊すために存在するんじゃなくて、あるから、あるだけだよ」' },
+      { spk: 'ryoma', text: '「壊れたんじゃなくて、広がったんじゃない？　理論の枠が広がったんだよ。枠が広がると、前の枠に入ってたものがこぼれて、壊れたように見える。でも壊れてない。広がっただけ」' },
+      { spk: 'narr', text: '櫻は両馬を見た。両馬は卵焼きを食べていた。' },
+      { shot: 'notebook', spk: 'naitou', text: '「なんで二回お礼言うの？」' },
+    ],
+  },
+
+  /* 13 ------------------------------------------------------------------ */
+  {
+    id: 'kuraishi',
+    no: '13',
+    chapter: '第一章（三年）',
+    title: '倉石暁、降臨',
+    accent: '#ff6b6b',
+    env: { ...SCHOOL, chalk: 'contour', leak: 0.5, sun: 1.2, amb: 0.6, bloom: 0.6, petals: 0 },
+    shots: { wide2: SHOTS.wide2, podiumWide: SHOTS.podiumWide, aisle: SHOTS.aisle, board: SHOTS.board },
+    cast: [
+      { id: 'kuraishi', pose: 'normal', spot: 'C1', ry: 176 },
+      { id: 'ryoma', pose: 'normal', spot: 'A4', ry: 12 },
+      { id: 'mie', pose: 'silence', spot: 'A2', ry: 16 },
+      { id: 'terachi', pose: 'normal', spot: 'A3', ry: 8 },
+      { id: 'rei', pose: 'normal', spot: 'A5', ry: 4 },
+    ],
+    lines: [
+      { shot: 'wide2', spk: 'narr', text: '入学式の日。理数科一年A組の教室。\n倉石のノートの表紙には、太いマジックペンで「✝」と書いてある。筆箱にも「✝」。制服のブレザーの裏地に、白い修正液で「✝本質✝」。' },
+      { shot: 'podiumWide', spk: 'kuraishi', text: '「倉石暁です。中学のときにYouTubeチャンネル〈星と地面とせいちちゃんねる〉の本質配信を見て、この学校に入ることを決めました。趣味は✝本質✝の探求です。よろしくお願いします」' },
+      { spk: 'narr', text: '教室が静まった。担任が「……趣味は？」と聞き返した。' },
+      { spk: 'kuraishi', text: '「✝本質✝の探求です」' },
+      { spk: 'narr', text: '担任は「わかりました」と言って次の生徒に進んだ。わかっていないが、入学式の日に深追いする体力は担任にもなかった。' },
+      { shot: 'aisle', spk: 'narr', text: '昼休み。倉石は一年の教室から出て、北棟の二階に向かった。' },
+      { spk: 'kuraishi', pose: 'shock', text: '「すみません。両馬二郎先輩はいますか」' },
+      { spk: 'narr', text: '教室の空気が一瞬止まった。一年生が来ること自体が珍しい。しかも名指し。' },
+      { shot: 'board', spk: 'ryoma', pose: 'grin', text: '「俺だけど」' },
+      { spk: 'narr', text: '両馬は普通に弁当を食べていた。卵焼きと鮭フレークご飯。\n——こうして三年目が始まった。' },
+    ],
+  },
+
+  /* 14 ------------------------------------------------------------------ */
+  {
+    id: 'march',
+    no: '14',
+    chapter: '第十五章',
+    title: '三月の終わり',
+    accent: '#ffd9e2',
+    env: {
+      ...SCHOOL,
+      chalk: 'contour',
+      petals: 1,
+      leak: 0.45,
+      sun: 1.25,
+      amb: 0.62,
+      fog: 0.055,
+      bloom: 0.65,
+      sunColor: '#ffe2c4',
+    },
+    shots: { final: SHOTS.final, wide: SHOTS.wide, pullback: SHOTS.pullback },
+    cast: [
+      { id: 'ryoma', pose: 'normal', spot: 'C1' },
+      { id: 'mie', pose: 'normal', spot: 'C2' },
+      { id: 'terachi', spot: 'A3' },
+      { id: 'satou', pose: 'look', spot: 'C3' },
+      { id: 'rei', pose: 'smile', spot: 'A4' },
+      { id: 'izaki', pose: 'smile', spot: 'A1' },
+      { id: 'izumi', pose: 'resolve', spot: 'A5' },
+      { id: 'katsuya', pose: 'gaze', spot: 'B1', ry: 178 },
+    ],
+    lines: [
+      { shot: 'final', spk: 'narr', text: '三月。年度末。一年間が終わる。何も劇的なことは起きなかった。' },
+      { spk: 'ryoma', text: '「一年終わるな」' },
+      { spk: 'izaki', text: '「終わるな」' },
+      { spk: 'izumi', text: '「早かったな」' },
+      { spk: 'satou', text: '「早かった」' },
+      { spk: 'mie', pose: 'silence', text: '「まあ」' },
+      { spk: 'terachi', text: '「まあ」' },
+      { spk: 'rei', text: '「まあ」' },
+      { spk: 'ryoma', pose: 'grin', text: '「全員〈まあ〉って言うの何」' },
+      { spk: 'mie', pose: 'normal', text: '「感想がないんだよ」' },
+      { shot: 'wide', spk: 'ryoma', text: '「感想がないのが✝本質✝だよ」' },
+      { spk: 'mie', pose: 'ha', text: '「出た。年度末まで✝本質✝か」' },
+      { shot: 'pullback', spk: 'narr', text: '桜が散る。教室の窓の外で。\n何も劇的なことは、起きなかった。' },
+    ],
+  },];
+
+export const SCENE_INDEX = Object.fromEntries(SCENES.map((s, i) => [s.id, i]));

@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>✝本質✝の教室 — 桐葉高校 北棟 理数科B組</title>
+    <meta name="description" content="「偏差値60の教室から✝本質✝が漏れ出している件について」を教室3Dモデルで再構成した体験型ビューア。" />
+  </head>
+  <body>
+    <canvas id="stage"></canvas>
+
+    <!-- ===== ローディング ===== -->
+    <div id="loading" class="loading">
+      <div class="loading-mark">✝</div>
+      <div class="loading-label">本質を読み込み中</div>
+      <div class="loading-bar"><i id="loading-fill"></i></div>
+      <div class="loading-num"><span id="loading-pct">0</span><small>%</small></div>
+      <div class="loading-note" id="loading-note">classroom.glb / 立ち絵 26点</div>
+    </div>
+
+    <!-- ===== タイトル ===== -->
+    <div id="title" class="title-screen">
+      <div class="title-inner">
+        <div class="title-kicker">桐葉高校 北棟 二階 · 理数科B組</div>
+        <h1 class="title-main">
+          <span class="title-bracket">「</span>偏差値60の教室から<span class="title-hon">✝本質✝</span>が<br />漏れ出している件について<span class="title-bracket">」</span>
+        </h1>
+        <div class="title-sub">3D CLASSROOM EDITION</div>
+        <p class="title-lead">
+          見えないが、ある。——教室の国境、コーンスープの不在、<br />
+          等高線の向こう側にいる人間。12の場面を、実際の教室で。
+        </p>
+        <button id="enter" class="title-enter">
+          <span>本質を見る</span><i>✝</i>
+        </button>
+        <div class="title-foot">
+          <span>クリック / ドラッグで視点 · WASDで移動 · Spaceで本文</span>
+          <button class="linkish" data-open="credits">クレジット</button>
+        </div>
+      </div>
+      <div class="title-vignette"></div>
+    </div>
+
+    <!-- ===== 上部バー ===== -->
+    <header id="topbar" class="topbar is-hidden">
+      <div class="brand">
+        <span class="brand-hon">✝本質✝</span>
+        <span class="brand-sub">桐葉高校 北棟 理数科B組</span>
+      </div>
+      <div class="topbar-meta">
+        <span id="scene-chapter" class="meta-chapter">序</span>
+        <span id="scene-title" class="meta-title">桐葉高校という二重構造</span>
+      </div>
+      <div class="tools">
+        <button id="btn-toc" class="tool" title="目次 (T)">目次</button>
+        <button id="btn-free" class="tool" title="自由視点 (F)">自由視点</button>
+        <button id="btn-style" class="tool" title="立ち絵スタイル">切り絵</button>
+        <button id="btn-audio" class="tool" title="音 (M)">音 OFF</button>
+        <button id="btn-credits" class="tool" title="クレジット">i</button>
+      </div>
+    </header>
+
+    <!-- ===== 目次 ===== -->
+    <nav id="toc" class="toc is-hidden" aria-label="目次">
+      <div class="toc-head">
+        <span>目次</span>
+        <button id="toc-close" class="toc-close">×</button>
+      </div>
+      <ol id="toc-list" class="toc-list"></ol>
+      <div class="toc-foot">
+        <button class="linkish" data-open="credits">クレジット / ライセンス</button>
+      </div>
+    </nav>
+
+    <!-- ===== ダイアログ ===== -->
+    <section id="dialogue" class="dialogue is-hidden">
+      <div class="dlg-accent" id="dlg-accent"></div>
+      <div class="dlg-body">
+        <div class="dlg-head">
+          <span id="dlg-speaker" class="dlg-speaker">ナレーション</span>
+          <span id="dlg-role" class="dlg-role"></span>
+        </div>
+        <p id="dlg-text" class="dlg-text"></p>
+        <div class="dlg-foot">
+          <span id="dlg-hint" class="dlg-hint">Space / クリックで次へ</span>
+          <span id="dlg-count" class="dlg-count">1 / 1</span>
+        </div>
+      </div>
+      <div class="dlg-actions">
+        <button id="dlg-auto" class="ghost" title="自動送り">自動</button>
+        <button id="dlg-next" class="ghost primary" title="次へ">次へ <i>▼</i></button>
+      </div>
+    </section>
+
+    <!-- ===== 人物カード ===== -->
+    <aside id="charcard" class="charcard is-hidden">
+      <button id="cc-close" class="cc-close">×</button>
+      <div id="cc-body" class="cc-body"></div>
+    </aside>
+
+    <!-- ===== 場面キャプション ===== -->
+    <div id="caption" class="caption"></div>
+
+    <!-- ===== ヒント ===== -->
+    <div id="hintbar" class="hintbar is-hidden">
+      <span><b>視点</b> ドラッグ / WASD / ホイール</span>
+      <span><b>本文</b> Space・クリック</span>
+      <span><b>目次</b> T</span>
+      <span><b>人物</b> クリックで本質度</span>
+    </div>
+
+    <!-- ===== クレジット ===== -->
+    <div id="credits" class="modal is-hidden">
+      <div class="modal-panel">
+        <button id="credits-close" class="modal-close">×</button>
+        <h2>クレジット / ライセンス</h2>
+
+        <h3>原作</h3>
+        <p>「偏差値60の教室から✝本質✝が漏れ出している件について」<br />
+          <small>Google Drive「本質images」内のテキストより引用・要約。固有名詞と台詞は原作に基づきます。</small>
+        </p>
+
+        <h3>教室モデル</h3>
+        <p>
+          <em>Classroom</em> by <a href="https://sketchfab.com/titi_156" target="_blank" rel="noreferrer">Pino_156</a> —
+          <a href="https://sketchfab.com/3d-models/classroom-d4553cc2008242849214e4cbf8ad8551" target="_blank" rel="noreferrer">Sketchfab</a><br />
+          ライセンス: <a href="http://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC-BY-4.0</a>
+          （本作はモデルのスケール・マテリアル・ライティングを改変して使用しています）
+        </p>
+
+        <h3>立ち絵</h3>
+        <p>
+          「本質images」内の立ち絵26点。本作では<b>原画をそのまま板として貼るのではなく</b>、
+          トリム・減色のうえで紙の切り絵シェーダ（ハーフトーン／輪郭線／紙の反り）を通して
+          立体空間に配置しています。台詞ごとに表情差分を差し替えます。
+        </p>
+
+        <h3>技術</h3>
+        <p>three.js / Vite。書き割り以外の小道具（黒板、自販機、配信ブース、掲示板ホログラム、窓外の風景）は
+          すべてコードで生成した Canvas テクスチャとジオメトリです。</p>
+
+        <h3>操作</h3>
+        <p>ドラッグ=視点 / WASD=移動 / ホイール=前後 / Space=本文送り / ←→=場面移動 / F=自由視点 / H=UI隠し</p>
+      </div>
+    </div>
+
+    <div id="fps" class="fps is-hidden"></div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

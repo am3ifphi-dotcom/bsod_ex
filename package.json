@@ -1,0 +1,19 @@
+{
+  "name": "honnshitsu-classroom-3d",
+  "private": true,
+  "version": "1.0.0",
+  "description": "「偏差値60の教室から✝本質✝が漏れ出している件について」3D — 桐葉高校 北棟 理数科B組",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "art": "bash tools/prepare-art.sh"
+  },
+  "dependencies": {
+    "three": "^0.186.0"
+  },
+  "devDependencies": {
+    "vite": "^7.1.0"
+  }
+}

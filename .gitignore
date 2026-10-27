@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+
+# 原作の原本画像（Drive が正）— 加工済みのみ public/chara に置く
+assets_src/
