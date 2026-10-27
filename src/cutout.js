@@ -212,8 +212,8 @@ export class CharacterCutout {
     // 名札
     const tagTex = nameTagTexture(def.name, def.kana, def.accent);
     this.tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: tagTex, transparent: true, opacity: 0.0, depthWrite: false }));
-    this.tag.scale.set(this.height * 0.56, this.height * 0.14, 1);
-    this.tag.position.y = this.height + 0.16;
+    this.tag.scale.set(this.height * 0.42, this.height * 0.105, 1);
+    this.tag.position.y = this.height + 0.13;
     this.group.add(this.tag);
 
     // クリック判定用（見た目の板より少し細い透明板）
@@ -305,7 +305,7 @@ export class CharacterCutout {
     this.opacityNow = THREE.MathUtils.lerp(this.opacityNow ?? 0, this.visibleTarget, visK);
     u.uOpacity.value = this.opacityNow;
     this.group.visible = this.opacityNow > 0.01;
-    this.tag.material.opacity = Math.max(0, (this.opacityNow - 0.6) / 0.4) * 0.9;
+    this.tag.material.opacity = Math.max(0, (this.opacityNow - 0.65) / 0.35) * 0.8;
     this.ring.material.opacity = 0.28 * this.opacityNow;
     this.shadow.material.opacity = 0.5 * this.opacityNow;
 
@@ -326,7 +326,7 @@ export class CharacterCutout {
 
     // 名札はカメラに正対しつつ、板の向きに合わせて左右に寄る
     if (this.tag.material.opacity > 0.01) {
-      this.tag.position.y = this.height + 0.16 + Math.sin(t * 1.2 + this.seed * 6.28) * 0.012;
+      this.tag.position.y = this.height + 0.13 + Math.sin(t * 1.2 + this.seed * 6.28) * 0.01;
     }
   }
 }
