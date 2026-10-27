@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>STOP_CODE // BSOD_EX</title>
+  <link rel="stylesheet" href="./src/style.css" />
+</head>
+<body>
+  <div id="app">
+    <canvas id="gl"></canvas>
+
+    <!-- ゲーム内HUD -->
+    <div id="hud" class="hidden">
+      <div id="crosshair"><span></span></div>
+      <div id="prompt" class="hidden"></div>
+      <div id="subtitle" class="hidden"></div>
+      <div id="hint-bar" class="hidden"></div>
+      <div id="discovery" class="hidden"></div>
+      <div id="fx-vignette"></div>
+      <div id="fx-grain"></div>
+      <div id="fx-scanlines"></div>
+    </div>
+
+    <!-- ゲーム内コンソール -->
+    <div id="console-panel" class="hidden">
+      <div id="console-header">SYS_CONSOLE // session 0x3F — type 'help'</div>
+      <div id="console-log"></div>
+      <div id="console-input-line">
+        <span id="console-prompt">&gt;</span>
+        <input id="console-input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" />
+      </div>
+    </div>
+
+    <!-- ロード画面 -->
+    <div id="loading">
+      <div id="loading-box">
+        <div id="loading-title">STOP_CODE : 0x000000EF</div>
+        <div id="loading-bar"><div id="loading-fill"></div></div>
+        <div id="loading-pct">0%</div>
+        <div id="loading-note">corrupting memory…</div>
+      </div>
+    </div>
+
+    <!-- タイトル -->
+    <div id="title" class="hidden">
+      <div class="title-inner">
+        <h1>BSOD_<span>EX</span></h1>
+        <p class="title-sub">― 青い画面の向こう側 ―</p>
+        <button id="start-btn">START</button>
+        <div class="title-controls">
+          <p><b>W A S D</b> 移動　<b>マウス</b> 視点　<b>SHIFT</b> 走る</p>
+          <p><b>E / クリック</b> 調べる　<b>ESC</b> 一時停止　<b>M</b> ミュート</p>
+          <p class="title-warn">※ イヤホン推奨。点滅表現を含みます。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ポーズ -->
+    <div id="pause" class="hidden">
+      <div class="pause-inner">
+        <h2>PAUSED</h2>
+        <p>一時停止中</p>
+        <button id="resume-btn">再開する</button>
+      </div>
+    </div>
+
+    <!-- フォーカス喪失時はポーズパネルで代替 -->
+  </div>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
