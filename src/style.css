@@ -78,7 +78,27 @@ button {
 .loading-bar { width: 220px; height: 1px; background: var(--line); overflow: hidden; }
 .loading-bar i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, transparent, var(--accent)); transition: width 0.3s; }
 .loading-num { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); letter-spacing: 0.2em; }
-.loading-note { font-family: var(--mono); font-size: 10px; color: var(--ink-faint); letter-spacing: 0.14em; }
+.loading-note {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-faint);
+  letter-spacing: 0.14em;
+  max-width: min(620px, 82vw);
+  text-align: center;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+.fatal-reload {
+  margin-top: 22px;
+  padding: 11px 26px;
+  border: 1px solid var(--line-strong);
+  font-family: var(--serif);
+  font-size: 12px;
+  letter-spacing: 0.3em;
+  color: var(--ink-dim);
+  transition: all 0.3s;
+}
+.fatal-reload:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 
 /* ---------- タイトル ---------- */
 .title-screen {

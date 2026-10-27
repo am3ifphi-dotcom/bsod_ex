@@ -361,11 +361,12 @@ export class World {
     g.add(tripod);
 
     // A4用紙
+    const a4Tex = a4Texture();
     const a4Mat = new THREE.MeshStandardMaterial({
-      map: a4Texture(),
+      map: a4Tex,
       roughness: 0.9,
       emissive: 0xffffff,
-      emissiveMap: a4Texture(),
+      emissiveMap: a4Tex,
       emissiveIntensity: 0.12,
       side: THREE.DoubleSide,
     });
@@ -431,8 +432,8 @@ export class World {
           vec4 c = texture2D(uMap, uv + vec2(wob, 0.0));
           float scan = 0.86 + 0.14 * sin(uv.y * 620.0 - uTime * 6.0);
           float flicker = 0.92 + 0.08 * sin(uTime * 21.0);
-          float edge = smoothstep(0.0, 0.06, uv.x) * smoothstep(1.0, 0.94, uv.x)
-                     * smoothstep(0.0, 0.05, uv.y) * smoothstep(1.0, 0.95, uv.y);
+          float edge = smoothstep(0.0, 0.06, uv.x) * (1.0 - smoothstep(0.94, 1.0, uv.x))
+                     * smoothstep(0.0, 0.05, uv.y) * (1.0 - smoothstep(0.95, 1.0, uv.y));
           gl_FragColor = vec4(c.rgb * scan * flicker, c.a * uOpacity * (0.55 + 0.45 * edge));
         }
       `,
@@ -481,9 +482,10 @@ export class World {
     g.position.set(1.94, 1.02, 0.62);
     g.rotation.y = 0.18;
 
+    const nbTex = notebookTexture();
     const mat = new THREE.MeshStandardMaterial({
-      map: notebookTexture(),
-      emissiveMap: notebookTexture(),
+      map: nbTex,
+      emissiveMap: nbTex,
       emissive: 0xffffff,
       emissiveIntensity: 0.35,
       roughness: 0.85,

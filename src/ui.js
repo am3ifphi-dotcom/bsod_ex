@@ -164,7 +164,7 @@ export class UI {
     this.el.role.textContent = spk ? spk.role : '桐葉高校 北棟 理数科B組';
     this.el.count.textContent = `${index + 1} / ${total}`;
     this.el.hint.textContent = this.auto ? '自動送り中' : 'Space / クリックで次へ';
-    this.autoBtn.classList.toggle('on', this.auto);
+    this.el.autoBtn.classList.toggle('on', this.auto);
     this.typeLine(line.text, () => this.queueAuto());
   }
 

@@ -28,7 +28,7 @@ const VERT = /* glsl */ `
 
   void main() {
     vUv = uv;
-    vNormalW = normalize(mat3(modelMatrix) * vec3(0.0, 0.0, 1.0));
+    vNormalW = normalize((modelMatrix * vec4(0.0, 0.0, 1.0, 0.0)).xyz);
     vec3 p = position;
 
     // 紙の反り（左右）
@@ -87,7 +87,7 @@ const FRAG = /* glsl */ `
 
     // 印刷の網点（弱め。遠景でのモアレを避ける）
     vec2 grid = fract(uv * vec2(480.0, 1200.0) / 4.5) - 0.5;
-    float dotMask = smoothstep(0.55, 0.12, length(grid));
+    float dotMask = 1.0 - smoothstep(0.12, 0.55, length(grid));
     float print = mix(1.0, 0.74 + dotMask * 0.42, 0.3);
 
     // 内側の輪郭
@@ -96,7 +96,7 @@ const FRAG = /* glsl */ `
     float aU = texture2D(uMap, uv + vec2(0.0, uTexel.y * 2.4)).a;
     float aD = texture2D(uMap, uv - vec2(0.0, uTexel.y * 2.4)).a;
     float inner = min(min(aL, aR), min(aU, aD));
-    float contour = smoothstep(0.62, 0.16, inner);
+    float contour = 1.0 - smoothstep(0.16, 0.62, inner);
 
     // 紙の地色（わずかに暖かい）
     vec3 paper = vec3(1.03, 0.995, 0.955);
@@ -107,10 +107,7 @@ const FRAG = /* glsl */ `
       vec3 c = mix(vec3(lum), col, 0.84) * paper * shade;
       c *= print;
       c = mix(c, uAccent * 0.5 + col * 0.35, contour * 0.7);
-      // 縁のハイライト（紙の切り口）
-      float edgeLight = smoothstep(0.5, 0.0, min(inner, 1.0)) * 0.0;
-      c += uHighlight * 0.09 + edgeLight;
-      c += uAccent * (1.0 - cut) * 0.0;
+      c += uHighlight * 0.09;
       col = c;
     } else if (uStyle < 1.5) {
       // ---- インク：二色刷り
@@ -422,6 +419,8 @@ export class Cast {
   }
 
   pick(raycaster) {
+    // 描画前でも判定できるようにワールド行列を更新しておく
+    this.group.updateWorldMatrix(true, true);
     const objs = this.active.filter((c) => c.group.visible).map((c) => c.mesh);
     const hits = raycaster.intersectObjects(objs, false);
     return hits.length ? this.items.get(hits[0].object.userData.characterId) : null;

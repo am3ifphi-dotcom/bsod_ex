@@ -28,7 +28,34 @@ function showFatal(err) {
   if (bar) bar.style.display = 'none';
   if (pct) pct.style.display = 'none';
   const box = document.getElementById('loading');
-  if (box) box.classList.remove('done');
+  if (!box) return;
+  box.classList.remove('done');
+  if (!box.dataset.fatal) {
+    box.dataset.fatal = '1';
+    const btn = document.createElement('button');
+    btn.className = 'fatal-reload';
+    btn.textContent = '再読み込み';
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      location.reload();
+    });
+    box.appendChild(btn);
+  }
+}
+
+/** 表示まわりの例外で全体を落とさない（コンソールには残す） */
+function safe(fn) {
+  return (...args) => {
+    try {
+      return fn(...args);
+    } catch (err) {
+      console.error(err);
+      try {
+        ui.toast('表示エラー（コンソールを確認）');
+      } catch (_) {}
+      return undefined;
+    }
+  };
 }
 window.addEventListener('error', (e) => showFatal(e.error || e.message));
 window.addEventListener('unhandledrejection', (e) => showFatal(e.reason));
@@ -103,7 +130,7 @@ const GradeShader = {
       col += (n - 0.5) * uGrain;
 
       // ビネット
-      float vig = smoothstep(0.95, 0.15, r2 * 1.9);
+      float vig = 1.0 - smoothstep(0.15, 0.95, r2 * 1.9);
       col *= mix(1.0, vig, uVignette * 0.55);
 
       // ごく薄い色かぶり
@@ -136,9 +163,9 @@ const audio = new AudioEngine();
 const ui = new UI({
   scenes: SCENES,
   on: {
-    enter: () => enter(),
-    next: () => nextLine(),
-    scene: (i) => goToScene(i),
+    enter: () => safeEnter(),
+    next: () => safeNext(),
+    scene: (i) => safeScene(i),
     free: () => toggleFree(),
     style: () => cycleStyle(),
     audio: () => toggleAudio(),
@@ -411,6 +438,17 @@ function resize() {
   bloom.setSize(w, h);
 }
 window.addEventListener('resize', resize);
+
+/* 安全版ラッパ（関数宣言は巻き上げられるのでここで定義してよい） */
+function safeEnter() {
+  return safe(enter)();
+}
+function safeNext() {
+  return safe(nextLine)();
+}
+function safeScene(i) {
+  return safe(goToScene)(i);
+}
 
 /* ------------------------------------------------------------------ */
 /* ループ                                                              */
