@@ -182,6 +182,8 @@ export class CharacterCutout {
     this.mesh.userData.characterId = def.id;
     this.height = H_METERS * def.scale;
     this.mesh.scale.set(this.height * ASPECT, this.height, 1);
+    // PlaneGeometry は原点中心なので、足元が床(y=0)に来るよう持ち上げる
+    this.mesh.position.y = this.height * 0.5;
     this.group.add(this.mesh);
 
     // 接地影
@@ -362,10 +364,11 @@ export class Cast {
     this.preload();
   }
 
-  async preload() {
+  async preload({ defaultsOnly = false } = {}) {
     const all = [];
     for (const c of this.items.values()) {
-      for (const key of Object.keys(c.def.poses)) all.push(c.setPose(key, { instant: true }));
+      const keys = defaultsOnly ? [c.def.defaultPose] : Object.keys(c.def.poses);
+      for (const key of keys) all.push(c.setPose(key, { instant: true }));
     }
     let done = 0;
     for (const p of all) {
@@ -392,7 +395,7 @@ export class Cast {
       if (!c) continue;
       wanted.add(entry.id);
       c.visibleTarget = 1;
-      if (entry.pose) c.setPose(entry.pose);
+      c.setPose(entry.pose || c.def.defaultPose);
       const base = typeof entry.spot === 'string' ? SPOTS[entry.spot] : entry.spot;
       const spot = base ? { ...base, ry: entry.ry ?? base.ry } : { x: 0.13, z: -0.55, ry: 180 };
       c.place(spot);

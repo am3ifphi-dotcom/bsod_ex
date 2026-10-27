@@ -2,20 +2,20 @@ import './style.css';
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 
-import { SCENES } from './data/scenes.js';
+import { SCENES, ROUTE } from './data/scenes.js';
 import { CHARACTERS } from './data/characters.js';
+import { SPAWNS } from './data/colliders.js';
 import { World } from './world.js';
 import { Cast } from './cutout.js';
-import { Director } from './director.js';
+import { Walker } from './walker.js';
 import { AudioEngine } from './audio.js';
 import { UI } from './ui.js';
 
 /* ------------------------------------------------------------------ */
-/* 例外は画面に出す（真っ黒のまま黙って死なないように）                */
+/* 例外は画面に出す                                                    */
 /* ------------------------------------------------------------------ */
 function showFatal(err) {
   console.error(err);
@@ -23,7 +23,7 @@ function showFatal(err) {
   const label = document.querySelector('.loading-label');
   const bar = document.querySelector('.loading-bar');
   const pct = document.querySelector('.loading-num');
-  if (label) label.textContent = '本質の読み込みに失敗しました';
+  if (label) label.textContent = '読み込みに失敗しました';
   if (note) note.textContent = String(err && err.message ? err.message : err);
   if (bar) bar.style.display = 'none';
   if (pct) pct.style.display = 'none';
@@ -42,62 +42,41 @@ function showFatal(err) {
     box.appendChild(btn);
   }
 }
-
-/** 表示まわりの例外で全体を落とさない（コンソールには残す） */
-function safe(fn) {
-  return (...args) => {
-    try {
-      return fn(...args);
-    } catch (err) {
-      console.error(err);
-      try {
-        ui.toast('表示エラー（コンソールを確認）');
-      } catch (_) {}
-      return undefined;
-    }
-  };
-}
 window.addEventListener('error', (e) => showFatal(e.error || e.message));
 window.addEventListener('unhandledrejection', (e) => showFatal(e.reason));
 
 /* ------------------------------------------------------------------ */
-/* レンダラ                                                            */
+/* レンダラ（軽量設定：影なし / 低解像度 / ポストは1パス）             */
 /* ------------------------------------------------------------------ */
 const canvas = document.getElementById('stage');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false });
-const PR = Math.min(window.devicePixelRatio || 1, 1.4);
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false, depth: true });
+const PR = Math.min(window.devicePixelRatio || 1, 1.25);
 renderer.setPixelRatio(PR);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.08;
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMappingExposure = 0.92;
+renderer.shadowMap.enabled = false;
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(56, window.innerWidth / window.innerHeight, 0.05, 200);
+const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.05, 160);
 
-/* ポストプロセス */
+/* グレーディング（粒子・周辺減光・色収差・簡易AA）だけ */
 const size = new THREE.Vector2(window.innerWidth, window.innerHeight);
-const rt = new THREE.WebGLRenderTarget(size.x * PR, size.y * PR, {
-  type: THREE.HalfFloatType,
-  samples: 2,
-});
+const rt = new THREE.WebGLRenderTarget(size.x * PR, size.y * PR, { type: THREE.HalfFloatType, samples: 0 });
 const composer = new EffectComposer(renderer, rt);
 composer.setSize(size.x, size.y);
 composer.addPass(new RenderPass(scene, camera));
-
-const bloom = new UnrealBloomPass(size.clone().multiplyScalar(1), 0.55, 0.72, 0.74);
-composer.addPass(bloom);
 
 const GradeShader = {
   uniforms: {
     tDiffuse: { value: null },
     uTime: { value: 0 },
-    uGrain: { value: 0.055 },
+    uGrain: { value: 0.05 },
     uVignette: { value: 1.0 },
-    uAberration: { value: 0.0012 },
+    uAberration: { value: 0.0016 },
     uFade: { value: 0 },
+    uTexel: { value: new THREE.Vector2(1 / (size.x * PR), 1 / (size.y * PR)) },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -110,31 +89,40 @@ const GradeShader = {
     uniform float uVignette;
     uniform float uAberration;
     uniform float uFade;
+    uniform vec2 uTexel;
     varying vec2 vUv;
 
     float rand(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233)) + uTime) * 43758.5453); }
+    float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
 
     void main() {
       vec2 uv = vUv;
       vec2 d = uv - 0.5;
       float r2 = dot(d, d);
 
-      float ab = uAberration * (0.4 + r2 * 2.4);
+      float ab = uAberration * (0.35 + r2 * 2.6);
       vec3 col;
       col.r = texture2D(tDiffuse, uv + d * ab).r;
       col.g = texture2D(tDiffuse, uv).g;
       col.b = texture2D(tDiffuse, uv - d * ab).b;
 
+      // 軽いAA（輝度差があるところだけ平均する）
+      vec3 n1 = texture2D(tDiffuse, uv + vec2(uTexel.x, 0.0)).rgb;
+      vec3 n2 = texture2D(tDiffuse, uv - vec2(uTexel.x, 0.0)).rgb;
+      vec3 n3 = texture2D(tDiffuse, uv + vec2(0.0, uTexel.y)).rgb;
+      vec3 n4 = texture2D(tDiffuse, uv - vec2(0.0, uTexel.y)).rgb;
+      float l0 = luma(col);
+      float lmax = max(max(luma(n1), luma(n2)), max(luma(n3), luma(n4)));
+      float lmin = min(min(luma(n1), luma(n2)), min(luma(n3), luma(n4)));
+      float edge = smoothstep(0.06, 0.35, lmax - lmin);
+      col = mix(col, (col + n1 + n2 + n3 + n4) * 0.2, edge * 0.55);
+
       // 粒子
-      float n = rand(uv * 512.0);
-      col += (n - 0.5) * uGrain;
+      col += (rand(uv * 512.0) - 0.5) * uGrain;
 
-      // ビネット
-      float vig = 1.0 - smoothstep(0.15, 0.95, r2 * 1.9);
-      col *= mix(1.0, vig, uVignette * 0.55);
-
-      // ごく薄い色かぶり
-      col = mix(col, col * vec3(1.02, 0.995, 0.965), 0.6);
+      // 周辺減光
+      float vig = 1.0 - smoothstep(0.12, 0.92, r2 * 2.0);
+      col *= mix(1.0, vig, uVignette * 0.72);
 
       col *= (1.0 - uFade);
       gl_FragColor = vec4(col, 1.0);
@@ -150,15 +138,26 @@ composer.addPass(new OutputPass());
 /* ------------------------------------------------------------------ */
 const state = {
   started: false,
-  sceneIndex: 0,
-  lineIndex: 0,
   style: 0,
-  free: false,
   audioOn: false,
-  loadingDone: false,
+  playing: false,
+  activeIndex: -1,
+  focusIndex: 0,
+  lineIndex: 0,
+  done: new Set(),
+  nearest: null,
+  lookChar: null,
+  locked: false,
 };
 
 const audio = new AudioEngine();
+const world = new World(renderer, scene);
+const cast = new Cast(scene);
+const walker = new Walker(camera, canvas, {
+  onStep: () => {
+    if (state.audioOn) audio.rustle();
+  },
+});
 
 const ui = new UI({
   scenes: SCENES,
@@ -166,16 +165,12 @@ const ui = new UI({
     enter: () => safeEnter(),
     next: () => safeNext(),
     scene: (i) => safeScene(i),
-    free: () => toggleFree(),
+    free: () => walker.lock?.(),
     style: () => cycleStyle(),
     audio: () => toggleAudio(),
     unhighlight: () => cast.highlight(null),
   },
 });
-
-const world = new World(renderer, scene);
-const cast = new Cast(scene);
-const director = new Director(camera, canvas);
 
 /* ------------------------------------------------------------------ */
 /* 起動                                                                */
@@ -186,108 +181,143 @@ cast.onProgress = (done, total) => {
   castProgress = done / total;
   updateProgress();
 };
-
 function updateProgress() {
-  const p = Math.min(1, glbProgress * 0.6 + castProgress * 0.4);
-  ui.progress(p, glbProgress < 1 ? 'classroom.glb を読み込み中' : '立ち絵を加工中（切り絵シェーダ）');
+  const p = Math.min(1, glbProgress * 0.7 + castProgress * 0.3);
+  ui.progress(p, glbProgress < 1 ? 'classroom.glb を読み込み中' : '立ち絵を準備中');
+}
+
+/* タイトル背景：教室の奥からゆっくり */
+const idle = {
+  a: { pos: new THREE.Vector3(2.9, 1.72, 4.25), tgt: new THREE.Vector3(-0.2, 1.15, -2.0) },
+  b: { pos: new THREE.Vector3(-3.1, 1.66, 3.9), tgt: new THREE.Vector3(0.9, 1.1, -1.2) },
+};
+let idleT = 0;
+function updateIdle(dt) {
+  idleT += dt * 0.045;
+  const k = (Math.sin(idleT) + 1) * 0.5;
+  camera.position.lerpVectors(idle.a.pos, idle.b.pos, k);
+  camera.lookAt(
+    new THREE.Vector3().lerpVectors(idle.a.tgt, idle.b.tgt, k)
+  );
+  camera.position.y += Math.sin(idleT * 7.1) * 0.008;
 }
 
 (async function boot() {
   updateProgress();
-  // タイトル画面の背景：教室の全景をゆっくり
-  director.setShot(SCENES[0].shots.title, { instant: true });
   world.applyScene(SCENES[0].env);
+  try {
+    await world.load((p) => {
+      glbProgress = p;
+      updateProgress();
+    });
+  } catch (err) {
+    showFatal(err);
+    return;
+  }
 
-  await world.load((p) => {
-    glbProgress = p;
-    updateProgress();
-  });
-  // 立ち絵のプリロード完了を待つ（失敗しても止まらないようにタイムアウト付き）
-  await new Promise((resolve) => {
-    const t0 = performance.now();
-    const check = setInterval(() => {
-      if (castProgress >= 1 || performance.now() - t0 > 45000) {
-        clearInterval(check);
-        resolve();
-      }
-    }, 100);
-  });
+  await cast.preload({ defaultsOnly: true });
 
   ui.progress(1, '完了');
   setTimeout(() => {
     ui.loaded();
     ui.showTitle();
-    state.loadingDone = true;
-  }, 420);
-
-  // タイトル背景用に、人物を少しだけ置いておく
-  cast.show([
-    { id: 'ryoma', spot: 'A4' },
-    { id: 'mie', pose: 'normal', spot: 'A2' },
-    { id: 'terachi', spot: 'A3' },
-    { id: 'satou', pose: 'game', spot: 'W1' },
-    { id: 'rei', spot: 'A5' },
-  ]);
+  }, 320);
 })();
 
 /* ------------------------------------------------------------------ */
-/* 場面遷移                                                            */
+/* 場面                                                                */
 /* ------------------------------------------------------------------ */
-let current = null;
+function routeOf(i) {
+  return ROUTE[SCENES[i].id] || { anchor: SPAWNS.frontCenter, marker: [0, 1.2, 0] };
+}
 
-function goToScene(index, { instant = false } = {}) {
-  state.sceneIndex = (index + SCENES.length) % SCENES.length;
-  const sc = SCENES[state.sceneIndex];
-  current = sc;
+function focusScene(i, { silent = false } = {}) {
+  state.focusIndex = (i + SCENES.length) % SCENES.length;
+  const sc = SCENES[state.focusIndex];
+  world.setMarker(routeOf(state.focusIndex).marker, sc.accent);
+  ui.setObjective(sc, state.done.size, SCENES.length);
+  ui.setChapter(sc);
+  if (!silent) ui.toast('近づくと本文が始まる');
+}
+
+function startScene(i, { teleport = false } = {}) {
+  if (state.playing) return;
+  state.activeIndex = (i + SCENES.length) % SCENES.length;
+  const sc = SCENES[state.activeIndex];
+  state.playing = true;
   state.lineIndex = 0;
 
+  if (teleport) {
+    const a = routeOf(state.activeIndex).anchor;
+    walker.setPose(a.x, a.z, a.look[0], a.look[1]);
+  }
+
+  world.setMarker(null);
   world.applyScene(sc.env);
   cast.show(sc.cast);
-  ui.setScene(sc, state.sceneIndex);
-  bloom.strength = sc.env.bloom ?? 0.55;
+  ui.setScene(sc, state.activeIndex);
+  ui.showDialogue();
+  grade.uniforms.uFade.value = 0.35;
+  fadeTo(0, 420);
   audio.setScene(sc.env.night ? 'stream' : sc.env.outside === 'lava' ? 'lava' : sc.id === 'window' ? 'window' : sc.env.petals ? 'march' : 'room');
-  director.setShot(sc.shots[sc.lines[0]?.shot] || Object.values(sc.shots)[0], { instant });
   showLine(0);
-  document.getElementById('charcard').classList.add('is-hidden');
+}
+
+function finishScene() {
+  const sc = SCENES[state.activeIndex];
+  state.playing = false;
+  state.done.add(sc.id);
+  ui.hideDialogue();
+  cast.show([]);
+  audio.chime(760);
+  ui.setProgress(state.done.size, SCENES.length);
+
+  const next = SCENES.findIndex((s, i) => i > state.activeIndex && !state.done.has(s.id));
+  if (next >= 0) {
+    focusScene(next);
+    ui.toast(`✝ ${sc.title} ── 本質 ${state.done.size}/${SCENES.length}`);
+  } else {
+    const rest = SCENES.findIndex((s) => !state.done.has(s.id));
+    if (rest >= 0) {
+      focusScene(rest);
+      ui.toast('残りの本質を探す');
+    } else {
+      state.focusIndex = -1;
+      world.setMarker(null);
+      ui.setObjective(null, SCENES.length, SCENES.length);
+      ui.caption('✝', '見えないけど、ある。');
+    }
+  }
 }
 
 function showLine(i) {
-  const sc = current;
+  const sc = SCENES[state.activeIndex];
   if (!sc) return;
   const line = sc.lines[i];
   if (!line) return;
   state.lineIndex = i;
-
-  if (line.shot && sc.shots[line.shot]) director.setShot(sc.shots[line.shot]);
   if (line.pose && line.spk !== 'narr') cast.setPose(line.spk, line.pose);
   if (line.spk && line.spk !== 'narr') cast.highlight(line.spk);
-  ui._line = line.text;
+  else cast.highlight(null);
   ui.setLine(line, i, sc.lines.length);
-  if (state.audioOn) audio.chime(620 + (i % 5) * 60);
+  if (state.audioOn) audio.chime(600 + (i % 5) * 70);
 }
 
 function nextLine() {
   if (!state.started) return;
+  if (!state.playing) {
+    interact();
+    return;
+  }
   if (ui.isTyping()) {
     ui.advancePreview();
     return;
   }
-  const sc = current;
-  if (!sc) return;
+  const sc = SCENES[state.activeIndex];
   if (state.lineIndex + 1 < sc.lines.length) {
-    if (state.audioOn) audio.rustle();
     showLine(state.lineIndex + 1);
-  } else if (state.sceneIndex + 1 < SCENES.length) {
-    if (state.audioOn) audio.rustle();
-    goToScene(state.sceneIndex + 1);
   } else {
-    // 最終場面
-    ui.toast('✝ 本質 ✝ ── ここまで');
-    ui.el.caption.innerHTML = `
-      <div class="cap-no">✝</div>
-      <div class="cap-title">本質は、ないときの方が本質である。</div>
-      <div class="cap-rule"></div>`;
-    ui.el.caption.classList.add('show');
+    finishScene();
   }
 }
 
@@ -298,13 +328,6 @@ async function enter() {
   if (state.started) return;
   state.started = true;
   ui.hideTitle();
-
-  // 窓の外から教室へ入っていく
-  director.pos.set(6.2, 2.5, -5.2);
-  director.tgt.set(0.2, 1.3, 2.0);
-  camera.position.copy(director.pos);
-  camera.lookAt(director.tgt);
-
   try {
     await audio.start();
     state.audioOn = true;
@@ -312,28 +335,46 @@ async function enter() {
   } catch (err) {
     console.warn('audio unavailable', err);
   }
-
-  goToScene(0);
+  walker.enter();
+  const a = routeOf(0).anchor;
+  walker.setPose(a.x, a.z, a.look[0], a.look[1]);
+  focusScene(0, { silent: true });
   grade.uniforms.uFade.value = 1;
-  fadeIn();
+  fadeTo(0, 900);
+  ui.toast('WASD で歩く / クリックでマウスを拘束');
 }
 
-function fadeIn() {
+function fadeTo(target, dur) {
+  const from = grade.uniforms.uFade.value;
   const t0 = performance.now();
-  const dur = 1600;
   const step = () => {
     const p = Math.min(1, (performance.now() - t0) / dur);
-    grade.uniforms.uFade.value = 1 - p * p * (3 - 2 * p);
+    const e = p * p * (3 - 2 * p);
+    grade.uniforms.uFade.value = from + (target - from) * e;
     if (p < 1) requestAnimationFrame(step);
   };
   step();
 }
 
-function toggleFree() {
-  state.free = !state.free;
-  director.setFree(state.free);
-  ui.setFreeLabel(state.free);
-  ui.toast(state.free ? '自由視点：WASD / ドラッグ / ホイール' : '演出視点に戻りました');
+function interact() {
+  // 近くの「本質」
+  if (!state.playing && state.focusIndex >= 0) {
+    const sc = SCENES[state.focusIndex];
+    const m = routeOf(state.focusIndex).marker;
+    const d = walker.distToXZ({ x: m[0], z: m[2] });
+    if (d < 2.6) {
+      startScene(state.focusIndex);
+      return;
+    }
+    ui.toast(`本質まで ${d.toFixed(1)}m`);
+    return;
+  }
+  // 見ている人物
+  if (state.lookChar) {
+    ui.showCard(state.lookChar.def);
+    cast.highlight(state.lookChar.def.id);
+    if (state.audioOn) audio.chime(980);
+  }
 }
 
 const STYLE_NAMES = ['切り絵', 'インク', 'スペクトル'];
@@ -341,7 +382,6 @@ function cycleStyle() {
   state.style = (state.style + 1) % 3;
   cast.style = state.style;
   ui.setStyleLabel(STYLE_NAMES[state.style]);
-  ui.toast(`立ち絵スタイル：${STYLE_NAMES[state.style]}`);
 }
 
 async function toggleAudio() {
@@ -361,85 +401,84 @@ async function toggleAudio() {
   }
 }
 
-/* クリック／タップ */
-let down = null;
-canvas.addEventListener('pointerdown', (e) => {
-  down = { x: e.clientX, y: e.clientY, t: performance.now() };
-});
+/* クリック：人物カード / 本文送り / ポインタロック */
 canvas.addEventListener('pointerup', (e) => {
-  if (!down) return;
-  const dist = Math.hypot(e.clientX - down.x, e.clientY - down.y);
-  const dt = performance.now() - down.t;
-  down = null;
-  if (dist > 8 || dt > 600) return;
-
+  if (!state.started) return;
+  if (state.locked) {
+    if (state.playing) nextLine();
+    return;
+  }
   const rect = canvas.getBoundingClientRect();
   const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
   const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-  const rc = director.raycaster(ndcX, ndcY);
-  const hit = cast.pick(rc);
+  const hit = cast.pick(walker.raycaster().setFromCamera(new THREE.Vector2(ndcX, ndcY), camera));
   if (hit) {
     cast.highlight(hit.def.id);
     ui.showCard(hit.def);
-    if (state.audioOn) audio.chime(980);
     return;
   }
-  if (document.getElementById('charcard').classList.contains('is-hidden') === false) {
+  if (!document.getElementById('charcard').classList.contains('is-hidden')) {
     ui.closeCard();
     return;
   }
-  if (!state.free) nextLine();
+  if (state.playing) nextLine();
 });
 
-/* キーボード */
+document.addEventListener('pointerlockchange', () => {
+  state.locked = document.pointerLockElement === canvas;
+  ui.setLocked(state.locked);
+});
+
 window.addEventListener('keydown', (e) => {
   if (e.target instanceof HTMLInputElement) return;
   const k = e.code;
-  if (k === 'Space' || k === 'Enter') {
+  if (k === 'Space' || k === 'Enter' || k === 'KeyE') {
     e.preventDefault();
-    nextLine();
-  } else if (k === 'ArrowRight' && !state.free) {
-    e.preventDefault();
-    if (state.started) goToScene(state.sceneIndex + 1);
-  } else if (k === 'ArrowLeft' && !state.free) {
-    e.preventDefault();
-    if (state.started) goToScene(state.sceneIndex - 1);
-  } else if (k === 'ArrowDown' && !state.free) {
-    e.preventDefault();
-    nextLine();
-  } else if (k === 'ArrowUp' && !state.free) {
-    e.preventDefault();
-    if (state.lineIndex > 0) showLine(state.lineIndex - 1);
-  } else if (k === 'KeyF') {
-    if (state.started) toggleFree();
+    if (k === 'KeyE') interact();
+    else nextLine();
   } else if (k === 'KeyT') {
     if (state.started) ui.toggleTOC();
-  } else if (k === 'KeyM') {
-    toggleAudio();
   } else if (k === 'KeyS') {
     cycleStyle();
+  } else if (k === 'KeyM') {
+    toggleAudio();
   } else if (k === 'KeyH') {
     ui.hideAllUI();
   } else if (k === 'Escape') {
     ui.closeTOC();
     ui.closeCard();
     ui.closeCredits();
+  } else if (k === 'Tab' && state.started) {
+    e.preventDefault();
+    interact();
   }
 });
 
-/* リサイズ */
-function resize() {
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-  renderer.setSize(w, h);
-  composer.setSize(w, h);
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
-  bloom.setSize(w, h);
+/* 目次から飛ぶ */
+function goToScene(i) {
+  if (state.playing) {
+    state.playing = false;
+    ui.hideDialogue();
+    cast.show([]);
+  }
+  startScene(i, { teleport: true });
+  ui.closeTOC();
 }
-window.addEventListener('resize', resize);
 
-/* 安全版ラッパ（関数宣言は巻き上げられるのでここで定義してよい） */
+/* ------------------------------------------------------------------ */
+/* 安全版ラッパ                                                        */
+/* ------------------------------------------------------------------ */
+const safe = (fn) => (...args) => {
+  try {
+    return fn(...args);
+  } catch (err) {
+    console.error(err);
+    try {
+      ui.toast('表示エラー（コンソールを確認）');
+    } catch (_) {}
+    return undefined;
+  }
+};
 function safeEnter() {
   return safe(enter)();
 }
@@ -451,37 +490,86 @@ function safeScene(i) {
 }
 
 /* ------------------------------------------------------------------ */
-/* ループ                                                              */
+/* リサイズ & ループ                                                   */
 /* ------------------------------------------------------------------ */
+function resize() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  renderer.setSize(w, h);
+  composer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  grade.uniforms.uTexel.value.set(1 / (w * PR), 1 / (h * PR));
+}
+window.addEventListener('resize', resize);
+
 const clock = new THREE.Clock();
+let probe = 0;
 let fpsAcc = 0;
 let fpsFrames = 0;
+let showFps = false;
 
 function tick() {
   requestAnimationFrame(tick);
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
 
-  director.update(dt);
+  if (state.started) walker.update(dt);
+  else updateIdle(dt);
+
   world.update(dt, t, camera);
-  cast.update(dt, t, {
-    fogColor: scene.fog.color,
-    fogDensity: scene.fog.density,
-  });
+  cast.update(dt, t, { fogColor: scene.fog.color, fogDensity: scene.fog.density });
   grade.uniforms.uTime.value = t;
+
+  // 0.12 秒ごとに、近くの本質／見ている人物を調べる
+  probe -= dt;
+  if (probe <= 0 && state.started) {
+    probe = 0.12;
+    probeWorld();
+  }
 
   composer.render();
 
   fpsAcc += dt;
   fpsFrames++;
   if (fpsAcc > 1) {
-    state.fps = Math.round(fpsFrames / fpsAcc);
-    if (state.showFps) ui.setFps(state.fps);
+    if (showFps) ui.setFps(Math.round(fpsFrames / fpsAcc));
     fpsAcc = 0;
     fpsFrames = 0;
   }
 }
 tick();
 
-/* デバッグ用（コンソールから触れるように） */
-window.__honnshitsu = { scene, camera, world, cast, director, ui, goToScene, CHARACTERS };
+function probeWorld() {
+  // 見ている人物
+  cast.group.updateWorldMatrix(true, true);
+  const hit = cast.pick(walker.raycaster());
+  state.lookChar = hit;
+  ui.setCrosshair(hit ? 'active' : 'idle');
+
+  if (state.playing) {
+    ui.setPrompt(null);
+    return;
+  }
+
+  if (state.focusIndex < 0) {
+    ui.setPrompt(hit ? `［E］${hit.def.name}` : null);
+    return;
+  }
+
+  const m = routeOf(state.focusIndex).marker;
+  const d = walker.distToXZ({ x: m[0], z: m[2] });
+  if (d < 1.25) {
+    ui.setPrompt('本質が漏れ出している');
+    startScene(state.focusIndex);
+  } else if (d < 3.2) {
+    ui.setPrompt(`［E］本質をひらく　${d.toFixed(1)}m`);
+  } else if (hit) {
+    ui.setPrompt(`［E］${hit.def.name}`);
+  } else {
+    ui.setPrompt(null);
+  }
+}
+
+/* デバッグ */
+window.__honnshitsu = { scene, camera, world, cast, walker, ui, goToScene, startScene, SCENES, ROUTE, state, CHARACTERS };

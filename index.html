@@ -28,13 +28,14 @@
         <div class="title-sub">3D CLASSROOM EDITION</div>
         <p class="title-lead">
           見えないが、ある。——教室の国境、コーンスープの不在、<br />
-          等高線の向こう側にいる人間。12の場面を、実際の教室で。
+          等高線の向こう側にいる人間。<br />
+          WASD で歩き、14の本質に近づいてください。
         </p>
         <button id="enter" class="title-enter">
-          <span>本質を見る</span><i>✝</i>
+          <span>教室に入る</span><i>✝</i>
         </button>
         <div class="title-foot">
-          <span>クリック / ドラッグで視点 · WASDで移動 · Spaceで本文</span>
+          <span>WASD 歩く · マウス 見回す · E 調べる · Space 本文</span>
           <button class="linkish" data-open="credits">クレジット</button>
         </div>
       </div>
@@ -53,12 +54,26 @@
       </div>
       <div class="tools">
         <button id="btn-toc" class="tool" title="目次 (T)">目次</button>
-        <button id="btn-free" class="tool" title="自由視点 (F)">自由視点</button>
-        <button id="btn-style" class="tool" title="立ち絵スタイル">切り絵</button>
+        <button id="btn-style" class="tool" title="立ち絵スタイル (S)">切り絵</button>
         <button id="btn-audio" class="tool" title="音 (M)">音 OFF</button>
         <button id="btn-credits" class="tool" title="クレジット">i</button>
       </div>
     </header>
+
+    <!-- ===== 探索 HUD ===== -->
+    <div id="crosshair" class="crosshair is-hidden"><i></i></div>
+
+    <div id="objective" class="objective is-hidden">
+      <div class="obj-head">
+        <span id="obj-no" class="obj-no">01</span>
+        <span id="obj-count" class="obj-count">0 / 14</span>
+      </div>
+      <div id="obj-title" class="obj-title">桐葉高校という二重構造</div>
+      <div class="obj-track"><i id="obj-bar"></i></div>
+      <div class="obj-note">✝本質✝ に近づくと本文が始まる</div>
+    </div>
+
+    <div id="prompt" class="prompt is-hidden"></div>
 
     <!-- ===== 目次 ===== -->
     <nav id="toc" class="toc is-hidden" aria-label="目次">
@@ -103,10 +118,11 @@
 
     <!-- ===== ヒント ===== -->
     <div id="hintbar" class="hintbar is-hidden">
-      <span><b>視点</b> ドラッグ / WASD / ホイール</span>
+      <span><b>移動</b> W A S D（Shift で走る）</span>
+      <span><b>見回す</b> クリックで拘束 / ドラッグ</span>
+      <span><b>調べる</b> E</span>
       <span><b>本文</b> Space・クリック</span>
-      <span><b>目次</b> T</span>
-      <span><b>人物</b> クリックで本質度</span>
+      <span><b>目次</b> T　<b>音</b> M　<b>画風</b> S</span>
     </div>
 
     <!-- ===== クレジット ===== -->
@@ -140,7 +156,8 @@
           すべてコードで生成した Canvas テクスチャとジオメトリです。</p>
 
         <h3>操作</h3>
-        <p>ドラッグ=視点 / WASD=移動 / ホイール=前後 / Space=本文送り / ←→=場面移動 / F=自由視点 / H=UI隠し</p>
+        <p>WASD=歩く（Shiftで走る） / マウス=見回す（クリックでポインタ拘束） / E=調べる / Space=本文送り /
+          T=目次 / S=画風 / M=音 / H=UI隠し / スマホ=左スティック移動・右ドラッグ視点</p>
       </div>
     </div>
 

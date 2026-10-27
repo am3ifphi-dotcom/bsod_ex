@@ -526,3 +526,26 @@ export const SCENES = [
   },];
 
 export const SCENE_INDEX = Object.fromEntries(SCENES.map((s, i) => [s.id, i]));
+
+/**
+ * 探索ルート。
+ *   anchor … その場面を始めるときの立ち位置と視線（ワールド座標・m）
+ *   marker … 「本質」が漏れている場所。ここに近づくと本文が始まる
+ * 歩いて回る前提なので、通路（机の間）に立つように置いてある。
+ */
+export const ROUTE = {
+  prologue: { anchor: { x: -3.25, z: 3.15, look: [0.4, 0.0] }, marker: [0.13, 1.24, 0.25] },
+  ecology: { anchor: { x: 0.2, z: 2.62, look: [0.2, 4.6] }, marker: [0.35, 2.02, 4.5] },
+  miso: { anchor: { x: 0.13, z: 0.5, look: [0.0, 4.6] }, marker: [-1.5, 1.86, 4.42] },
+  stream: { anchor: { x: 0.13, z: -2.6, look: [0.55, 2.6] }, marker: [0.55, 1.36, 2.62] },
+  friday: { anchor: { x: 1.94, z: -0.4, look: [-2.0, 4.4] }, marker: [-2.2, 1.84, 4.42] },
+  window: { anchor: { x: 1.94, z: -3.6, look: [3.9, -3.4] }, marker: [3.42, 1.52, -3.35] },
+  stream4: { anchor: { x: 1.94, z: -0.4, look: [0.55, 2.62] }, marker: [0.55, 1.42, 2.58] },
+  archaeology: { anchor: { x: 0.13, z: -2.6, look: [-0.15, 1.25] }, marker: [-0.15, 1.92, 1.25] },
+  corn: { anchor: { x: -2.6, z: 2.7, look: [-3.5, 1.55] }, marker: [-3.05, 1.34, 1.55] },
+  lava: { anchor: { x: 3.5, z: -0.6, look: [7, -1.2] }, marker: [3.5, 1.56, -0.35] },
+  wife: { anchor: { x: 0.2, z: 2.6, look: [-1.45, 4.2] }, marker: [-1.45, 1.62, 3.66] },
+  theory: { anchor: { x: 1.94, z: -0.4, look: [1.94, 0.62] }, marker: [1.94, 1.26, 0.66] },
+  kuraishi: { anchor: { x: 2.6, z: 2.62, look: [0.55, 2.7] }, marker: [0.55, 1.44, 2.72] },
+  march: { anchor: { x: -3.25, z: 3.15, look: [0.2, 1.0] }, marker: [0.13, 1.4, 1.2] },
+};

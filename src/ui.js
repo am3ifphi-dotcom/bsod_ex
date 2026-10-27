@@ -42,6 +42,13 @@ export class UI {
       credits: $('credits'),
       hintbar: $('hintbar'),
       fps: $('fps'),
+      crosshair: $('crosshair'),
+      objective: $('objective'),
+      objNo: $('obj-no'),
+      objTitle: $('obj-title'),
+      objCount: $('obj-count'),
+      objBar: $('obj-bar'),
+      prompt: $('prompt'),
     };
 
     this.buildTOC();
@@ -74,7 +81,6 @@ export class UI {
     $('enter').addEventListener('click', () => this.on.enter());
     $('btn-toc').addEventListener('click', () => this.toggleTOC());
     $('toc-close').addEventListener('click', () => this.closeTOC());
-    $('btn-free').addEventListener('click', () => this.on.free());
     $('btn-style').addEventListener('click', () => this.on.style());
     $('btn-audio').addEventListener('click', () => this.on.audio());
     $('btn-credits').addEventListener('click', () => this.openCredits());
@@ -117,9 +123,70 @@ export class UI {
   hideTitle() {
     this.el.title.classList.add('hide');
     this.el.topbar.classList.remove('is-hidden');
-    this.el.dialogue.classList.remove('is-hidden');
     this.el.hintbar.classList.remove('is-hidden');
+    this.el.crosshair.classList.remove('is-hidden');
+    this.el.objective.classList.remove('is-hidden');
     setTimeout(() => this.el.caption.classList.remove('show'), 3200);
+  }
+
+  showDialogue() {
+    this.el.dialogue.classList.remove('is-hidden');
+  }
+
+  hideDialogue() {
+    this.el.dialogue.classList.add('is-hidden');
+  }
+
+  /* ----- 探索 HUD ----- */
+  setObjective(scene, done, total) {
+    if (!scene) {
+      this.el.objNo.textContent = '✝';
+      this.el.objTitle.textContent = 'すべての本質を集めた';
+      this.setProgress(total, total);
+      return;
+    }
+    this.el.objNo.textContent = scene.no;
+    this.el.objTitle.textContent = scene.title;
+    this.el.objNo.style.color = scene.accent;
+    this.setProgress(done, total);
+  }
+
+  setChapter(scene) {
+    if (!scene) return;
+    this.el.chapter.textContent = scene.chapter;
+    this.el.titleText.textContent = scene.title;
+  }
+
+  setProgress(done, total) {
+    this.el.objCount.textContent = `${done} / ${total}`;
+    this.el.objBar.style.width = `${(done / total) * 100}%`;
+  }
+
+  setPrompt(text) {
+    if (!text) {
+      this.el.prompt.classList.add('is-hidden');
+      return;
+    }
+    this.el.prompt.textContent = text;
+    this.el.prompt.classList.remove('is-hidden');
+  }
+
+  setCrosshair(state) {
+    this.el.crosshair.classList.toggle('is-active', state === 'active');
+  }
+
+  setLocked(locked) {
+    // 照準はポインタロック中だけ出す。プロンプトは操作中は少し沈める。
+    this.el.crosshair.classList.toggle('is-locked', locked);
+    this.el.prompt.classList.toggle('is-quiet', locked);
+  }
+
+  caption(no, title) {
+    this.el.caption.innerHTML = `
+      <div class="cap-no">${no}</div>
+      <div class="cap-title">${title}</div>
+      <div class="cap-rule"></div>`;
+    this.el.caption.classList.add('show');
   }
 
   /* ----- 目次 ----- */
@@ -223,11 +290,6 @@ export class UI {
 
   setStyleLabel(name) {
     $('btn-style').textContent = name;
-  }
-
-  setFreeLabel(on) {
-    $('btn-free').classList.toggle('on', on);
-    $('btn-free').textContent = on ? '演出視点' : '自由視点';
   }
 
   setAudioLabel(on) {

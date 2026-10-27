@@ -41,6 +41,7 @@ export class World {
     this.buildNotebook();
     this.buildSigns();
     this.buildLeak();
+    this.buildMarker();
     this.buildPetals();
   }
 
@@ -591,7 +592,7 @@ export class World {
 
     // ✝ の粒
     const glyph = makeGlyphTexture();
-    const count = 46;
+    const count = 22;
     const inst = new THREE.InstancedMesh(
       new THREE.PlaneGeometry(0.11, 0.11),
       new THREE.MeshBasicMaterial({ map: glyph, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }),
@@ -615,11 +616,82 @@ export class World {
   }
 
   /* ---------------------------------------------------------------- */
+  /* 探索マーカー（「本質」が漏れている場所）                          */
+  /* ---------------------------------------------------------------- */
+  buildMarker() {
+    const g = new THREE.Group();
+    const glyph = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: makeGlyphTexture(),
+        color: 0xffc98a,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        toneMapped: false,
+      })
+    );
+    glyph.scale.set(0.34, 0.34, 1);
+    g.add(glyph);
+
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.2, 0.225, 40),
+      new THREE.MeshBasicMaterial({
+        color: 0xffc98a,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    g.add(ring);
+
+    // 床に落ちる光の輪
+    const pool = new THREE.Mesh(
+      new THREE.CircleGeometry(0.55, 32),
+      new THREE.MeshBasicMaterial({
+        color: 0xffb35c,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    pool.rotation.x = -Math.PI / 2;
+    pool.position.y = 0.004;
+    g.add(pool);
+
+    g.visible = false;
+    this.root.add(g);
+    this.props.marker = { group: g, glyph, ring, pool, target: 0, pos: new THREE.Vector3(0, 1.2, 0) };
+  }
+
+  setMarker(pos, accent) {
+    const m = this.props.marker;
+    if (!pos) {
+      m.target = 0;
+      return;
+    }
+    m.pos.set(pos[0], pos[1], pos[2]);
+    m.group.position.set(pos[0], 0, pos[2]);
+    m.glyph.position.y = pos[1];
+    m.ring.position.y = 0.02;
+    const c = new THREE.Color(accent || '#ffb35c');
+    m.glyph.material.color.copy(c);
+    m.ring.material.color.copy(c);
+    m.pool.material.color.copy(c);
+    m.target = 1;
+    m.group.visible = true;
+  }
+
+  /* ---------------------------------------------------------------- */
   /* 桜                                                               */
   /* ---------------------------------------------------------------- */
   buildPetals() {
     const tex = petalTexture();
-    const count = 90;
+    const count = 40;
     const inst = new THREE.InstancedMesh(
       new THREE.PlaneGeometry(0.055, 0.055),
       new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.95, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }),
@@ -648,6 +720,11 @@ export class World {
   /* ---------------------------------------------------------------- */
   applyScene(env) {
     const e = { ...env };
+    // 全体を暗く落とす（窓からの光だけを主役にする）
+    const SUN = 0.46;
+    const AMB = 0.40;
+    const FILL = 0.40;
+    const WIN = 0.45;
 
     this.setChalk(e.chalk);
     this.setOutside(e.outside || 'school');
@@ -656,14 +733,14 @@ export class World {
     this.setNotebook(!!e.notebook);
     this.props.booth.visible = !!e.booth;
 
-    this.targets.sun = (e.sun ?? 1) * 1.9;
-    this.targets.hemi = e.amb ?? 0.55;
-    this.targets.fog = e.fog ?? 0.05;
+    this.targets.sun = (e.sun ?? 1) * 1.9 * SUN;
+    this.targets.hemi = (e.amb ?? 0.55) * AMB;
+    this.targets.fog = (e.fog ?? 0.05) * 1.45;
     this.targets.leak = e.leak ?? 0.3;
     this.targets.petals = e.petals ?? 0;
-    this.targets.window = e.night ? 2.2 : 13;
-    this.targets.fill = e.night ? 3.2 : 8;
-    this.targets.env = e.night ? 0.14 : 0.34;
+    this.targets.window = (e.night ? 2.2 : 13) * WIN;
+    this.targets.fill = (e.night ? 3.2 : 8) * FILL;
+    this.targets.env = (e.night ? 0.14 : 0.34) * 0.5;
 
     this.night = !!e.night;
     this.sunColor = new THREE.Color(e.sunColor || (this.night ? '#8fa6d8' : '#ffe4c4'));
@@ -834,6 +911,21 @@ export class World {
     // リングライトの明滅
     if (this.props.booth.visible) {
       this.props.booth.children[0].material.emissiveIntensity = 3.0 + Math.sin(t * 5.2) * 0.15;
+    }
+
+    // マーカー
+    const mk = this.props.marker;
+    if (mk) {
+      mk.vis = THREE.MathUtils.lerp(mk.vis ?? 0, mk.target, k);
+      mk.group.visible = mk.vis > 0.01;
+      const pulse = 0.62 + 0.38 * Math.sin(t * 2.1);
+      mk.glyph.material.opacity = mk.vis * pulse * 0.95;
+      mk.glyph.position.y = mk.pos.y + Math.sin(t * 1.4) * 0.05;
+      mk.glyph.material.rotation = Math.sin(t * 0.7) * 0.12;
+      mk.ring.material.opacity = mk.vis * (0.25 + 0.35 * pulse);
+      const sc = 1 + Math.sin(t * 2.1) * 0.12;
+      mk.ring.scale.setScalar(sc);
+      mk.pool.material.opacity = mk.vis * 0.16 * pulse;
     }
 
     // ネオンの明滅（夜）
