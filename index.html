@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>SLEEP() — A short horror in one room</title>
+<meta name="description" content="A short first-person horror / glitch experience. Walk your room, touch the PC, fall through the blue screen." />
+<link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+<div id="app">
+  <canvas id="gl"></canvas>
+
+  <!-- in-world post overlay (vignette / scanlines are in shader; this is for text) -->
+  <div id="hud">
+    <div id="crosshair"><span></span><span></span></div>
+    <div id="prompt" class="prompt"></div>
+    <div id="toast" class="toast"></div>
+    <div id="chapter" class="chapter">
+      <div class="chapter-num"></div>
+      <div class="chapter-title"></div>
+      <div class="chapter-sub"></div>
+    </div>
+    <div id="narration" class="narration"></div>
+    <div id="keys" class="keys">
+      <span><b>WASD</b>移動</span><span><b>SHIFT</b>走る</span><span><b>E</b>調べる</span><span><b>C</b>コンソール</span><span><b>ESC</b>停止</span>
+    </div>
+    <div id="rec" class="rec"><i></i>REC <span id="clock">03:14:07</span></div>
+  </div>
+
+  <div id="console" class="console" aria-hidden="true">
+    <div class="console-head">
+      <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+      <span class="console-title">RECOVERY CONSOLE — session 0x0B50D</span>
+      <span class="console-close" id="console-close">ESC</span>
+    </div>
+    <div class="console-body" id="console-log"></div>
+    <div class="console-inputline">
+      <span class="console-prompt">&gt;</span>
+      <input id="console-input" autocomplete="off" spellcheck="false" maxlength="64" />
+      <span class="console-caret"></span>
+    </div>
+    <div class="console-foot">ENTER 実行 ・ ↑↓ 履歴 ・ C / ESC 閉じる</div>
+  </div>
+
+  <div id="menu" class="screen">
+    <div class="menu-inner">
+      <div class="kicker">A SHORT FIRST-PERSON HORROR</div>
+      <h1>SLEEP<span>()</span></h1>
+      <p class="tag">夜、部屋。<br/>画面の青だけが、まだ起きている。</p>
+      <button id="btn-start" class="btn primary">入 室 す る</button>
+      <div class="menu-row">
+        <button id="btn-settings" class="btn ghost">設定</button>
+        <button id="btn-help" class="btn ghost">操作</button>
+      </div>
+      <div class="warn">光の点滅・強いノイズを含みます。音量にご注意ください。<br/>ヘッドホン推奨。</div>
+    </div>
+    <div class="menu-foot">© 2026 — three.js / CC0 audio &amp; models</div>
+  </div>
+
+  <div id="settings" class="screen panel" hidden>
+    <div class="panel-inner">
+      <h2>設定</h2>
+      <label>音量 <input id="opt-vol" type="range" min="0" max="100" value="80" /><b id="val-vol">80</b></label>
+      <label>マウス感度 <input id="opt-sens" type="range" min="20" max="300" value="100" /><b id="val-sens">1.00</b></label>
+      <label>描画品質
+        <select id="opt-quality">
+          <option value="auto" selected>自動</option>
+          <option value="high">高</option>
+          <option value="low">低</option>
+        </select>
+      </label>
+      <label>視点の揺れ <input id="opt-bob" type="checkbox" checked /></label>
+      <label>光の演出を抑える <input id="opt-flash" type="checkbox" /></label>
+      <div class="panel-btns"><button id="btn-settings-close" class="btn primary">戻る</button></div>
+    </div>
+  </div>
+
+  <div id="help" class="screen panel" hidden>
+    <div class="panel-inner">
+      <h2>操作</h2>
+      <ul class="helplist">
+        <li><b>WASD / 矢印</b><span>歩く</span></li>
+        <li><b>SHIFT</b><span>走る</span></li>
+        <li><b>マウス</b><span>見回す（クリックで固定 / 解除）</span></li>
+        <li><b>E / 左クリック</b><span>調べる・決定</span></li>
+        <li><b>C</b><span>異世界でコンソール</span></li>
+        <li><b>ESC</b><span>一時停止</span></li>
+      </ul>
+      <div class="panel-btns"><button id="btn-help-close" class="btn primary">戻る</button></div>
+    </div>
+  </div>
+
+  <div id="pause" class="screen panel" hidden>
+    <div class="panel-inner">
+      <h2>一時停止</h2>
+      <div class="panel-btns col">
+        <button id="btn-resume" class="btn primary">再開</button>
+        <button id="btn-pause-settings" class="btn ghost">設定</button>
+        <button id="btn-restart" class="btn ghost">最初から</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="end" class="screen panel" hidden>
+    <div class="panel-inner">
+      <div class="kicker">END OF SESSION</div>
+      <h2>おかえり。</h2>
+      <p class="endtext">部屋は、あなたが落ちたときと<br/>ほとんど同じに見える。<br/><br/>──たぶん、同じ。</p>
+      <div class="panel-btns col">
+        <button id="btn-again" class="btn primary">もう一度</button>
+      </div>
+      <div class="warn small">E で PC をもう一度調べることもできます。</div>
+    </div>
+  </div>
+
+  <div id="flash" class="flash"></div>
+  <div id="static" class="static"></div>
+  <div id="loading" class="loading"><div class="loadbar"><i></i></div><span>LOADING…</span></div>
+  <div id="nogl" class="screen" hidden><div class="panel-inner"><h2>WebGL2 が必要です</h2><p>最新の Chrome / Edge / Firefox でお試しください。</p></div></div>
+</div>
+<script type="importmap">
+{
+  "imports": {
+    "three": "/node_modules/three/build/three.module.js",
+    "three/addons/": "/node_modules/three/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

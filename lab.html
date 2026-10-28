@@ -1,0 +1,34 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%;background:#000;overflow:hidden}canvas{display:block}</style>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script>
+</head><body><script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+const P=new URLSearchParams(location.search);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(1280,800); renderer.setPixelRatio(1);
+renderer.outputColorSpace=THREE.SRGBColorSpace; renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.0;
+renderer.shadowMap.enabled=true;
+document.body.appendChild(renderer.domElement);
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0x0a0d12);
+scene.add(new THREE.HemisphereLight(0x9db6ff,0x221a14,0.55));
+const moon=new THREE.DirectionalLight(0xa8c4ff,1.6); moon.position.set(6,6,-2); moon.castShadow=true; scene.add(moon);
+const amb=new THREE.AmbientLight(0x333344,0.6); scene.add(amb);
+const cam=new THREE.PerspectiveCamera(70,1280/800,0.05,300);
+const loader=new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);
+const room=await loader.loadAsync('/models/bedroom.glb');
+scene.add(room.scene);
+const box=new THREE.Box3().setFromObject(room.scene);
+console.log('ROOMBOX', JSON.stringify({min:box.min.toArray(),max:box.max.toArray()}));
+const lines=[];
+room.scene.traverse(o=>{ if(o.isMesh){ const b=new THREE.Box3().setFromObject(o); const n=o.name; lines.push([n, b.min.toArray().map(v=>+v.toFixed(2)), b.max.toArray().map(v=>+v.toFixed(2))]); } });
+for(const l of lines) console.log('PART', JSON.stringify(l));
+// axes helper
+scene.add(new THREE.AxesHelper(1));
+const pos=(P.get('p')||'0,1.6,0').split(',').map(Number);
+const look=(P.get('l')||'0,1.6,-1').split(',').map(Number);
+cam.position.set(...pos); cam.lookAt(new THREE.Vector3(...look));
+window.__ready=true;
+renderer.render(scene,cam);
+function loop(){ requestAnimationFrame(loop); renderer.render(scene,cam);} loop();
+</script></body></html>

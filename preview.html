@@ -1,0 +1,32 @@
+<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;background:#222}canvas{display:block}</style>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script>
+</head><body><script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+const params = new URLSearchParams(location.search);
+const file = params.get('m') || 'monitor';
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(900,700); renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x2a2a30);
+scene.add(new THREE.HemisphereLight(0xffffff,0x333344,2.2));
+const d = new THREE.DirectionalLight(0xffffff,2.2); d.position.set(3,5,4); scene.add(d);
+const d2 = new THREE.DirectionalLight(0x8899ff,1.2); d2.position.set(-4,2,-3); scene.add(d2);
+const cam = new THREE.PerspectiveCamera(45, 900/700, 0.01, 200); cam.up.set(0,1,0);
+const grid = new THREE.GridHelper(10, 100, 0x666666, 0x333333); scene.add(grid);
+const loader = new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);
+loader.load('/models/'+file+'.glb', (g)=>{
+  const root=g.scene; scene.add(root);
+  const box=new THREE.Box3().setFromObject(root); const size=box.getSize(new THREE.Vector3()); const c=box.getCenter(new THREE.Vector3());
+  const r=Math.max(size.x,size.y,size.z);
+  if(params.get('top')){ cam.position.set(c.x, c.y+r*1.6, c.z+0.001); cam.up.set(0,0,-1); cam.lookAt(c); }
+  else { cam.position.set(c.x+r*0.9, c.y+r*0.7, c.z+r*1.4); cam.lookAt(c); } cam.near=r/100; cam.far=r*100; cam.updateProjectionMatrix();
+  window.__info = {size:size.toArray(), center:c.toArray(), meshes:0, min:box.min.toArray(), max:box.max.toArray()};
+  root.traverse(o=>{if(o.isMesh)window.__info.meshes++;});
+  console.log('INFO', JSON.stringify(window.__info));
+  window.__ready=true;
+}, undefined, e=>{console.log('ERR',e.message); window.__ready='err';});
+function loop(){requestAnimationFrame(loop); renderer.render(scene,cam);} loop();
+</script></body></html>

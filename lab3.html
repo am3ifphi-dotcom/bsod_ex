@@ -1,0 +1,33 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%;background:#000;overflow:hidden}canvas{display:block}
+@font-face{font-family:"SleepJP";src:url("/fonts/NotoSansJP-Regular.woff2") format("woff2")}</style>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script>
+</head><body><script type="module">
+import * as THREE from 'three';
+import { Engine } from '/src/core/engine.js';
+import { Audio } from '/src/core/audio.js';
+import { Room } from '/src/world/room.js';
+const W=1280,H=800;
+const canvas=document.createElement('canvas'); document.body.appendChild(canvas);
+const engine=new Engine(canvas);
+const cam=new THREE.PerspectiveCamera(64, W/H, 0.03, 200); cam.rotation.order='YXZ';
+const audio=new Audio();
+const room=new Room(engine, audio, {});
+await room.build();
+await room.bsod.loadFonts();
+room.scene.add(cam);
+engine.setScene(room.scene, cam);
+window.__room=room; window.__engine=engine; window.__cam=cam;
+window.THREE=THREE;
+window.__pierce=(nx=0,ny=0)=>{const rc=new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(nx,ny), cam); const hits=rc.intersectObjects(room.scene.children,true).filter(h=>h.object.isMesh&&h.object.visible); return hits.slice(0,4).map(h=>[h.object.name, +h.distance.toFixed(2)]);};
+window.__setCam=(x,y,z,yaw,pitch,fov=64)=>{cam.position.set(x,y,z);cam.rotation.set(pitch,yaw,0);cam.fov=fov;cam.updateProjectionMatrix();};
+window.__tune=(o)=>{Object.entries(o).forEach(([k,v])=>{ if(k.startsWith('u.')) engine.u[k.slice(2)].value=v; else if(k==='exposure') engine.renderer.toneMappingExposure=v; else if(k==='bloom') engine.bloom.strength=v; else if(k in room.lights) room.lights[k].intensity=v; });};
+window.__onScreen=()=>room.powerOnScreen();
+window.__eaten=(v)=>room.setEaten(v);
+let last=performance.now();
+function loop(now){ const dt=Math.min(0.05,(now-last)/1000); last=now; engine.time+=dt;
+  room.update(dt, engine.time, {player:cam.position, camera:cam, hoverScreen:false, pupil:{x:0,y:0}});
+  engine.u.uTime.value=engine.time; engine.composer.render(dt); requestAnimationFrame(loop); }
+requestAnimationFrame(loop);
+window.__setCam(0.55,1.64,0.15,-1.45,-0.03);
+window.__ready=true;
+</script></body></html>

@@ -1,0 +1,32 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%;background:#000;overflow:hidden}canvas{display:block}</style>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script>
+</head><body><script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+const P=new URLSearchParams(location.search);
+const W=1280,H=800;
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(W,H); renderer.outputColorSpace=THREE.SRGBColorSpace; renderer.toneMapping=THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0x0b0d10);
+scene.add(new THREE.HemisphereLight(0x99aaff,0x201810,1.2));
+const d=new THREE.DirectionalLight(0xffffff,1.5); d.position.set(2,4,3); scene.add(d);
+const cam=new THREE.PerspectiveCamera(65,W/H,0.02,200);
+const loader=new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);
+const g=await loader.loadAsync('/models/pc.glb');
+const root=g.scene;
+const scale=+(P.get('s')||0.15);
+root.scale.setScalar(scale);
+scene.add(root);
+const b=new THREE.Box3().setFromObject(root); console.log('PCBOX',JSON.stringify({min:b.min.toArray(),max:b.max.toArray()}));
+// list meshes sorted by size
+const arr=[]; root.traverse(o=>{ if(o.isMesh){ const bb=new THREE.Box3().setFromObject(o); const s=bb.getSize(new THREE.Vector3()); arr.push([o.name, +s.x.toFixed(2), +s.y.toFixed(2), +s.z.toFixed(2), bb.min.toArray().map(v=>+v.toFixed(2))]); }});
+arr.sort((a,b)=>b[1]*b[2]*b[3]-a[1]*a[2]*a[3]);
+for(const a of arr.slice(0,22)) console.log('M',JSON.stringify(a));
+const pos=(P.get('p')||'0,1.6,2.6').split(',').map(Number);
+const look=(P.get('l')||'0,0.9,0').split(',').map(Number);
+cam.position.set(...pos); cam.lookAt(new THREE.Vector3(...look));
+window.__ready=true;
+function loop(){requestAnimationFrame(loop);renderer.render(scene,cam);} loop();
+</script></body></html>

@@ -1,0 +1,30 @@
+{
+  "name": "bsod_ex",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/am3ifphi-dotcom/bsod_ex.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/am3ifphi-dotcom/bsod_ex/issues"
+  },
+  "homepage": "https://github.com/am3ifphi-dotcom/bsod_ex#readme",
+  "dependencies": {
+    "three": "^0.180.0",
+    "vite": "^7.3.7"
+  },
+  "devDependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@gltf-transform/cli": "^4.5.1",
+    "@sparticuz/chromium": "^153.0.0",
+    "puppeteer-core": "^25.16.0"
+  }
+}

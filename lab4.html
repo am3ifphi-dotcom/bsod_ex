@@ -1,0 +1,30 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#111;overflow:hidden}canvas{display:block}</style>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script>
+</head><body><script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+const W=1000,H=1000;
+const r=new THREE.WebGLRenderer({antialias:true}); r.setSize(W,H); r.outputColorSpace=THREE.SRGBColorSpace;
+document.body.appendChild(r.domElement);
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0x101418);
+scene.add(new THREE.AmbientLight(0xffffff,2.2));
+const g=new GLTFLoader(); g.setMeshoptDecoder(MeshoptDecoder);
+const pc=await g.loadAsync('/models/pc.glb');
+pc.scene.scale.setScalar(0.15);
+scene.add(pc.scene);
+const grid=new THREE.GridHelper(6, 12, 0x66ff66, 0x2a5a2a); scene.add(grid);
+// axis markers: +X red, +Z blue
+const ax=new THREE.Mesh(new THREE.ConeGeometry(0.05,0.2,8), new THREE.MeshBasicMaterial({color:0xff3333})); ax.position.set(1,0.05,0); ax.rotation.z=-Math.PI/2; scene.add(ax);
+const az=new THREE.Mesh(new THREE.ConeGeometry(0.05,0.2,8), new THREE.MeshBasicMaterial({color:0x3366ff})); az.position.set(0,0.05,1); az.rotation.x=Math.PI/2; scene.add(az);
+// mark the screen plane position candidate
+const mk=new THREE.Mesh(new THREE.SphereGeometry(0.04,10,8), new THREE.MeshBasicMaterial({color:0xff00ff}));
+mk.position.set(-0.2,0.45,0.455); scene.add(mk);
+const cam=new THREE.PerspectiveCamera(45,W/H,0.01,100);
+cam.position.set(0,6,0.01); cam.lookAt(0,0,0);
+r.render(scene,cam);
+// also a front view from +X
+window.__front=()=>{ cam.position.set(3,0.6,0.4); cam.lookAt(0,0.3,0.3); r.render(scene,cam); };
+window.__front2=()=>{ cam.position.set(-3,0.6,0.4); cam.lookAt(0,0.3,0.3); r.render(scene,cam); };
+window.__ready=true;
+</script></body></html>
