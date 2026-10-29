@@ -4,12 +4,14 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview --host 0.0.0.0 --port 5173",
+    "build:web": "BSOD_OUTDIR=web npm run build",
     "check:shaders": "node scripts/validate-shaders.mjs src/post/PostFX.ts src/world/BsodScreen.ts src/world/BedroomScene.ts src/world/GlitchWorld.ts",
-    "verify": "npm run check:shaders && npm run build",
-    "test:canvas": "tsx scripts/inspect-bsod-canvas.mts"
+    "dev": "vite --host 0.0.0.0 --port 5173",
+    "preview": "vite preview --host 0.0.0.0 --port 5173",
+    "serve:web": "python3 -m http.server 5173 --bind 0.0.0.0 --directory web",
+    "test:canvas": "tsx scripts/inspect-bsod-canvas.mts",
+    "verify": "npm run check:shaders && npm run build"
   },
   "dependencies": {
     "three": "^0.186.1"
