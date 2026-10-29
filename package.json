@@ -1,0 +1,31 @@
+{
+  "name": "bsod-ex",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5173",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 5173",
+    "check:shaders": "node scripts/validate-shaders.mjs src/post/PostFX.ts src/world/BsodScreen.ts src/world/BedroomScene.ts src/world/GlitchWorld.ts",
+    "verify": "npm run check:shaders && npm run build",
+    "test:canvas": "tsx scripts/inspect-bsod-canvas.mts"
+  },
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@gltf-transform/cli": "^4.5.1",
+    "@gltf-transform/core": "^4.5.1",
+    "@gltf-transform/extensions": "^4.5.1",
+    "@gltf-transform/functions": "^4.5.1",
+    "@moreplease/glslang": "^16.6.0-1",
+    "@napi-rs/canvas": "^0.1.50",
+    "@types/three": "^0.186.0",
+    "meshoptimizer": "^0.23.0",
+    "sharp": "^0.35.5",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.2",
+    "vite": "^8.3.5"
+  }
+}
