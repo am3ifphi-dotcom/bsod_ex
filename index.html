@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BSOD_EX // 0x000000F4</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="canvas-wrap"></div>
+
+    <!-- Loading & Title Cold-Open Overlay -->
+    <div id="title-overlay" class="overlay visible">
+      <div class="title-vignette"></div>
+      <div class="title-card">
+        <div class="sys-tag">STOP: 0x000000F4 // CRITICAL_REALITY_FAULT</div>
+        <h1 class="game-title" data-text="BSOD_EX">BSOD_EX</h1>
+        <p class="game-sub">深夜 02:47 — 自室のモニターが青く光っている</p>
+
+        <div id="loading-block">
+          <div class="loading-bar-track">
+            <div id="loading-bar-fill"></div>
+          </div>
+          <div id="loading-status">システムメモリと3D空間を展開中... 0%</div>
+        </div>
+
+        <button id="start-btn" class="primary-btn hidden" disabled>
+          <span class="btn-icon">:(</span>
+          <span>目を覚ます</span>
+        </button>
+
+        <div class="controls-grid">
+          <div><kbd>W A S D</kbd> 移動</div>
+          <div><kbd>MOUSE</kbd> 視点移動</div>
+          <div><kbd>CLICK / E</kbd> 調べる・干渉</div>
+          <div><kbd>C</kbd> コンソール（異世界）</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Subtle In-Game HUD -->
+    <div id="hud" class="hidden">
+      <div id="crosshair">
+        <span class="ch-dot"></span>
+        <span class="ch-ring"></span>
+      </div>
+
+      <!-- Custom OS-like cursor when inspecting the PC monitor -->
+      <div id="pc-cursor" class="hidden">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <path
+            d="M4 2L4 19L8.5 14.8L11.8 21.5L14.4 20.2L11.1 13.6L17.2 13.6L4 2Z"
+            fill="#ffffff"
+            stroke="#001a38"
+            stroke-width="1.6"
+          />
+        </svg>
+      </div>
+
+      <div id="interact-prompt" class="hidden"></div>
+      <div id="world-hint" class="hidden"></div>
+      <div id="subtitle-banner" class="hidden"></div>
+      <div id="aftermath-bar" class="hidden">
+        <span>[R] 最初からやり直す</span>
+        <span>[ESC] メニュー</span>
+      </div>
+    </div>
+
+    <!-- Diegetic In-Game Kernel Console (C key in Glitch World) -->
+    <div id="console-modal" class="hidden" aria-hidden="true">
+      <div class="console-window">
+        <div class="console-titlebar">
+          <div class="console-title">
+            <span class="console-sq"></span>
+            <span>Administrator: X:\WINDOWS\SYSTEM32\KERNEL_RECOVERY_CON.EXE</span>
+          </div>
+          <button id="console-close-btn" type="button" title="閉じる (ESC)">✕</button>
+        </div>
+        <div id="console-log" class="console-log"></div>
+        <form id="console-form" class="console-input-row" autocomplete="off">
+          <span class="console-prompt">DUMP:\CORE&gt;</span>
+          <input
+            id="console-input"
+            type="text"
+            spellcheck="false"
+            autocomplete="off"
+            autocapitalize="characters"
+            maxlength="48"
+            placeholder="コマンドを入力して Enter..."
+          />
+        </form>
+        <div class="console-footer">
+          <span>[ENTER] 実行</span>
+          <span>[ESC / C] 閉じて探索へ戻る</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pause / Settings Modal -->
+    <div id="pause-modal" class="overlay hidden">
+      <div class="pause-card">
+        <div class="sys-tag">PAUSED // SYSTEM_INTERRUPT</div>
+        <h2>一時停止</h2>
+        <p id="pause-phase-label" class="pause-sub">深夜の自室</p>
+
+        <div class="setting-row">
+          <label for="sens-slider">マウス感度</label>
+          <input id="sens-slider" type="range" min="0.3" max="2.2" step="0.05" value="1.0" />
+        </div>
+        <div class="setting-row">
+          <label for="vol-slider">マスター音量</label>
+          <input id="vol-slider" type="range" min="0" max="1.0" step="0.02" value="0.85" />
+        </div>
+
+        <div class="pause-actions">
+          <button id="resume-btn" class="primary-btn">体験に戻る</button>
+          <button id="restart-btn" class="secondary-btn">最初からやり直す</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
