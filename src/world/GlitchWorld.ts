@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { toFastLambert } from './BedroomScene';
+import { getSharedNoiseTexture } from '../utils/ProceduralNoise';
 
 const FLOATING_SHARD_COUNT = 120;
 const ABYSS_DEBRIS_COUNT = 96;
@@ -36,12 +37,20 @@ function addInstancedGltf(
 }
 
 export class GlitchWorld {
+  public readonly scene = new THREE.Scene();
   public readonly group = new THREE.Group();
   public readonly corePosition = new THREE.Vector3(0, 4.4, -56);
   public readonly spawnPosition = new THREE.Vector3(0, 0, 20);
+  public readonly skyPortalPos = new THREE.Vector3(0, 46, 86);
+  public readonly skyPortalQuat = new THREE.Quaternion();
+
+  private skySleeveMesh!: THREE.Mesh;
+  private skySleeveBackCap!: THREE.Mesh;
 
   private terrainMat!: THREE.ShaderMaterial;
   private skyMat!: THREE.ShaderMaterial;
+  private astrolabeMat!: THREE.ShaderMaterial;
+  private readonly astrolabeRings: THREE.Mesh[] = [];
   private dataSeaMat!: THREE.ShaderMaterial;
   private citadelMat!: THREE.ShaderMaterial;
   private finMat!: THREE.ShaderMaterial;
@@ -50,6 +59,11 @@ export class GlitchWorld {
   private errorCascadeMat!: THREE.ShaderMaterial;
   private leviathanMat!: THREE.ShaderMaterial;
   private skyRiftMat!: THREE.ShaderMaterial;
+  private skyTunnelMat!: THREE.ShaderMaterial;
+  private skyExitStreamMat!: THREE.ShaderMaterial;
+  private skyFangMat!: THREE.ShaderMaterial;
+  private causewayBusMat!: THREE.ShaderMaterial;
+  private floatingShardMat!: THREE.ShaderMaterial;
   private landingShockMat!: THREE.ShaderMaterial;
   private landingShockTimer = 99.0;
   private crtGlassMat!: THREE.ShaderMaterial;
@@ -68,14 +82,6 @@ export class GlitchWorld {
   private spireMat!: THREE.ShaderMaterial;
   private lanternMat!: THREE.ShaderMaterial;
   private monolithMat!: THREE.ShaderMaterial;
-  private readonly trafficStates: Array<{
-    baseX: number;
-    y: number;
-    z: number;
-    speed: number;
-    len: number;
-    lane: number;
-  }> = [];
 
   // Central WAKE_UP glyph plates & Gyroscopic Sanctuary Rings!
   private readonly wakePlates: Array<{
@@ -88,6 +94,8 @@ export class GlitchWorld {
   private coreBeamMat!: THREE.ShaderMaterial;
   private corePlaqueMat!: THREE.MeshBasicMaterial;
   public coreSecretRevealed = false;
+  private phantomMat!: THREE.ShaderMaterial;
+  private phantomMesh!: THREE.InstancedMesh;
 
   // Periodic Silence vs Anomaly pacing
   private anomalyTimer = 7.5;
@@ -114,13 +122,13 @@ export class GlitchWorld {
   private readonly collapseCenter = new THREE.Vector3(0, 0, -42);
   private readonly dummy = new THREE.Object3D();
 
-  private readonly shardStates: Array<{
-    basePos: THREE.Vector3;
-    rot: THREE.Euler;
-    rotVel: THREE.Vector3;
-    scale: THREE.Vector3;
-    bobPhase: number;
-  }> = [];
+  /**
+   * Maps a local Z coordinate along the Sky-Monitor tunnel axis (localZ < 0 = inside 56m exit sleeve,
+   * localZ = 0 = shattered BSOD screen mouth, localZ > 0 = out in open GlitchWorld sky) to world space.
+   */
+  public getSkyTunnelPoint(localZ: number, localX = 0, localY = 0, out = new THREE.Vector3()): THREE.Vector3 {
+    return out.set(localX, localY, localZ).applyQuaternion(this.skyPortalQuat).add(this.skyPortalPos);
+  }
 
   private readonly abyssStates: Array<{
     x: number;
@@ -164,6 +172,17 @@ export class GlitchWorld {
     const trenchBand = Math.exp(-((absX - 20.0) * (absX - 20.0)) / 72.0) * inSpan;
     const trenchDip = -2.35 * trenchBand * (1.0 - Math.exp(-(dCore * dCore) / 260.0));
 
+    // 4b. Branching East Ossuary Spur (+18.5, -8) & West Reliquary Spur (-18.5, -28) bridging the Data Sea!
+    const spurEx = THREE.MathUtils.smoothstep(x, 0.0, 6.0) * (1.0 - THREE.MathUtils.smoothstep(x, 18.5, 25.5));
+    const spurEz = Math.exp(-((z + 8.0) * (z + 8.0)) / 24.0);
+    const dEast = Math.hypot(x - 18.5, z + 8.0);
+    const eastWing = Math.max(3.6 * spurEx * spurEz, 3.85 * Math.exp(-(dEast * dEast) / 38.0));
+
+    const spurWx = THREE.MathUtils.smoothstep(-x, 0.0, 6.0) * (1.0 - THREE.MathUtils.smoothstep(-x, 18.5, 25.5));
+    const spurWz = Math.exp(-((z + 28.0) * (z + 28.0)) / 24.0);
+    const dWest = Math.hypot(x + 18.5, z + 28.0);
+    const westWing = Math.max(3.6 * spurWx * spurWz, 3.85 * Math.exp(-(dWest * dWest) / 38.0));
+
     // 5. Outer obsidian-concrete islands & horizon rim
     const waves =
       (Math.sin(x * 0.095) * Math.cos(z * 0.085) * 1.45 +
@@ -173,10 +192,14 @@ export class GlitchWorld {
     const rCenter = Math.hypot(x, z + 18.0);
     const rim = Math.max(0.0, rCenter - 62.0) * 0.26;
 
-    return spawnIsland + smoothCore + bridgeDeck + trenchDip + waves + rim;
+    return spawnIsland + smoothCore + bridgeDeck + trenchDip + eastWing + westWing + waves + rim;
   }
 
   public async load(gltfLoader: GLTFLoader, texLoader: THREE.TextureLoader): Promise<void> {
+    this.scene.background = new THREE.Color(0x011330);
+    this.scene.fog = new THREE.FogExp2(0x011330, 0.0056);
+    this.scene.add(this.group);
+
     const [
       crayGltf,
       rackGltf,
@@ -229,6 +252,9 @@ export class GlitchWorld {
     // 5c. Hand-placed scale & wayfinding detail (causeway lanterns, sanctuary monoliths).
     this.buildCausewayDetailAndMonoliths();
 
+    // 5d. Threshold Host Effigy & Peripheral Stalking Glitch Apparitions
+    this.buildHostEffigyAndPhantoms();
+
     // 6. Act 4 True Voronoi Jigsaw Fracture & 245m Abyssal Freefall Shaft
     this.buildCollapseAndAbyss(concreteDiff, concreteDisp);
   }
@@ -253,6 +279,8 @@ export class GlitchWorld {
     const skyBandTex = new THREE.CanvasTexture(skyCanvas);
     skyBandTex.wrapS = THREE.RepeatWrapping;
     skyBandTex.wrapT = THREE.ClampToEdgeWrapping;
+    skyBandTex.minFilter = THREE.LinearFilter;
+    skyBandTex.generateMipmaps = false;
 
     const skyGeo = new THREE.SphereGeometry(230, 32, 24);
     this.skyMat = new THREE.ShaderMaterial({
@@ -264,6 +292,7 @@ export class GlitchWorld {
         uCollapse: { value: 0 },
         uPlayerPos: { value: new THREE.Vector3(0, 5, 20) },
         uBandTex: { value: skyBandTex },
+        uNoiseTex: { value: getSharedNoiseTexture() },
       },
       vertexShader: /* glsl */ `
         varying vec3 vWorldDir;
@@ -282,6 +311,7 @@ export class GlitchWorld {
         uniform float uCollapse;
         uniform vec3 uPlayerPos;
         uniform sampler2D uBandTex;
+        uniform sampler2D uNoiseTex;
 
         float hash(vec2 p) {
           return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -313,36 +343,44 @@ export class GlitchWorld {
           vec3 rayCol = mix(vec3(0.28, 0.74, 1.0), vec3(1.0, 0.18, 0.28), max(uAnomaly * 0.75, uCollapse));
           col += rayCol * godRays * (0.42 + uAnomaly * 0.52);
 
-          // Almond-shaped Giant Watcher Eyelid & Iris Rings!
+          // Almond-shaped Giant Watcher Eyelid, Serrated Parasyte Rim & Bloodshot Iris!
           vec2 eyeSpace = sunPlane / 0.115;
           float blinkSquint = 1.0 + 0.28 * sin(uTime * 0.7) + uAnomaly * 0.45;
-          float almondR = length(vec2(eyeSpace.x * 0.72, eyeSpace.y * blinkSquint));
+          float lidSerration = (abs(fract((rayTheta * 0.1591549 + 0.5) * 40.0) - 0.5) * 2.0) * (0.03 + 0.08 * max(uAnomaly, uCollapse));
+          float almondR = length(vec2(eyeSpace.x * 0.72, eyeSpace.y * blinkSquint)) + lidSerration;
           float outerHalo = smoothstep(0.014, 0.0, abs(sunAng - 0.205)) * (0.45 + 0.55 * step(0.35, fract(rayTheta * 6.0 + uTime * 0.2)));
           float scleraRim = exp(-abs(almondR - 1.0) * 14.0) * 1.45;
-          col += mix(vec3(0.76, 0.94, 1.0), vec3(1.0, 0.22, 0.30), max(uAnomaly, uCollapse)) * (scleraRim + outerHalo * 0.78);
+          col += mix(vec3(0.76, 0.94, 1.0), vec3(1.0, 0.20, 0.28), max(uAnomaly, uCollapse)) * (scleraRim + outerHalo * 0.78);
 
           if (almondR < 1.02) {
-            // Pupil subtly tracks the player's world X/Z across the basin!
-            vec2 gazeShift = vec2(clamp(uPlayerPos.x / 55.0, -0.28, 0.28), clamp((-20.0 - uPlayerPos.z) / 140.0, -0.18, 0.18));
+            // Saccadic micro-twitches + live tracking of player's world X/Z across the basin!
+            float sacTick = floor(uTime * (3.5 + uAnomaly * 14.0));
+            vec2 sac = (vec2(hash(vec2(sacTick, 1.3)), hash(vec2(sacTick, 7.9))) - 0.5) * (0.04 + 0.16 * max(uAnomaly, uCollapse));
+            vec2 gazeShift = vec2(clamp(uPlayerPos.x / 55.0, -0.28, 0.28), clamp((-20.0 - uPlayerPos.z) / 140.0, -0.18, 0.18)) + sac;
             vec2 irisP = eyeSpace - gazeShift;
             float irisR = length(irisP);
-            float irisAng = atan(irisP.y, irisP.x);
-            float irisFibers = 0.5 + 0.5 * sin(irisAng * 32.0 + sin(irisR * 18.0 - uTime * 2.5) * 1.8);
+            float safeIx = (abs(irisP.x) < 1e-5 && abs(irisP.y) < 1e-5) ? 1e-5 : irisP.x;
+            float irisAng = atan(irisP.y, safeIx);
+            float irisFibers = 0.5 + 0.5 * sin(irisAng * 34.0 + sin(irisR * 18.0 - uTime * 2.5) * 1.8);
 
-            // Sclera interior
-            vec3 eyeCol = mix(vec3(0.005, 0.03, 0.11), vec3(0.85, 0.94, 1.0), smoothstep(0.78, 0.99, almondR) * 0.65);
+            // Sclera interior with arterial bloodshot capillaries flaring during anomalies
+            float cap1 = pow(max(0.0, 1.0 - abs(sin(irisAng * 11.0 + sin(almondR * 15.0) * 1.7))), 14.0);
+            vec3 eyeCol = mix(vec3(0.008, 0.035, 0.12), vec3(0.88, 0.92, 0.96), smoothstep(0.68, 0.99, almondR) * 0.72);
+            eyeCol = mix(eyeCol, vec3(0.85, 0.04, 0.12), cap1 * smoothstep(0.55, 0.96, almondR) * (0.28 + 0.72 * max(uAnomaly, uCollapse)));
+
             // Glowing cybernetic/eldritch iris ring
-            float inIris = smoothstep(0.72, 0.64, irisR) * smoothstep(0.20, 0.30, irisR);
-            vec3 irisTint = mix(vec3(0.12, 0.68, 1.0), vec3(1.0, 0.08, 0.18), max(uAnomaly * 0.9, uCollapse));
-            eyeCol += irisTint * inIris * (0.55 + 0.75 * irisFibers);
+            float inIris = smoothstep(0.72, 0.64, irisR) * smoothstep(0.16, 0.28, irisR);
+            vec3 irisTint = mix(vec3(0.12, 0.68, 1.0), vec3(1.0, 0.08, 0.18), max(uAnomaly * 0.92, uCollapse));
+            eyeCol += irisTint * inIris * (0.55 + 0.85 * irisFibers);
 
-            // Constricting vertical cat-slit / abyssal pupil + glowing ':(' brand inside pupil!
-            float slitFactor = mix(1.0, 3.2, max(uAnomaly, uCollapse));
+            // Constricting manic pinpoint / slit pupil!
+            float slitFactor = mix(1.2, 3.6, max(uAnomaly, uCollapse));
+            float pupilSize = mix(0.24, 0.14, max(uAnomaly, uCollapse));
             float pupilR = length(vec2(irisP.x * slitFactor, irisP.y));
-            float inPupil = smoothstep(0.28, 0.21, pupilR);
+            float inPupil = smoothstep(pupilSize + 0.04, pupilSize - 0.02, pupilR);
             eyeCol = mix(eyeCol, vec3(0.0, 0.002, 0.01), inPupil);
-            float pupilRim = smoothstep(0.045, 0.0, abs(pupilR - 0.25));
-            eyeCol += mix(vec3(0.75, 0.95, 1.0), vec3(1.0, 0.15, 0.22), max(uAnomaly, uCollapse)) * pupilRim * 0.95;
+            float pupilRim = smoothstep(0.04, 0.0, abs(pupilR - pupilSize));
+            eyeCol += mix(vec3(0.75, 0.95, 1.0), vec3(1.0, 0.15, 0.22), max(uAnomaly, uCollapse)) * pupilRim * 1.15;
 
             col = mix(col, eyeCol, smoothstep(1.02, 0.93, almondR));
           }
@@ -363,33 +401,40 @@ export class GlitchWorld {
             col += vec3(0.75, 0.92, 1.0) * txt * (0.48 + uAnomaly * 0.95 + uCollapse * 1.15);
           }
 
-          // === STRATOSPHERIC CLOUD BANKS ===
-          // Two drifting fbm layers hug the horizon so the vault has real aerial depth and the
-          // megacity silhouettes sink into weather instead of stopping dead against a gradient.
+          // === KERNEL AURORA BOREALIS CURTAINS & ECLIPSE CORONA RAYS ===
+          if (y > 0.04) {
+            float azim = atan(dir.x, -dir.z);
+            vec4 an1 = texture2D(uNoiseTex, vec2(azim * 0.95 + uTime * 0.014, y * 0.55 - uTime * 0.022));
+            vec4 an2 = texture2D(uNoiseTex, vec2(azim * 2.15 - uTime * 0.019, y * 1.10 + an1.r * 0.28));
+            float curtain = pow(clamp(sin(azim * 6.0 + an1.r * 4.8 + uTime * 0.22) * 0.5 + 0.5, 0.0, 1.0), 3.2)
+                          * smoothstep(0.32, 0.84, an2.b)
+                          * smoothstep(0.04, 0.24, y) * smoothstep(0.88, 0.30, y);
+            vec3 auroraCalm = mix(vec3(0.04, 0.62, 0.96), vec3(0.26, 0.34, 1.0), smoothstep(0.12, 0.58, y));
+            vec3 auroraPanic = vec3(1.0, 0.14, 0.34);
+            col += mix(auroraCalm, auroraPanic, max(uAnomaly * 0.85, uCollapse)) * curtain * (0.62 + uAnomaly * 0.55);
+
+            // Sweeping radial solar-eclipse corona rays emanating from the Watching Sky-Eye
+            vec2 eyeDelta = vec2(dir.x, dir.y - 0.33);
+            float eclipseAng = atan(eyeDelta.y, eyeDelta.x);
+            float raySpoke = pow(0.5 + 0.5 * cos(eclipseAng * 11.0 - uTime * 0.24 + an1.g * 1.8), 5.0);
+            float rayFalloff = exp(-sunAng * 3.1) * smoothstep(0.06, 0.26, sunAng);
+            col += mix(vec3(0.36, 0.82, 1.0), vec3(1.0, 0.22, 0.30), uAnomaly) * raySpoke * rayFalloff * 0.48;
+          }
+
+          // === STRATOSPHERIC CLOUD BANKS (Fast smooth hardware-bilinear FBM lookup!) ===
           {
-            vec3 cloudDir = dir;
-            vec2 cp = vec2(atan(cloudDir.z, cloudDir.x) * 1.35, cloudDir.y * 3.4);
-            cp.x += uTime * 0.004;
-            float n1 = hash(vec2(floor(cp.x * 6.0), floor(cp.y * 6.0)));
-            float band = 0.0;
-            vec2 q = cp * 6.0;
-            for (int i = 0; i < 4; i++) {
-              float layer = hash(floor(q) + float(i) * 17.3);
-              float fx = fract(q.x);
-              float fy = fract(q.y);
-              float sm = (1.0 - abs(fx * 2.0 - 1.0)) * (1.0 - abs(fy * 2.0 - 1.0));
-              band += layer * sm * (1.0 / (1.0 + float(i)));
-              q *= 2.05;
-            }
-            float horizonMask = smoothstep(0.46, 0.02, y) * smoothstep(-0.30, 0.02, y);
-            float cloudAmt = smoothstep(0.34, 0.78, band * 0.62 + n1 * 0.18) * horizonMask;
-            vec3 cloudCol = mix(vec3(0.03, 0.10, 0.24), vec3(0.16, 0.38, 0.74), smoothstep(0.0, 0.4, y));
-            cloudCol += mix(vec3(0.35, 0.70, 1.0), vec3(1.0, 0.25, 0.32), uAnomaly) * exp(-sunAng * 2.2) * 0.35;
-            col = mix(col, cloudCol, clamp(cloudAmt * 0.72, 0.0, 0.72));
+            vec2 cp = vec2(atan(dir.z, dir.x) * 0.42 + uTime * 0.0022, dir.y * 1.15);
+            vec4 cn1 = texture2D(uNoiseTex, cp);
+            vec4 cn2 = texture2D(uNoiseTex, cp * 2.7 - vec2(uTime * 0.004, 0.0));
+            float band = cn1.r * 0.68 + cn2.g * 0.32;
+            float horizonMask = smoothstep(0.48, 0.01, y) * smoothstep(-0.30, 0.02, y);
+            float cloudAmt = smoothstep(0.36, 0.76, band) * horizonMask;
+            vec3 cloudCol = mix(vec3(0.025, 0.095, 0.23), vec3(0.16, 0.40, 0.78), smoothstep(0.0, 0.38, y));
+            cloudCol += mix(vec3(0.38, 0.74, 1.0), vec3(1.0, 0.25, 0.32), uAnomaly) * exp(-sunAng * 2.2) * 0.42;
+            col = mix(col, cloudCol, clamp(cloudAmt * 0.74, 0.0, 0.74));
           }
 
           // === HIGH STAR FIELD ===
-          // Sparse cold pinpricks above the cloud deck: reinforces the alien altitude.
           if (y > 0.18) {
             vec2 starCell = floor(dir.xz / max(0.004, 0.010 + y * 0.006) * 26.0);
             float star = hash(starCell + 7.1);
@@ -411,6 +456,53 @@ export class GlitchWorld {
       `,
     });
     this.group.add(new THREE.Mesh(skyGeo, this.skyMat));
+
+    // Colossal Precessing Celestial Kernel Astrolabe Rings suspended around the Watching Sky-Eye!
+    this.astrolabeMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      uniforms: {
+        uTime: { value: 0 },
+        uAnomaly: { value: 0 },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec2 vUv;
+        uniform float uTime;
+        uniform float uAnomaly;
+        void main() {
+          // Crisp register tick marks + travelling clockwork arc pulse along torus circumference
+          float ticks = step(0.38, fract(vUv.x * 72.0));
+          float majorTick = step(0.82, fract(vUv.x * 12.0));
+          float arcPulse = 0.55 + 0.45 * sin(vUv.x * 18.8495 - uTime * 1.8);
+          float core = smoothstep(0.5, 0.12, abs(vUv.y - 0.5));
+          vec3 calmCol = mix(vec3(0.32, 0.80, 1.0), vec3(0.88, 0.96, 1.0), majorTick);
+          vec3 panicCol = vec3(1.0, 0.20, 0.32);
+          vec3 col = mix(calmCol, panicCol, uAnomaly * 0.85);
+          float alpha = core * (0.24 + 0.42 * ticks + 0.34 * majorTick) * arcPulse;
+          gl_FragColor = vec4(col, alpha * 0.72);
+        }
+      `,
+    });
+    const astrolabeHub = new THREE.Group();
+    astrolabeHub.position.set(0, 68, -148);
+    const astroRadii = [26, 39, 54];
+    for (let i = 0; i < astroRadii.length; i++) {
+      const ringGeo = new THREE.TorusGeometry(astroRadii[i], 0.34 + i * 0.08, 6, 72);
+      const ringMesh = new THREE.Mesh(ringGeo, this.astrolabeMat);
+      ringMesh.rotation.set(0.35 + i * 0.42, i * 0.6, 0.25 - i * 0.3);
+      astrolabeHub.add(ringMesh);
+      this.astrolabeRings.push(ringMesh);
+    }
+    this.group.add(astrolabeHub);
 
     // Atmospheric directional + hemisphere lighting for 3D structural depth
     const hemi = new THREE.HemisphereLight(0x6ec3ff, 0x001b3a, 1.05);
@@ -445,6 +537,7 @@ export class GlitchWorld {
       uniforms: {
         uConcreteMap: { value: concreteDiff },
         uDispMap: { value: concreteDisp },
+        uNoiseTex: { value: getSharedNoiseTexture() },
         uTime: { value: 0 },
         uAnomaly: { value: 0 },
         uCollapseCenter: { value: this.collapseCenter },
@@ -471,6 +564,7 @@ export class GlitchWorld {
         varying vec2 vUv;
         uniform sampler2D uConcreteMap;
         uniform sampler2D uDispMap;
+        uniform sampler2D uNoiseTex;
         uniform float uTime;
         uniform float uAnomaly;
         uniform vec3 uCollapseCenter;
@@ -479,7 +573,6 @@ export class GlitchWorld {
         uniform float uFogDensity;
 
         void main() {
-          // Hand off the 12.18m patch around the player cleanly to the 3D Voronoi Jigsaw Fracture Mesh!
           if (uCollapseActive > 0.5) {
             float rPatch = length(vWorldPos.xz - uCollapseCenter.xz);
             if (rPatch < 12.18) {
@@ -487,43 +580,41 @@ export class GlitchWorld {
             }
           }
 
-          vec2 tiledUv = vWorldPos.xz * 0.16;
-          vec3 conc = texture2D(uConcreteMap, tiledUv).rgb;
-          vec3 concB = texture2D(uConcreteMap, tiledUv * 3.7 + vec2(0.37, 0.19)).rgb;
-          float disp = texture2D(uDispMap, vWorldPos.xz * 0.11).r;
-          float dispFine = texture2D(uDispMap, vWorldPos.xz * 0.62).r;
+          // Only 3 texture fetches total (down from 7!) using screen-space derivatives for crisp basalt relief!
+          vec3 conc = texture2D(uConcreteMap, vWorldPos.xz * 0.16).rgb;
+          float disp = texture2D(uDispMap, vWorldPos.xz * 0.12).r;
+          vec4 macroN = texture2D(uNoiseTex, vWorldPos.xz * 0.045);
 
-          // --- Surface normal rebuilt from the displacement map: real micro-relief instead of a flat plane.
-          float e = 0.35;
-          float dX = texture2D(uDispMap, (vWorldPos.xz + vec2(e, 0.0)) * 0.11).r
-                   - texture2D(uDispMap, (vWorldPos.xz - vec2(e, 0.0)) * 0.11).r;
-          float dZ = texture2D(uDispMap, (vWorldPos.xz + vec2(0.0, e)) * 0.11).r
-                   - texture2D(uDispMap, (vWorldPos.xz - vec2(0.0, e)) * 0.11).r;
-          vec3 bump = normalize(vec3(-dX * 2.6, 1.0, -dZ * 2.6));
+          float hField = disp * 0.7 + conc.r * 0.3;
+          float dHx = dFdx(hField);
+          float dHy = dFdy(hField);
+          vec3 dPdx = dFdx(vWorldPos);
+          vec3 dPdy = dFdy(vWorldPos);
+          vec3 baseN = normalize(vNormal);
+          vec3 r1 = cross(dPdy, baseN);
+          vec3 r2 = cross(baseN, dPdx);
+          float det = dot(dPdx, r1);
+          vec3 surfGrad = sign(det) * (dHx * r1 + dHy * r2);
+          vec3 nrm = normalize(abs(det) * baseN - surfGrad * 1.45);
 
-          // High-contrast chiaroscuro wet basalt + specular reflection from Eclipsed Sky Corona!
-          vec3 nrm = normalize(mix(normalize(vNormal), bump, 0.65));
           vec3 lightDir = normalize(vec3(0.12, 0.62, -0.78));
           vec3 viewDir = normalize(cameraPosition - vWorldPos);
           vec3 halfDir = normalize(lightDir + viewDir);
           float ndl = clamp(dot(nrm, lightDir), 0.0, 1.0);
           float spec = pow(max(dot(nrm, halfDir), 0.0), 42.0) * (0.35 + 0.65 * conc.r);
 
-          // Standing water / data-puddles: broad noise patches that mirror the sky-eye like wet asphalt.
-          float puddle = smoothstep(0.52, 0.72, dispFine * 0.65 + concB.b * 0.55);
+          float puddle = smoothstep(0.48, 0.72, macroN.r * 0.72 + disp * 0.42);
           vec3 reflDir = reflect(-viewDir, nrm);
-          float eyeSpec = pow(max(dot(reflDir, normalize(vec3(0.0, 0.30, -0.95))), 0.0), 26.0);
+          float eyeSpec = pow(max(dot(reflDir, normalize(vec3(0.0, 0.30, -0.95))), 0.0), 28.0);
 
           vec3 darkObsidian = vec3(0.005, 0.018, 0.068);
           vec3 litStone = mix(vec3(0.0, 0.11, 0.44), vec3(0.55, 0.04, 0.12), uAnomaly * 0.55);
           vec3 baseBlue = mix(darkObsidian, litStone, conc.r * 0.72 + disp * 0.28);
-          // Fine aggregate speckle keeps the stone from reading as flat colour up close.
-          baseBlue += (concB.r - 0.5) * 0.045;
+          baseBlue += (macroN.g - 0.5) * 0.045;
           vec3 col = baseBlue * (0.40 + 0.78 * ndl) + vec3(0.55, 0.88, 1.0) * spec * 0.58;
-          col += mix(vec3(0.18, 0.55, 1.0), vec3(1.0, 0.22, 0.30), uAnomaly * 0.7) * eyeSpec * puddle * 0.85;
+          col += mix(vec3(0.18, 0.55, 1.0), vec3(1.0, 0.22, 0.30), uAnomaly * 0.7) * eyeSpec * puddle * 0.88;
           col = mix(col, baseBlue * 0.55 + vec3(0.02, 0.10, 0.24) * (1.0 - ndl), puddle * 0.42);
 
-          // Crisp architectural memory-sector grid lines (major 4m, minor 1m)
           vec2 fwMajor = max(fwidth(vWorldPos.xz * 0.25), vec2(0.0001));
           vec2 gMajor = abs(fract(vWorldPos.xz * 0.25 - 0.5) - 0.5) / fwMajor;
           float lineMajor = 1.0 - min(min(gMajor.x, gMajor.y), 1.0);
@@ -533,25 +624,23 @@ export class GlitchWorld {
           float lineMinor = 1.0 - min(min(gMinor.x, gMinor.y), 1.0);
 
           float onPath = exp(-(vWorldPos.x * vWorldPos.x) / 11.0) * step(-58.0, vWorldPos.z) * step(vWorldPos.z, 24.0);
+          float spurEastLine = exp(-((vWorldPos.z + 8.0) * (vWorldPos.z + 8.0)) / 3.2) * step(0.0, vWorldPos.x) * step(vWorldPos.x, 19.5);
+          float spurWestLine = exp(-((vWorldPos.z + 28.0) * (vWorldPos.z + 28.0)) / 3.2) * step(-19.5, vWorldPos.x) * step(vWorldPos.x, 0.0);
           float pathPulse = 0.5 + 0.5 * sin(vWorldPos.z * 0.38 + uTime * 3.2);
+          float spurPulse = 0.5 + 0.5 * sin(abs(vWorldPos.x) * 0.55 - uTime * 4.2);
           float railLine = smoothstep(0.12, 0.0, abs(abs(vWorldPos.x) - 2.65)) * step(-55.0, vWorldPos.z) * step(vWorldPos.z, 22.0);
-
-          // Glowing cyan shoreline foam right where stone piers meet the Y = -0.35m Data Sea!
           float shoreGlow = smoothstep(0.32, 0.0, abs(vWorldPos.y - (-0.32)));
 
           vec3 accentGlow = mix(vec3(0.58, 0.88, 1.0), vec3(1.0, 0.28, 0.36), uAnomaly * 0.7);
-          // Slow data pulses travel along the major seams, so the plaza feels alive rather than painted.
           float vein = sin(vWorldPos.z * 0.55 - uTime * 2.4) * 0.5 + 0.5;
           col += accentGlow * lineMajor * (0.38 + onPath * 0.42 * pathPulse + uAnomaly * 0.45) * (0.72 + vein * 0.55);
-          // Concave crevices collect darkness (cheap curvature AO from the height field).
-          float cav = clamp(1.0 - (dX * dX + dZ * dZ) * 22.0, 0.0, 1.0);
-          col *= mix(0.62, 1.0, cav);
+          // Arterial crimson-cyan nerve traces leading out along the East (+18.5,-8) & West (-18.5,-28) Shrine Spurs!
+          col += vec3(0.95, 0.20, 0.36) * (spurEastLine + spurWestLine) * lineMajor * (0.45 + 0.55 * spurPulse);
+          col *= mix(0.76, 1.0, disp);
           col += vec3(0.25, 0.65, 1.0) * lineMinor * 0.12;
           col += accentGlow * railLine * (0.35 + 0.50 * pathPulse);
           col += vec3(0.45, 0.88, 1.0) * shoreGlow * 0.65;
 
-          // --- Aerial perspective: trench mist pools on the basin floor, thinning with altitude,
-          // with warm forward-scatter toward the eclipsed sky-eye. This is what sells the depth.
           float camDist = length(cameraPosition - vWorldPos);
           float heightMist = exp(-max(vWorldPos.y + 1.5, 0.0) * 0.022);
           float airDensity = uFogDensity * (0.72 + heightMist * 1.25);
@@ -614,12 +703,19 @@ export class GlitchWorld {
           vec3 refl = reflect(-viewDir, waveN);
           float sunSpec = pow(max(dot(refl, sunDir), 0.0), 48.0);
 
-          // Hex/grid data currents beneath the dark mirror surface
+          // Hex/grid data currents + deep submerged parallax server-trench abyss beneath the dark mirror waves!
           vec2 cell = fract(vWorldPos.xz * 0.25 + vec2(0.0, uTime * 0.18));
           float stream = smoothstep(0.06, 0.0, abs(cell.x - 0.5)) * (0.4 + 0.6 * sin(vWorldPos.z * 0.2 + uTime * 2.0));
 
-          vec3 abyssCol = vec3(0.002, 0.015, 0.058);
-          vec3 skyReflCol = mix(vec3(0.04, 0.38, 0.92), vec3(0.85, 0.12, 0.22), uAnomaly * 0.65);
+          vec2 subUv = vWorldPos.xz * 0.068 - (viewDir.xz / max(abs(viewDir.y) + 0.20, 0.20)) * 0.36;
+          vec2 subGrid = abs(fract(subUv) - 0.5);
+          float trenchRack = smoothstep(0.055, 0.0, min(subGrid.x, subGrid.y))
+                           * (0.45 + 0.55 * sin(subUv.y * 6.283 + uTime * 1.3));
+          float deepSpore = smoothstep(0.96, 1.0, sin(subUv.x * 12.0 + uTime * 0.7) * cos(subUv.y * 12.0 - uTime * 0.9));
+
+          vec3 abyssCol = vec3(0.002, 0.015, 0.058)
+                        + mix(vec3(0.02, 0.34, 0.78), vec3(0.85, 0.10, 0.24), uAnomaly) * (trenchRack * 0.38 + deepSpore * 0.45) * (1.0 - fresnel * 0.7);
+          vec3 skyReflCol = mix(vec3(0.04, 0.40, 0.94), vec3(0.88, 0.12, 0.24), uAnomaly * 0.65);
           vec3 col = mix(abyssCol, skyReflCol, clamp(fresnel * 0.85 + 0.08, 0.0, 1.0));
           col += vec3(0.75, 0.95, 1.0) * sunSpec * 1.25;
           col += vec3(0.25, 0.72, 1.0) * stream * 0.28;
@@ -677,6 +773,16 @@ export class GlitchWorld {
   public triggerLandingShockwave(): void {
     this.landingShockTimer = 0.0;
     this.landingShockMat.uniforms.uShockT.value = 0.0;
+  }
+
+  public triggerAnomalySurge(strength = 1.0): void {
+    this.anomalyIntensity = Math.max(this.anomalyIntensity, THREE.MathUtils.clamp(strength, 0, 1));
+    this.anomalyTimer = 6.5 + Math.random() * 3.0;
+  }
+
+  public setArrivalSleeveActive(active: boolean): void {
+    if (this.skySleeveMesh) this.skySleeveMesh.visible = active;
+    if (this.skySleeveBackCap) this.skySleeveBackCap.visible = active;
   }
 
   /**
@@ -1041,41 +1147,91 @@ export class GlitchWorld {
     this.group.add(finMesh);
     this.finMat = finMat;
 
-    // D) Colossal 28-Meter Shattered Bedroom PC Monitor Floating in the Sky at (0, 94, 58)!
-    // When emerging from the bedroom monitor, the player tumbles backward out of THIS giant monitor,
-    // looking straight UP at it shrinking into the clouds before rolling over to dive into the Megacity!
+    // D) Colossal Circular Single-Row Parasyte Sky-Maw & Solid 58m Vortex Exit Sleeve at (0, 46, 86)
+    //    Aimed cleanly at (0, 22, -6) (-14.62 deg pitch) so you fly seamlessly out through the physical 3D tooth rim!
     const skyMonGroup = new THREE.Group();
-    skyMonGroup.position.set(0, 94, 58);
-    skyMonGroup.rotation.x = Math.PI * 0.42; // Screen faces downward-and-forward toward the Overlook!
+    skyMonGroup.position.copy(this.skyPortalPos);
+    skyMonGroup.lookAt(0, 22.0, -6.0);
+    this.skyPortalQuat.copy(skyMonGroup.quaternion);
 
-    const bezelMat = new THREE.MeshLambertMaterial({
-      color: 0x050912,
-      emissive: 0x031126,
-      emissiveIntensity: 0.55,
+    // 58m Solid Vortex Sleeve (radius 3.8m deep -> flared 6.4m Parasyte lip right at z=0, ZERO premature wall fade!)
+    const sleeveLen = 58.0;
+    const sleeveGeo = new THREE.CylinderGeometry(5.6, 3.8, sleeveLen, 32, 28, true);
+    sleeveGeo.rotateX(Math.PI * 0.5);
+    sleeveGeo.translate(0, 0, -sleeveLen * 0.5);
+
+    this.skyTunnelMat = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      transparent: false,
+      depthWrite: true,
+      uniforms: {
+        uTime: { value: 0 },
+        uNoiseTex: { value: getSharedNoiseTexture() },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        varying vec3 vLocalPos;
+        varying float vDepth;
+        void main() {
+          vUv = uv;
+          float d = clamp(-position.z / 58.0, 0.0, 1.0);
+          vDepth = d;
+          // Bell-flare organic lip collar right over the final 3.5m (-3.5m .. 0.0m) where the 48 teeth root!
+          float lipFlare = 1.0 + 0.145 * exp(position.z * 0.65);
+          vec3 p = vec3(position.xy * lipFlare, position.z);
+          vLocalPos = p;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec2 vUv;
+        varying vec3 vLocalPos;
+        varying float vDepth;
+        uniform float uTime;
+        uniform sampler2D uNoiseTex;
+        void main() {
+          float safeX = (abs(vLocalPos.x) < 1e-5 && abs(vLocalPos.y) < 1e-5) ? 1e-5 : vLocalPos.x;
+          float angle = atan(vLocalPos.y, safeX);
+          float zScroll = vLocalPos.z * 0.62 + uTime * 48.0;
+          vec4 nSample = texture2D(uNoiseTex, vec2(angle * 0.3183, vLocalPos.z * 0.025 + uTime * 0.18));
+
+          vec2 cell = vec2(angle * 6.366, zScroll);
+          vec2 f = fract(cell);
+          float line = smoothstep(0.075, 0.0, min(f.x, 1.0 - f.x)) + smoothstep(0.06, 0.0, min(f.y, 1.0 - f.y));
+          float helixA = pow(max(0.0, sin(angle * 6.0 + vLocalPos.z * 0.22 + uTime * 17.2)), 8.0);
+          float helixB = pow(max(0.0, cos(angle * 10.0 - vLocalPos.z * 0.16 + uTime * 12.7)), 10.0);
+          float shockRing = smoothstep(0.92, 1.0, fract(vLocalPos.z * 0.09 + uTime * 7.0));
+
+          // Matches BsodScreen's deep sleeveBase palette 1:1, darkening into a fleshy crimson-obsidian gum rim right at z=0!
+          vec3 col = mix(vec3(0.006, 0.12, 0.44), vec3(0.004, 0.065, 0.28), smoothstep(0.08, 0.65, vDepth));
+          col += vec3(0.28, 0.76, 1.0) * line * 0.46;
+          col += vec3(0.32, 0.84, 1.0) * (helixA * 0.55 + helixB * 0.45) * 0.88;
+          col += vec3(0.70, 0.94, 1.0) * shockRing * 0.72;
+
+          // Anatomical dark gum collar at the very mouth lip (z = -2.2m .. 0.0m) anchoring the 48 single-row teeth!
+          float gumLip = smoothstep(0.045, 0.0, vDepth);
+          float socketWave = 0.5 + 0.5 * cos(angle * 48.0);
+          vec3 lipGumCol = mix(vec3(0.16, 0.008, 0.038), vec3(0.015, 0.04, 0.14), socketWave * 0.6);
+          col = mix(col, lipGumCol + nSample.r * 0.02, gumLip * 0.88);
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `,
     });
-    const monW = 28.0;
-    const monH = 15.5;
-    const rimT = 1.35;
-    const rimD = 1.6;
-    const topBar = new THREE.Mesh(new THREE.BoxGeometry(monW + rimT * 2, rimT, rimD), bezelMat);
-    topBar.position.set(0, monH * 0.5 + rimT * 0.5, 0);
-    const botBar = new THREE.Mesh(new THREE.BoxGeometry(monW + rimT * 2, rimT * 1.35, rimD), bezelMat);
-    botBar.position.set(0, -monH * 0.5 - rimT * 0.65, 0);
-    const leftBar = new THREE.Mesh(new THREE.BoxGeometry(rimT, monH, rimD), bezelMat);
-    leftBar.position.set(-monW * 0.5 - rimT * 0.5, 0, 0);
-    const rightBar = new THREE.Mesh(new THREE.BoxGeometry(rimT, monH, rimD), bezelMat);
-    rightBar.position.set(monW * 0.5 + rimT * 0.5, 0, 0);
-    skyMonGroup.add(topBar, botBar, leftBar, rightBar);
+    const sleeveMesh = new THREE.Mesh(sleeveGeo, this.skyTunnelMat);
+    sleeveMesh.frustumCulled = false;
+    skyMonGroup.add(sleeveMesh);
+    this.skySleeveMesh = sleeveMesh;
 
-    // Glowing power LED on the colossal sky-monitor chin!
-    const pwrLed = new THREE.Mesh(
-      new THREE.BoxGeometry(0.9, 0.25, 0.3),
-      new THREE.MeshBasicMaterial({ color: 0x6cd8ff })
+    const backCap = new THREE.Mesh(
+      new THREE.CircleGeometry(4.0, 24),
+      new THREE.MeshBasicMaterial({ color: 0x00081c, side: THREE.DoubleSide })
     );
-    pwrLed.position.set(monW * 0.42, -monH * 0.5 - rimT * 0.65, rimD * 0.52);
-    skyMonGroup.add(pwrLed);
+    backCap.position.z = -sleeveLen - 0.1;
+    skyMonGroup.add(backCap);
+    this.skySleeveBackCap = backCap;
 
-    const riftGeo = new THREE.PlaneGeometry(monW, monH);
+    // Soft Radial Corona + Single-Row Sky Maw Iris right around the 6.4m flared lip!
+    const riftGeo = new THREE.PlaneGeometry(30.0, 30.0);
     this.skyRiftMat = new THREE.ShaderMaterial({
       transparent: true,
       side: THREE.DoubleSide,
@@ -1094,51 +1250,172 @@ export class GlitchWorld {
         varying vec2 vUv;
         uniform float uTime;
         void main() {
-          vec2 d = (vUv - 0.5) * vec2(1.8, 1.0) * 2.0;
-          float ang = atan(d.y, d.x);
-          float jag = 0.11 * sin(ang * 13.0 + uTime * 2.5) + 0.06 * cos(ang * 23.0 - uTime * 4.0);
-          float r = length(d) + jag;
-          // Outer shattered #0078D7 BSOD screen glass with spiderweb cracks + dark abyssal portal center!
-          float hole = smoothstep(0.62, 0.72, r);
-          float rimGlow = smoothstep(0.16, 0.0, abs(r - 0.68));
-          float web = smoothstep(0.025, 0.0, abs(sin(ang * 9.0 + r * 3.0))) * hole;
-          vec3 bsodGlass = vec3(0.0, 0.32, 0.74) + vec3(0.65, 0.92, 1.0) * (rimGlow + web * 0.45);
-          vec3 portalVoid = vec3(0.002, 0.008, 0.035) + vec3(0.55, 0.88, 1.0) * rimGlow;
-          vec3 col = mix(portalVoid, bsodGlass, hole);
-          gl_FragColor = vec4(col, mix(0.88, 0.96, hole));
+          vec2 d = (vUv - 0.5) * 2.0; // -1..+1 over 30m -> r=0.427 is 6.4m flared sleeve lip!
+          float safeX = (abs(d.x) < 1e-5 && abs(d.y) < 1e-5) ? 1e-5 : d.x;
+          float ang = atan(d.y, safeX);
+          float r = length(d);
+          // Completely clear inside the 6.1m mouth opening (r < 0.405), dark solid lip shroud from 0.41..0.58, feathered corona outside!
+          float lipBand = smoothstep(0.395, 0.425, r) * (1.0 - smoothstep(0.54, 0.94, r));
+          if (lipBand < 0.008) discard;
+          float rimGlow = exp(-abs(r - 0.435) * 24.0);
+          vec3 col = mix(vec3(0.025, 0.012, 0.045), vec3(0.28, 0.72, 1.0), rimGlow * 0.85);
+          gl_FragColor = vec4(col, clamp(lipBand * 0.92, 0.0, 0.95));
         }
       `,
     });
     const skyRift = new THREE.Mesh(riftGeo, this.skyRiftMat);
+    skyRift.frustumCulled = false;
     skyMonGroup.add(skyRift);
 
-    // Wreckage: 30 shards of the monitor's shattered glass and bezel hanging in a slow orbit,
-    // catching the light. This is the first thing you look at after being spat out of the screen.
+    // 48 Single-Row 3D Sculpted Parasyte Sky-Maw Teeth rooted cleanly into the flared 6.2m lip (ZERO multi-tier floating rings!)
+    const skyFangCount = 48;
+    const skyFangGeo = new THREE.ConeGeometry(0.40, 2.15, 6, 2);
+    skyFangGeo.translate(0, 1.075, 0);
+    const sfSeed = new Float32Array(skyFangCount * 4);
+    for (let i = 0; i < skyFangCount; i++) {
+      sfSeed[i * 4 + 0] = (i / skyFangCount) * Math.PI * 2;
+      sfSeed[i * 4 + 1] = 0.0;
+      sfSeed[i * 4 + 2] = 0.74 + ((i * 0.618034) % 1) * 0.55;
+      sfSeed[i * 4 + 3] = (i * 2.39996) % (Math.PI * 2);
+    }
+    skyFangGeo.setAttribute('aSkyFang4', new THREE.InstancedBufferAttribute(sfSeed, 4));
+
+    this.skyFangMat = new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
+      uniforms: {
+        uTime: { value: 0 },
+      },
+      vertexShader: /* glsl */ `
+        attribute vec4 aSkyFang4;
+        uniform float uTime;
+        varying float vTip;
+        varying vec3 vNrm;
+        varying vec3 vViewPos;
+        void main() {
+          float ang = aSkyFang4.x;
+          float lenSc = aSkyFang4.z;
+          float phase = aSkyFang4.w;
+
+          // Hinged wide open around the 6.25m flared lip so the Sky-Maw holds gaping open without pakupaku flapping!
+          float chomp = sin(uTime * 1.1 + phase * 0.25) * 0.02;
+          float rad = 6.22;
+          vec2 dir = vec2(cos(ang), sin(ang));
+          vec2 tang = vec2(-dir.y, dir.x);
+          vec3 fangAxis = normalize(vec3(-dir * (0.58 + chomp), 0.76));
+          vec3 sideAxis = vec3(tang, 0.0);
+          vec3 hookAxis = normalize(cross(sideAxis, fangAxis));
+
+          vec3 root = vec3(dir * rad, -0.22);
+          float w = 0.96;
+          vec3 lp = root + sideAxis * (position.x * w) + fangAxis * (position.y * lenSc) + hookAxis * (position.z * w * 0.68);
+          vec3 ln = normalize(sideAxis * normal.x + fangAxis * normal.y + hookAxis * normal.z);
+
+          vec4 mv = modelViewMatrix * vec4(lp, 1.0);
+          vViewPos = -mv.xyz;
+          vNrm = normalize(normalMatrix * ln);
+          vTip = clamp(position.y / 2.15, 0.0, 1.0);
+          gl_Position = projectionMatrix * mv;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying float vTip;
+        varying vec3 vNrm;
+        varying vec3 vViewPos;
+        void main() {
+          vec3 N = normalize(vNrm);
+          vec3 V = normalize(vViewPos);
+          vec3 L = normalize(vec3(0.2, 0.6, 0.78));
+          vec3 H = normalize(L + V);
+          float diff = 0.28 + 0.72 * max(dot(N, L), 0.0);
+          float spec = pow(max(dot(N, H), 0.0), 48.0);
+          float rim = pow(1.0 - abs(dot(N, V)), 2.4);
+          vec3 col = mix(vec3(0.18, 0.015, 0.055), vec3(0.88, 0.86, 0.80), smoothstep(0.0, 0.32, vTip));
+          col = mix(col, vec3(0.96, 0.98, 1.0), smoothstep(0.35, 0.92, vTip));
+          col = col * diff + vec3(0.95, 0.99, 1.0) * spec * 1.2 + vec3(0.32, 0.82, 1.0) * rim * 0.55;
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `,
+    });
+    const skyFangs = new THREE.InstancedMesh(skyFangGeo, this.skyFangMat, skyFangCount);
+    skyFangs.frustumCulled = false;
+    skyMonGroup.add(skyFangs);
+
+    // 140 Continuous Outward-Streaming Hyperspace Speed-Lines & Mist Filaments (-48m inside sleeve -> +42m in open sky!)
+    // Bridges the tunnel-to-sky transition so speed filaments fly right out into the 3D world around the player!
+    const exitLineCount = 140;
+    const exitLineGeo = new THREE.BoxGeometry(0.045, 0.045, 1.0);
+    const eSeed = new Float32Array(exitLineCount * 4);
+    for (let i = 0; i < exitLineCount; i++) {
+      eSeed[i * 4 + 0] = (i / exitLineCount) * Math.PI * 2 + (i % 5) * 0.11;
+      eSeed[i * 4 + 1] = 1.65 + ((i * 0.381966) % 1) * 4.8; // radius 1.65m..6.45m (clear center corridor!)
+      eSeed[i * 4 + 2] = (i * 0.618034) % 1;
+      eSeed[i * 4 + 3] = 0.65 + ((i * 0.271828) % 1) * 1.35;
+    }
+    exitLineGeo.setAttribute('aExitSeed', new THREE.InstancedBufferAttribute(eSeed, 4));
+    this.skyExitStreamMat = new THREE.ShaderMaterial({
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      uniforms: {
+        uTime: { value: 0 },
+      },
+      vertexShader: /* glsl */ `
+        attribute vec4 aExitSeed;
+        uniform float uTime;
+        varying float vAlpha;
+        void main() {
+          float zMin = -48.0;
+          float zSpan = 90.0; // -48m inside sleeve -> +42m out in open sky!
+          float spd = 28.0 + aExitSeed.w * 22.0;
+          float z = zMin + mod(aExitSeed.z * zSpan + uTime * spd, zSpan);
+          float tSpan = (z - zMin) / zSpan;
+          // Flare gently outward after crossing Z=0 into open sky!
+          float skyFlare = 1.0 + max(0.0, z) * 0.032;
+          float swirl = aExitSeed.x + z * 0.018 + uTime * 0.45;
+          float r = aExitSeed.y * skyFlare;
+          float len = (3.8 + aExitSeed.w * 5.2);
+          vec3 lp = vec3(position.x, position.y, position.z * len);
+          vAlpha = smoothstep(0.0, 0.12, tSpan) * (1.0 - smoothstep(0.62, 1.0, tSpan)) * (0.42 + 0.45 * fract(aExitSeed.w * 5.7));
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(cos(swirl) * r + lp.x, sin(swirl) * r + lp.y, z + lp.z, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying float vAlpha;
+        void main() {
+          gl_FragColor = vec4(0.62, 0.92, 1.0, vAlpha);
+        }
+      `,
+    });
+    const skyExitStreams = new THREE.InstancedMesh(exitLineGeo, this.skyExitStreamMat, exitLineCount);
+    skyExitStreams.frustumCulled = false;
+    skyMonGroup.add(skyExitStreams);
+
+    // Outward-blown crystalline glass wreckage orbiting wide around the open flight corridor
     this.skyDebris = new THREE.Group();
-    const debrisGeo = new THREE.CylinderGeometry(1, 1, 0.12, 3, 1);
+    const debrisGeo = new THREE.CylinderGeometry(1, 1, 0.10, 3, 1);
     debrisGeo.rotateX(Math.PI * 0.5);
     const debrisMat = new THREE.MeshBasicMaterial({
-      color: 0x9ad8ff,
+      color: 0xa6e2ff,
       transparent: true,
-      opacity: 0.42,
+      opacity: 0.56,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       side: THREE.DoubleSide,
     });
-    const debris = new THREE.InstancedMesh(debrisGeo, debrisMat, 30);
+    const debris = new THREE.InstancedMesh(debrisGeo, debrisMat, 36);
     debris.frustumCulled = false;
     const dbDummy = new THREE.Object3D();
-    for (let i = 0; i < 30; i++) {
-      const ang = (i / 30) * Math.PI * 2 + Math.random() * 0.3;
-      const rad = 17 + Math.random() * 13;
+    for (let i = 0; i < 36; i++) {
+      const ang = (i / 36) * Math.PI * 2 + (i % 3) * 0.14;
+      const rad = 6.2 + (i % 6) * 1.75;
       dbDummy.position.set(
         Math.cos(ang) * rad,
-        Math.sin(ang) * rad * 0.62,
-        (Math.random() - 0.5) * 12
+        Math.sin(ang) * rad,
+        1.5 + (i % 7) * 3.1
       );
-      dbDummy.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
-      const sc = 0.7 + Math.random() * 3.4;
-      dbDummy.scale.set(sc, sc, sc);
+      dbDummy.rotation.set(i * 0.7, i * 1.1, i * 0.5);
+      const sc = 0.65 + (i % 4) * 0.65;
+      dbDummy.scale.set(sc, sc * 0.7, sc);
       dbDummy.updateMatrix();
       debris.setMatrixAt(i, dbDummy.matrix);
     }
@@ -1148,14 +1425,10 @@ export class GlitchWorld {
 
     this.group.add(skyMonGroup);
 
-    // Two point lights give the GLB props (Cray, racks, CRTs) real falloff instead of flat lambert.
-    const coreLamp = new THREE.PointLight(0x3aa8ff, 26, 46, 2.0);
-    coreLamp.position.set(this.corePosition.x, this.corePosition.y + 9.0, this.corePosition.z);
+    // Single focused Sanctuary point light (cuts PointLight shader loop in half while hemi+2 DirLights sculpt causeway!)
+    const coreLamp = new THREE.PointLight(0x3aa8ff, 30, 56, 2.0);
+    coreLamp.position.set(this.corePosition.x, this.corePosition.y + 9.5, this.corePosition.z);
     this.group.add(coreLamp);
-
-    const causewayLamp = new THREE.PointLight(0x1e6bff, 12, 34, 2.0);
-    causewayLamp.position.set(0, 7.0, 4.0);
-    this.group.add(causewayLamp);
   }
 
   /**
@@ -1252,10 +1525,7 @@ export class GlitchWorld {
 
     // 1. Cathedral Rib-Arches & Angled Abyssal Blade Monoliths (56 instances, 1 draw call!)
     const ribCount = 56;
-    // Ribs are authored as a tapered, chamfered column rather than a plain box: eight radial
-    // segments with a per-vertex chamfer profile gives every arch a modelled silhouette with
-    // readable fluting and an actual keel edge instead of a billboard-with-bevel look.
-    const ribGeo = this.makeChamferedColumnGeometry(0.5, 0.5, 8);
+    const ribGeo = this.makeChamferedColumnGeometry(8, 0.45, 8);
     const ribPhase = new Float32Array(ribCount);
     this.cathedralMat = new THREE.ShaderMaterial({
       uniforms: {
@@ -1556,9 +1826,10 @@ export class GlitchWorld {
     errorMesh.instanceMatrix.needsUpdate = true;
     this.group.add(errorMesh);
 
-    // 4. Colossal 140m Articulated Biomechanical Sky-Leviathan (88 Vertebrae, 100% GPU Vertex-Animated!)
+    // 4. Colossal 140m Articulated Biomechanical Sky-Leviathan (88 Chamfered Armor Vertebrae, 100% GPU Vertex-Animated!)
     const segCount = 88;
-    const segGeo = new THREE.OctahedronGeometry(1.0, 0);
+    const segGeo = this.makeChamferedColumnGeometry(6, 0.38, 2);
+    segGeo.rotateX(Math.PI * 0.5);
     const segAttr = new Float32Array(segCount);
     for (let i = 0; i < segCount; i++) segAttr[i] = i / (segCount - 1);
     segGeo.setAttribute('aSeg', new THREE.InstancedBufferAttribute(segAttr, 1));
@@ -1726,10 +1997,15 @@ export class GlitchWorld {
           vec3 viewDir = normalize(cameraPosition - vWorldPos);
           float fres = pow(abs(dot(normalize(vNormalW), viewDir)), 1.5);
           float rise = 0.65 + 0.35 * sin(vWorldPos.y * 0.45 - uTime * 7.5);
-          float pulseBand = smoothstep(0.88, 1.0, fract(vWorldPos.y * 0.04 - uTime * 0.85));
-          float topFade = smoothstep(160.0, 20.0, vWorldPos.y);
-          float alpha = fres * topFade * (0.26 + 0.22 * pulseBand + uAnomaly * 0.25) * rise;
-          gl_FragColor = vec4(0.68, 0.92, 1.0, alpha);
+          float pulseBand = smoothstep(0.86, 1.0, fract(vWorldPos.y * 0.045 - uTime * 0.85));
+          // Twin counter-rotating helical memory ribbons ascending 160m into the heavens!
+          float ang = vUv.x * 6.283185;
+          float helix1 = pow(0.5 + 0.5 * sin(ang * 2.0 + vWorldPos.y * 0.14 - uTime * 3.4), 7.0);
+          float helix2 = pow(0.5 + 0.5 * sin(-ang * 2.0 + vWorldPos.y * 0.11 - uTime * 2.6), 7.0);
+          float topFade = smoothstep(160.0, 18.0, vWorldPos.y);
+          float alpha = fres * topFade * (0.24 + 0.24 * pulseBand + 0.38 * (helix1 + helix2) + uAnomaly * 0.28) * rise;
+          vec3 col = mix(vec3(0.62, 0.92, 1.0), vec3(1.0, 0.24, 0.36), uAnomaly * 0.75);
+          gl_FragColor = vec4(col, alpha);
         }
       `,
     });
@@ -1779,42 +2055,56 @@ export class GlitchWorld {
     addInstancedGltf(sanctuary, rackTemplate, sanctRackMats);
     addInstancedGltf(sanctuary, cablesTemplate, sanctCableMats);
 
-    // === THE WORLD SECRET: "WAKE_UP" FLOATING GLYPH MONOLITHS ===
-    // Scattered in 3D space from afar; magnetically lock into crisp "WAKE_UP" when player explores to the core!
+    // === THE WORLD SECRET: "WAKE_UP" 3D OBSIDIAN & CRYSTAL STELE MONOLITHS ===
     const chars = ['W', 'A', 'K', 'E', '_', 'U', 'P'];
-    const spacing = 1.42;
+    const spacing = 1.44;
     const startX = -((chars.length - 1) * spacing) * 0.5;
+    const steleBackingMat = new THREE.MeshLambertMaterial({
+      color: 0x050e22,
+      emissive: 0x062858,
+      emissiveIntensity: 0.75,
+    });
 
     for (let i = 0; i < chars.length; i++) {
       const chCanvas = document.createElement('canvas');
       chCanvas.width = 256;
       chCanvas.height = 320;
       const cctx = chCanvas.getContext('2d')!;
-      cctx.fillStyle = 'rgba(0, 72, 156, 0.88)';
-      cctx.fillRect(10, 10, 236, 300);
-      cctx.strokeStyle = '#ffffff';
-      cctx.lineWidth = 6;
+      cctx.fillStyle = '#031d44';
+      cctx.fillRect(0, 0, 256, 320);
+      cctx.strokeStyle = '#6ec8ff';
+      cctx.lineWidth = 8;
       cctx.strokeRect(10, 10, 236, 300);
+      cctx.strokeStyle = 'rgba(255,255,255,0.45)';
+      cctx.lineWidth = 2;
+      cctx.strokeRect(22, 22, 212, 276);
+
+      cctx.fillStyle = '#7acbff';
+      cctx.font = '18px Consolas, monospace';
+      cctx.textAlign = 'center';
+      cctx.fillText(`0x0${i + 1}`, 128, 44);
 
       cctx.fillStyle = '#ffffff';
-      cctx.font = 'bold 195px Consolas, "Segoe UI", monospace';
-      cctx.textAlign = 'center';
+      cctx.font = 'bold 186px Consolas, "Segoe UI", monospace';
       cctx.textBaseline = 'middle';
-      cctx.shadowColor = '#7fd0ff';
-      cctx.shadowBlur = 18;
-      cctx.fillText(chars[i], 128, 164);
+      cctx.shadowColor = '#66c8ff';
+      cctx.shadowBlur = 22;
+      cctx.fillText(chars[i], 128, 172);
 
       const tex = new THREE.CanvasTexture(chCanvas);
       tex.colorSpace = THREE.SRGBColorSpace;
+      tex.minFilter = THREE.LinearFilter;
+      tex.generateMipmaps = false;
 
-      const plate = new THREE.Mesh(
-        new THREE.PlaneGeometry(1.22, 1.52),
-        new THREE.MeshBasicMaterial({
-          map: tex,
-          side: THREE.DoubleSide,
-          transparent: true,
-        })
-      );
+      // Sculpted 3D obsidian tablet with front & back illuminated crystal glyph face
+      const steleBody = new THREE.Mesh(new THREE.BoxGeometry(1.26, 1.58, 0.18), steleBackingMat);
+      const faceMat = new THREE.MeshBasicMaterial({ map: tex });
+      const frontFace = new THREE.Mesh(new THREE.PlaneGeometry(1.18, 1.48), faceMat);
+      frontFace.position.z = 0.095;
+      const backFace = new THREE.Mesh(new THREE.PlaneGeometry(1.18, 1.48), faceMat);
+      backFace.rotation.y = Math.PI;
+      backFace.position.z = -0.095;
+      steleBody.add(frontFace, backFace);
 
       const alignedPos = new THREE.Vector3(startX + i * spacing, 7.55, 1.8);
       const scatteredPos = new THREE.Vector3(
@@ -1828,52 +2118,66 @@ export class GlitchWorld {
         Math.sin(i * 1.7) * 0.48
       );
 
-      plate.position.copy(scatteredPos);
-      plate.rotation.copy(scatteredRot);
-      sanctuary.add(plate);
+      steleBody.position.copy(scatteredPos);
+      steleBody.rotation.copy(scatteredRot);
+      sanctuary.add(steleBody);
 
       this.wakePlates.push({
-        mesh: plate,
+        mesh: steleBody,
         alignedPos,
         scatteredPos,
         scatteredRot,
       });
     }
 
-    // Eye-level Core Terminal Inscription Plaque right at the front of the Cray-1 Core
+    // Sculpted Brutalist Lectern Pedestal + Core Terminal Inscription Plaque at front of Cray-1 Core
+    const lecternPedestal = new THREE.Mesh(
+      this.makeChamferedColumnGeometry(8, 0.38, 4),
+      steleBackingMat
+    );
+    lecternPedestal.position.set(0, 1.0, 3.74);
+    lecternPedestal.scale.set(1.15, 2.0, 0.72);
+    sanctuary.add(lecternPedestal);
+
+    const plaqueBezel = new THREE.Mesh(new THREE.BoxGeometry(2.64, 1.06, 0.12), steleBackingMat);
+    plaqueBezel.position.set(0, 2.05, 3.59);
+    plaqueBezel.rotation.x = -0.22;
+    sanctuary.add(plaqueBezel);
+
     const plaqueCanvas = document.createElement('canvas');
     plaqueCanvas.width = 1024;
     plaqueCanvas.height = 384;
     const pctx = plaqueCanvas.getContext('2d')!;
-    pctx.fillStyle = '#001e42';
+    pctx.fillStyle = '#001836';
     pctx.fillRect(0, 0, 1024, 384);
     pctx.strokeStyle = '#6ec4ff';
     pctx.lineWidth = 6;
     pctx.strokeRect(8, 8, 1008, 368);
 
     pctx.fillStyle = '#82cdff';
-    pctx.font = '26px Consolas, monospace';
-    pctx.fillText('KERNEL_CORE_REGISTER // 0x0078D7 [RESTRICTED MEMORY]', 48, 68);
+    pctx.font = '25px Consolas, monospace';
+    pctx.fillText('KERNEL_CORE_REGISTER // 0x0078D7 [HOST_SESSION: 02:47]', 44, 66);
 
     pctx.fillStyle = '#ffffff';
-    pctx.font = 'bold 58px Consolas, monospace';
-    pctx.fillText('EMERGENCY INTERRUPT : WAKE_UP', 48, 168);
+    pctx.font = 'bold 54px Consolas, monospace';
+    pctx.fillText('EMERGENCY INTERRUPT : WAKE_UP', 44, 166);
 
     pctx.fillStyle = '#d4ecff';
-    pctx.font = '29px "Segoe UI", "Yu Gothic UI", sans-serif';
-    pctx.fillText('意識ダンプを強制終了するには、[ C ] キーでコンソールを開き', 48, 256);
-    pctx.fillText('上記の割り込みコマンドを実行してください。', 48, 304);
+    pctx.font = '28px "Segoe UI", "Yu Gothic UI", sans-serif';
+    pctx.fillText('[ C ] でカーネルコンソールを開き WAKE_UP を実行せよ。', 44, 254);
+    pctx.fillText('※ 意識が完全にダンプ固定される前に強制割り込みをかけろ', 44, 304);
 
     const plaqueTex = new THREE.CanvasTexture(plaqueCanvas);
     plaqueTex.colorSpace = THREE.SRGBColorSpace;
+
     this.corePlaqueMat = new THREE.MeshBasicMaterial({
       map: plaqueTex,
       transparent: true,
-      opacity: 0.15,
+      opacity: 0.35,
     });
     const plaque = new THREE.Mesh(new THREE.PlaneGeometry(2.5, 0.94), this.corePlaqueMat);
-    plaque.position.set(0, 2.05, 3.65);
-    plaque.rotation.x = -0.14;
+    plaque.position.set(0, 2.05, 3.66);
+    plaque.rotation.x = -0.22;
     sanctuary.add(plaque);
 
     this.group.add(sanctuary);
@@ -2067,17 +2371,17 @@ export class GlitchWorld {
     this.createDiegeticLogSign(
       new THREE.Vector3(-2.8, this.getTerrainHeight(-2.8, 9) + 1.45, 9),
       0.38,
-      'DUMP_SECTOR_01 // ARRIVAL',
-      'ここはクラッシュダンプの深層領域です。',
-      '中心部の巨大演算核（CORE）に脱出の割り込みコードが記録されています。'
+      'MEMORY_0247.DMP // 意識隔離領域',
+      'あなたの身体はまだ部屋の椅子に座ったまま、顎に咥えられています。',
+      '中央核から伸びる「3本の紅い神経動脈」を辿り、楔をすべて引き抜け。'
     );
 
     this.createDiegeticLogSign(
       new THREE.Vector3(3.1, this.getTerrainHeight(3.1, -18) + 1.45, -18),
       -0.38,
-      'DUMP_SECTOR_02 // SHELL_ACCESS',
-      '[ C ] キーでカーネル回復コンソールを起動できます。',
-      'ただし正しい命令語を知らなければ、この世界からは抜け出せません。'
+      'OPTIC_HAZARD // 天球の紅い凝視',
+      '空の瞳が紅く脈動している間、その瞳を直視してはならない。',
+      '視線を伏せるか肋骨アーチの影に隠れ、[ C ] コンソールで封印状態を確認せよ。'
     );
   }
 
@@ -2092,49 +2396,76 @@ export class GlitchWorld {
     c.width = 768;
     c.height = 280;
     const ctx = c.getContext('2d')!;
-    ctx.fillStyle = 'rgba(0, 32, 72, 0.88)';
+    ctx.fillStyle = 'rgba(2, 22, 54, 0.94)';
     ctx.fillRect(0, 0, 768, 280);
-    ctx.strokeStyle = 'rgba(130, 205, 255, 0.85)';
+    ctx.fillStyle = 'rgba(24, 118, 220, 0.28)';
+    ctx.fillRect(10, 10, 748, 56);
+    ctx.strokeStyle = 'rgba(130, 212, 255, 0.92)';
     ctx.lineWidth = 4;
-    ctx.strokeRect(6, 6, 756, 268);
+    ctx.strokeRect(8, 8, 752, 264);
 
-    ctx.fillStyle = '#7ac8ff';
-    ctx.font = '22px Consolas, monospace';
-    ctx.fillText(header, 34, 58);
+    ctx.fillStyle = '#8ad4ff';
+    ctx.font = 'bold 22px Consolas, monospace';
+    ctx.fillText(header, 32, 46);
 
     ctx.fillStyle = '#ffffff';
-    ctx.font = '25px "Segoe UI", "Yu Gothic UI", sans-serif';
-    ctx.fillText(line1, 34, 138);
-    ctx.fillText(line2, 34, 190);
+    ctx.font = '24px "Segoe UI", "Yu Gothic UI", sans-serif';
+    ctx.fillText(line1, 32, 136);
+    ctx.fillText(line2, 32, 188);
+
+    ctx.fillStyle = 'rgba(122, 200, 255, 0.65)';
+    ctx.font = '16px Consolas, monospace';
+    ctx.fillText('STATUS: DIAGNOSTIC_TERMINAL_ONLINE // [0x0078D7]', 32, 246);
 
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
-    const sign = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.95, 0.72),
-      new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide, transparent: true })
-    );
-    sign.position.copy(pos);
-    sign.rotation.y = rotY;
-    this.group.add(sign);
 
-    // Thin stand post
-    const post = new THREE.Mesh(
-      new THREE.BoxGeometry(0.05, 1.5, 0.05),
-      new THREE.MeshBasicMaterial({ color: 0x5ab2ff })
+    // Sculpted Brutalist Obsidian Diagnostic Lectern (replaces thin 5cm stick post!)
+    const consoleGroup = new THREE.Group();
+    consoleGroup.position.set(pos.x, pos.y - 1.45, pos.z);
+    consoleGroup.rotation.y = rotY;
+
+    const obsidianMat = new THREE.MeshLambertMaterial({
+      color: 0x050e22,
+      emissive: 0x041d42,
+      emissiveIntensity: 0.65,
+    });
+    const trimMat = new THREE.MeshBasicMaterial({ color: 0x5cc2ff });
+
+    const plinth = new THREE.Mesh(this.makeChamferedColumnGeometry(8, 0.35, 2), obsidianMat);
+    plinth.position.set(0, 0.68, -0.08);
+    plinth.scale.set(0.88, 1.36, 0.56);
+    consoleGroup.add(plinth);
+
+    const baseGlow = new THREE.Mesh(new THREE.BoxGeometry(1.04, 0.05, 0.72), trimMat);
+    baseGlow.position.set(0, 0.03, -0.08);
+    consoleGroup.add(baseGlow);
+
+    const hood = new THREE.Mesh(new THREE.BoxGeometry(2.08, 0.84, 0.14), obsidianMat);
+    hood.position.set(0, 1.42, 0.02);
+    hood.rotation.x = -0.24;
+    consoleGroup.add(hood);
+
+    const sign = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.94, 0.71),
+      new THREE.MeshBasicMaterial({ map: tex })
     );
-    post.position.copy(pos).setY(pos.y - 0.75);
-    this.group.add(post);
+    sign.position.set(0, 1.42, 0.095);
+    sign.rotation.x = -0.24;
+    consoleGroup.add(sign);
+
+    this.group.add(consoleGroup);
   }
 
   private buildFloatingAtmosphere(): void {
-    // 1. Instanced Floating Corrupted BSOD UI Shards (1 draw call for 180 shards!)
+    // 1. 100% GPU-Animated Floating Corrupted BSOD UI Shards (0.0ms CPU per frame!)
     const shardCanvas = document.createElement('canvas');
     shardCanvas.width = 256;
     shardCanvas.height = 128;
     const ctx = shardCanvas.getContext('2d')!;
-    ctx.fillStyle = 'rgba(0, 120, 215, 0.82)';
+    ctx.fillStyle = 'rgba(0, 108, 204, 0.86)';
     ctx.fillRect(0, 0, 256, 128);
-    ctx.strokeStyle = '#ffffff';
+    ctx.strokeStyle = '#d8f2ff';
     ctx.lineWidth = 4;
     ctx.strokeRect(4, 4, 248, 120);
     ctx.fillStyle = '#ffffff';
@@ -2147,34 +2478,77 @@ export class GlitchWorld {
     shardTex.colorSpace = THREE.SRGBColorSpace;
 
     const shardGeo = new THREE.PlaneGeometry(1.4, 0.7);
-    const shardMat = new THREE.MeshBasicMaterial({
-      map: shardTex,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.82,
-    });
-    this.floatingShards = new THREE.InstancedMesh(shardGeo, shardMat, FLOATING_SHARD_COUNT);
-
+    const aBase = new Float32Array(FLOATING_SHARD_COUNT * 4);
+    const aSpin = new Float32Array(FLOATING_SHARD_COUNT * 4);
     for (let i = 0; i < FLOATING_SHARD_COUNT; i++) {
       const x = (Math.random() - 0.5) * 96;
       const z = -75 + Math.random() * 105;
       const y = this.getTerrainHeight(x, z) + 2.2 + Math.random() * 18.0;
-      this.shardStates.push({
-        basePos: new THREE.Vector3(x, y, z),
-        rot: new THREE.Euler(Math.random() * 3, Math.random() * 3, Math.random() * 0.6),
-        rotVel: new THREE.Vector3(
-          (Math.random() - 0.5) * 0.25,
-          (Math.random() - 0.5) * 0.35,
-          (Math.random() - 0.5) * 0.15
-        ),
-        scale: new THREE.Vector3(0.5 + Math.random() * 1.7, 0.5 + Math.random() * 1.5, 1),
-        bobPhase: Math.random() * Math.PI * 2,
-      });
+      aBase[i * 4 + 0] = x;
+      aBase[i * 4 + 1] = y;
+      aBase[i * 4 + 2] = z;
+      aBase[i * 4 + 3] = 0.55 + Math.random() * 1.45; // scale
+
+      aSpin[i * 4 + 0] = (Math.random() - 0.5) * 0.35;
+      aSpin[i * 4 + 1] = (Math.random() - 0.5) * 0.45;
+      aSpin[i * 4 + 2] = Math.random() * Math.PI * 2;
+      aSpin[i * 4 + 3] = (i % 3) - 1;
     }
+    shardGeo.setAttribute('aBase', new THREE.InstancedBufferAttribute(aBase, 4));
+    shardGeo.setAttribute('aSpin', new THREE.InstancedBufferAttribute(aSpin, 4));
+
+    this.floatingShardMat = new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
+      transparent: true,
+      depthWrite: false,
+      uniforms: {
+        uTex: { value: shardTex },
+        uTime: { value: 0 },
+        uAnomaly: { value: 0 },
+      },
+      vertexShader: /* glsl */ `
+        attribute vec4 aBase;
+        attribute vec4 aSpin;
+        uniform float uTime;
+        uniform float uAnomaly;
+        varying vec2 vUv;
+        varying float vDist;
+        void main() {
+          vUv = uv;
+          float ay = aSpin.z + uTime * aSpin.y;
+          float ax = aSpin.z * 0.7 + uTime * aSpin.x;
+          float cy = cos(ay), sy = sin(ay);
+          float cx = cos(ax), sx = sin(ax);
+          vec3 p = position * aBase.w;
+          vec3 p1 = vec3(p.x, p.y * cx - p.z * sx, p.y * sx + p.z * cx);
+          vec3 p2 = vec3(p1.x * cy + p1.z * sy, p1.y, -p1.x * sy + p1.z * cy);
+
+          float jump = step(0.5, uAnomaly) * sin(uTime * 55.0) * 0.35 * aSpin.w;
+          vec3 worldP = aBase.xyz + vec3(jump, sin(uTime * 0.9 + aSpin.z) * 0.45, 0.0) + p2;
+          vec4 mv = viewMatrix * vec4(worldP, 1.0);
+          vDist = -mv.z;
+          gl_Position = projectionMatrix * mv;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec2 vUv;
+        varying float vDist;
+        uniform sampler2D uTex;
+        uniform float uAnomaly;
+        void main() {
+          vec4 tex = texture2D(uTex, vUv);
+          vec3 col = mix(tex.rgb, vec3(1.0, 0.25, 0.34), uAnomaly * 0.45);
+          float fade = smoothstep(145.0, 35.0, vDist);
+          gl_FragColor = vec4(col, tex.a * 0.82 * fade);
+        }
+      `,
+    });
+    this.floatingShards = new THREE.InstancedMesh(shardGeo, this.floatingShardMat, FLOATING_SHARD_COUNT);
+    this.floatingShards.frustumCulled = false;
     this.group.add(this.floatingShards);
 
     // 2. Reverse-Snow Rising Digital Pixel Motes (1 draw call!)
-    const pCount = 1200;
+    const pCount = 800;
     const positions = new Float32Array(pCount * 3);
     const phases = new Float32Array(pCount);
     for (let i = 0; i < pCount; i++) {
@@ -2282,7 +2656,7 @@ export class GlitchWorld {
    * Total added cost: 6 draw calls, zero per-frame allocation.
    */
   private buildAtmosphericDepth(): void {
-    // ---------------------------------------------------------------- 1. TRENCH MIST VOLUMES
+    // ---------------------------------------------------------------- 1. TRENCH MIST VOLUMES (Fast uNoiseTex!)
     this.mistMat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
@@ -2290,6 +2664,7 @@ export class GlitchWorld {
       uniforms: {
         uTime: { value: 0 },
         uAnomaly: { value: 0 },
+        uNoiseTex: { value: getSharedNoiseTexture() },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -2297,8 +2672,6 @@ export class GlitchWorld {
         varying float vFade;
         void main() {
           vUv = uv;
-          // Cylindrical billboard: mist sheets always face the camera but stay vertical, so they
-          // stack into believable volumetric banks instead of turning into a flat card.
           vec3 center = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
           float sx = length(instanceMatrix[0].xyz);
           float sy = length(instanceMatrix[1].xyz);
@@ -2308,7 +2681,7 @@ export class GlitchWorld {
           vec3 wp = center + right * (position.x * sx) + vec3(0.0, position.y * sy, 0.0);
           vWorldPos = wp;
           float dist = length(cameraPosition - wp);
-          vFade = smoothstep(1.5, 9.0, length(cameraPosition.xz - center.xz)) * smoothstep(320.0, 60.0, dist);
+          vFade = smoothstep(2.0, 10.5, length(cameraPosition.xz - center.xz)) * smoothstep(320.0, 60.0, dist);
           gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
         }
       `,
@@ -2318,48 +2691,27 @@ export class GlitchWorld {
         varying float vFade;
         uniform float uTime;
         uniform float uAnomaly;
-
-        float hash21(vec2 p) {
-          p = fract(p * vec2(127.1, 311.7));
-          p += dot(p, p + 34.23);
-          return fract(p.x * p.y);
-        }
-        float vnoise(vec2 p) {
-          vec2 i = floor(p);
-          vec2 f = fract(p);
-          vec2 u = f * f * (3.0 - 2.0 * f);
-          return mix(mix(hash21(i), hash21(i + vec2(1.0, 0.0)), u.x),
-                     mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), u.x), u.y);
-        }
-        float fbm(vec2 p) {
-          float v = 0.0;
-          float a = 0.5;
-          for (int i = 0; i < 4; i++) {
-            v += a * vnoise(p);
-            p *= 2.03;
-            a *= 0.5;
-          }
-          return v;
-        }
+        uniform sampler2D uNoiseTex;
 
         void main() {
-          vec2 p = vUv * vec2(2.4, 1.4) + vec2(uTime * 0.012, uTime * 0.006);
-          float n = fbm(p) * 0.78 + vnoise(p * 2.7 - uTime * 0.01) * 0.22;
-          // Soft round card edges so no rectangle silhouette ever shows.
-          float edge = smoothstep(0.0, 0.34, vUv.x) * smoothstep(1.0, 0.66, vUv.x)
-                     * smoothstep(0.0, 0.30, vUv.y) * smoothstep(1.0, 0.55, vUv.y);
-          float body = smoothstep(0.34, 0.86, n) * edge * vFade;
+          vec2 p = vUv * vec2(0.85, 0.55) + vec2(uTime * 0.006, uTime * 0.003);
+          float n1 = texture2D(uNoiseTex, p).r;
+          float n2 = texture2D(uNoiseTex, p * 2.3 - vec2(uTime * 0.005, 0.0)).g;
+          float n = n1 * 0.72 + n2 * 0.28;
+          float edge = smoothstep(0.0, 0.36, vUv.x) * smoothstep(1.0, 0.64, vUv.x)
+                     * smoothstep(0.0, 0.32, vUv.y) * smoothstep(1.0, 0.56, vUv.y);
+          float body = smoothstep(0.34, 0.84, n) * edge * vFade;
 
           vec3 viewDir = normalize(vWorldPos - cameraPosition);
           float scatter = pow(max(dot(viewDir, normalize(vec3(0.0, 0.30, -0.95))), 0.0), 3.0);
           vec3 col = mix(vec3(0.035, 0.11, 0.26), vec3(0.14, 0.34, 0.66), scatter);
           col = mix(col, vec3(0.30, 0.10, 0.16), uAnomaly * 0.45);
-          gl_FragColor = vec4(col, body * (0.30 + uAnomaly * 0.16));
+          gl_FragColor = vec4(col, body * (0.28 + uAnomaly * 0.14));
         }
       `,
     });
 
-    const MIST_COUNT = 64;
+    const MIST_COUNT = 36;
     const mistGeo = new THREE.PlaneGeometry(1, 1);
     const mist = new THREE.InstancedMesh(mistGeo, this.mistMat, MIST_COUNT);
     mist.frustumCulled = false;
@@ -2372,19 +2724,17 @@ export class GlitchWorld {
       let mz: number;
       let my: number;
       if (alongBridge) {
-        // Banks hanging in the flanking chasms, just under the causeway walkway.
-        mx = side * (11 + Math.random() * 26);
+        mx = side * (12 + Math.random() * 26);
         mz = -84 + Math.random() * 118;
         my = -1.4 + Math.random() * 3.4;
       } else {
-        // Wide haze skirts around the basin rim for horizon separation.
         const ang = Math.random() * Math.PI * 2;
         const r = 86 + Math.random() * 62;
         mx = Math.cos(ang) * r;
         mz = -18 + Math.sin(ang) * r;
         my = 2.0 + Math.random() * 9.0;
       }
-      const w = 26 + Math.random() * 30;
+      const w = 28 + Math.random() * 30;
       const h = 9 + Math.random() * 13;
       mDummy.position.set(mx, my + h * 0.4, mz);
       mDummy.rotation.set(0, 0, 0);
@@ -2395,7 +2745,7 @@ export class GlitchWorld {
     mist.instanceMatrix.needsUpdate = true;
     this.group.add(mist);
 
-    // ---------------------------------------------------------------- 2. CLOUD DECKS
+    // ---------------------------------------------------------------- 2. UNIFIED STORM CLOUD DECK (Single pass, 2 taps!)
     this.cloudDeckMat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
@@ -2403,7 +2753,7 @@ export class GlitchWorld {
       uniforms: {
         uTime: { value: 0 },
         uAnomaly: { value: 0 },
-        uHeight: { value: 0 },
+        uNoiseTex: { value: getSharedNoiseTexture() },
       },
       vertexShader: /* glsl */ `
         varying vec3 vWorldPos;
@@ -2420,77 +2770,35 @@ export class GlitchWorld {
         varying vec2 vUv;
         uniform float uTime;
         uniform float uAnomaly;
-        uniform float uHeight;
-
-        float hash21(vec2 p) {
-          p = fract(p * vec2(127.1, 311.7));
-          p += dot(p, p + 34.23);
-          return fract(p.x * p.y);
-        }
-        float vnoise(vec2 p) {
-          vec2 i = floor(p);
-          vec2 f = fract(p);
-          vec2 u = f * f * (3.0 - 2.0 * f);
-          return mix(mix(hash21(i), hash21(i + vec2(1.0, 0.0)), u.x),
-                     mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), u.x), u.y);
-        }
-        float fbm(vec2 p) {
-          float v = 0.0;
-          float a = 0.5;
-          for (int i = 0; i < 4; i++) {
-            v += a * vnoise(p);
-            p *= 2.07;
-            a *= 0.5;
-          }
-          return v;
-        }
+        uniform sampler2D uNoiseTex;
 
         void main() {
-          vec2 drift = vec2(uTime * 0.008, uTime * 0.0035);
-          vec2 p = vWorldPos.xz * 0.0035 + drift;
-          float base = fbm(p);
-          float detail = vnoise(p * 3.1 - drift * 1.7);
-          float cloud = smoothstep(0.46, 0.78, base * 0.78 + detail * 0.22);
+          vec2 drift = vec2(uTime * 0.0028, uTime * 0.0012);
+          vec2 p = vWorldPos.xz * 0.0014 + drift;
+          float base = texture2D(uNoiseTex, p).r;
+          float detail = texture2D(uNoiseTex, p * 2.9 - drift * 1.6).g;
+          float cloud = smoothstep(0.44, 0.78, base * 0.74 + detail * 0.26);
 
-          // Under-lit storm deck: bright cyan rim where the sky-eye grazes it.
           vec3 viewDir = normalize(vWorldPos - cameraPosition);
           float sunScatter = pow(max(dot(viewDir, normalize(vec3(0.0, 0.30, -0.95))), 0.0), 4.0);
-          vec3 col = mix(vec3(0.012, 0.055, 0.145), vec3(0.10, 0.30, 0.62), sunScatter);
+          vec3 col = mix(vec3(0.012, 0.055, 0.145), vec3(0.11, 0.32, 0.66), sunScatter);
           col = mix(col, vec3(0.34, 0.06, 0.14), uAnomaly * 0.55);
-          col += vec3(0.42, 0.76, 1.0) * pow(cloud, 2.0) * 0.12 * (0.4 + sunScatter);
+          col += vec3(0.42, 0.76, 1.0) * pow(cloud, 2.0) * 0.15 * (0.4 + sunScatter);
 
           float dist = length(cameraPosition - vWorldPos);
-          float fade = smoothstep(0.0, 0.3, vUv.x) * smoothstep(1.0, 0.7, vUv.x)
-                     * smoothstep(0.0, 0.3, vUv.y) * smoothstep(1.0, 0.7, vUv.y)
-                     * smoothstep(760.0, 180.0, dist);
-          gl_FragColor = vec4(col, cloud * fade * (uHeight > 0.5 ? 0.34 : 0.24));
+          float fade = smoothstep(0.0, 0.28, vUv.x) * smoothstep(1.0, 0.72, vUv.x)
+                     * smoothstep(0.0, 0.28, vUv.y) * smoothstep(1.0, 0.72, vUv.y)
+                     * smoothstep(780.0, 160.0, dist);
+          gl_FragColor = vec4(col, cloud * fade * 0.36);
         }
       `,
     });
 
-    const deckLow = new THREE.Mesh(new THREE.PlaneGeometry(680, 680), this.cloudDeckMat);
-    deckLow.rotation.x = -Math.PI * 0.5;
-    deckLow.position.set(0, 46, -18);
-    deckLow.renderOrder = 2;
-    this.group.add(deckLow);
-
-    const deckHighMat = new THREE.ShaderMaterial({
-      transparent: true,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      uniforms: {
-        uTime: this.cloudDeckMat.uniforms.uTime,
-        uAnomaly: this.cloudDeckMat.uniforms.uAnomaly,
-        uHeight: { value: 1 },
-      },
-      vertexShader: this.cloudDeckMat.vertexShader,
-      fragmentShader: this.cloudDeckMat.fragmentShader,
-    });
-    const deckHigh = new THREE.Mesh(new THREE.PlaneGeometry(980, 980), deckHighMat);
-    deckHigh.rotation.x = -Math.PI * 0.5;
-    deckHigh.position.set(0, 108, -18);
-    deckHigh.renderOrder = 2;
-    this.group.add(deckHigh);
+    const deckUnified = new THREE.Mesh(new THREE.PlaneGeometry(820, 820), this.cloudDeckMat);
+    deckUnified.rotation.x = -Math.PI * 0.5;
+    deckUnified.position.set(0, 74, -18);
+    deckUnified.renderOrder = 2;
+    this.group.add(deckUnified);
 
     // ---------------------------------------------------------------- 3. HORIZON SILHOUETTES
     this.skylineMat = new THREE.ShaderMaterial({
@@ -2573,7 +2881,7 @@ export class GlitchWorld {
     skyline.instanceMatrix.needsUpdate = true;
     this.group.add(skyline);
 
-    // ---------------------------------------------------------------- 4. SKY TRAFFIC
+    // ---------------------------------------------------------------- 4. 100% GPU SKY TRAFFIC (0.0ms CPU!)
     this.trafficMat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
@@ -2583,26 +2891,28 @@ export class GlitchWorld {
         uAnomaly: { value: 0 },
       },
       vertexShader: /* glsl */ `
+        attribute vec4 aLaneA; // baseX, y, z, speedWithDir
+        attribute vec2 aLaneB; // len, phase
+        uniform float uTime;
         varying vec2 vUv;
         varying vec3 vWorldPos;
-        varying float vSeed;
-        attribute float aSeed;
         void main() {
           vUv = uv;
-          vSeed = aSeed;
-          vec4 wp = vec4(position, 1.0);
-          #ifdef USE_INSTANCING
-            wp = instanceMatrix * wp;
-          #endif
-          wp = modelMatrix * wp;
-          vWorldPos = wp.xyz;
-          gl_Position = projectionMatrix * viewMatrix * wp;
+          float dir = sign(aLaneA.w);
+          float travel = mod(aLaneA.x + aLaneA.w * uTime + 300.0, 260.0) - 130.0;
+          float bob = sin(uTime * 0.7 + aLaneB.y) * 1.6;
+
+          // Local Z scaled by len, rotated around Y by +-90 deg so cylinder streams along +-X!
+          vec3 lp = vec3(position.x, position.y, position.z * aLaneB.x);
+          vec3 rotP = dir > 0.0 ? vec3(lp.z, lp.y, -lp.x) : vec3(-lp.z, lp.y, lp.x);
+          vec3 wp = vec3(travel, aLaneA.y + bob, aLaneA.z) + rotP;
+          vWorldPos = wp;
+          gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
         }
       `,
       fragmentShader: /* glsl */ `
         varying vec2 vUv;
         varying vec3 vWorldPos;
-        varying float vSeed;
         uniform float uTime;
         uniform float uAnomaly;
         void main() {
@@ -2620,23 +2930,23 @@ export class GlitchWorld {
     const trafficGeo = new THREE.CylinderGeometry(0.22, 0.22, 1, 4, 1, true);
     trafficGeo.translate(0, 0.5, 0);
     trafficGeo.rotateX(Math.PI * 0.5);
-    const trafficSeeds = new Float32Array(TRAFFIC_COUNT);
+    const laneA = new Float32Array(TRAFFIC_COUNT * 4);
+    const laneB = new Float32Array(TRAFFIC_COUNT * 2);
     this.trafficMesh = new THREE.InstancedMesh(trafficGeo, this.trafficMat, TRAFFIC_COUNT);
     this.trafficMesh.frustumCulled = false;
     this.trafficMesh.renderOrder = 4;
     for (let i = 0; i < TRAFFIC_COUNT; i++) {
       const lane = i % 3;
-      this.trafficStates.push({
-        baseX: (Math.random() - 0.5) * 240,
-        y: 26 + lane * 22 + Math.random() * 16,
-        z: -96 + Math.random() * 150,
-        speed: 9 + Math.random() * 26,
-        len: 6 + Math.random() * 20,
-        lane,
-      });
-      trafficSeeds[i] = Math.random();
+      const dir = lane === 1 ? -1 : 1;
+      laneA[i * 4 + 0] = (Math.random() - 0.5) * 240;
+      laneA[i * 4 + 1] = 26 + lane * 22 + Math.random() * 16;
+      laneA[i * 4 + 2] = -96 + Math.random() * 150;
+      laneA[i * 4 + 3] = dir * (9 + Math.random() * 26);
+      laneB[i * 2 + 0] = 6 + Math.random() * 20;
+      laneB[i * 2 + 1] = i;
     }
-    trafficGeo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(trafficSeeds, 1));
+    trafficGeo.setAttribute('aLaneA', new THREE.InstancedBufferAttribute(laneA, 4));
+    trafficGeo.setAttribute('aLaneB', new THREE.InstancedBufferAttribute(laneB, 2));
     this.group.add(this.trafficMesh);
 
     // ---------------------------------------------------------------- 5. SKY-EYE LIGHT SHAFTS
@@ -2883,6 +3193,97 @@ export class GlitchWorld {
     monoliths.instanceMatrix.needsUpdate = true;
     this.group.add(monoliths);
     this.monolithMat = monolithMat;
+
+    // ---------------------------------------------------------------- ARCHITECTURAL CAUSEWAY PARAPETS & CENTRAL MEMORY BUS
+    const curbCount = 52;
+    const curbGeo = new THREE.BoxGeometry(0.42, 0.44, 2.75);
+    const curbInst = new THREE.InstancedMesh(curbGeo, monolithMat, curbCount);
+    curbInst.frustumCulled = false;
+    let cIdx = 0;
+    for (let i = 0; i < 26; i++) {
+      const z = 18.5 - i * 2.55;
+      for (const side of [-1, 1]) {
+        const x = side * 3.38;
+        const y = this.getTerrainHeight(x, z);
+        const yNext = this.getTerrainHeight(x, z - 1.5);
+        const pitch = Math.atan2(yNext - y, 1.5);
+        moDummy.position.set(x, y + 0.16, z);
+        moDummy.rotation.set(pitch, 0, 0);
+        moDummy.scale.set(1, 1, 1);
+        moDummy.updateMatrix();
+        curbInst.setMatrixAt(cIdx++, moDummy.matrix);
+      }
+    }
+    curbInst.instanceMatrix.needsUpdate = true;
+    this.group.add(curbInst);
+
+    // Arrival Overlook Octagonal Plaza Ring & Medallion at (0, spawnY, 20)
+    const overlookDais = new THREE.Mesh(
+      new THREE.CylinderGeometry(5.6, 6.2, 0.22, 8),
+      new THREE.MeshLambertMaterial({
+        color: 0x051430,
+        emissive: 0x06285a,
+        emissiveIntensity: 0.55,
+      })
+    );
+    overlookDais.position.set(0, this.getTerrainHeight(0, 20) - 0.04, 20);
+    this.group.add(overlookDais);
+
+    const overlookRing = new THREE.Mesh(
+      new THREE.RingGeometry(4.4, 4.65, 32),
+      new THREE.MeshBasicMaterial({ color: 0x8ad8ff, side: THREE.DoubleSide })
+    );
+    overlookRing.rotation.x = -Math.PI * 0.5;
+    overlookRing.position.set(0, this.getTerrainHeight(0, 20) + 0.085, 20);
+    this.group.add(overlookRing);
+
+    // Central Glowing 64-Bit Kernel Memory Bus Conduit conforming smoothly along the Causeway spine!
+    const busGeo = new THREE.PlaneGeometry(1.15, 68, 1, 48);
+    busGeo.rotateX(-Math.PI * 0.5);
+    busGeo.translate(0, 0, -14.5);
+    const busPos = busGeo.attributes.position;
+    for (let i = 0; i < busPos.count; i++) {
+      const bx = busPos.getX(i);
+      const bz = busPos.getZ(i);
+      busPos.setY(i, this.getTerrainHeight(bx, bz) + 0.055);
+    }
+    this.causewayBusMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: { value: 0 },
+        uAnomaly: { value: 0 },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        varying vec3 vWorldPos;
+        void main() {
+          vUv = uv;
+          vec4 wp = modelMatrix * vec4(position, 1.0);
+          vWorldPos = wp.xyz;
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec2 vUv;
+        varying vec3 vWorldPos;
+        uniform float uTime;
+        uniform float uAnomaly;
+        void main() {
+          float lane = smoothstep(0.06, 0.0, abs(fract(vUv.x * 8.0) - 0.5));
+          float border = smoothstep(0.08, 0.0, min(vUv.x, 1.0 - vUv.x));
+          float packet = pow(0.5 + 0.5 * sin(vWorldPos.z * 0.42 + uTime * 7.5), 8.0);
+          float endFade = smoothstep(0.0, 0.08, vUv.y) * smoothstep(1.0, 0.92, vUv.y);
+          vec3 col = mix(vec3(0.28, 0.78, 1.0), vec3(1.0, 0.24, 0.34), uAnomaly * 0.8);
+          float alpha = (lane * 0.28 + border * 0.65 + lane * packet * 0.85) * endFade;
+          gl_FragColor = vec4(col, alpha * 0.72);
+        }
+      `,
+    });
+    const busMesh = new THREE.Mesh(busGeo, this.causewayBusMat);
+    busMesh.renderOrder = 2;
+    this.group.add(busMesh);
   }
 
   private buildCollapseAndAbyss(concreteDiff: THREE.Texture, concreteDisp: THREE.Texture): void {
@@ -3139,12 +3540,22 @@ export class GlitchWorld {
           float trenchBand = exp(-((absX - 20.0) * (absX - 20.0)) / 72.0) * inSpan;
           float trenchDip = -2.35 * trenchBand * (1.0 - exp(-(dCore * dCore) / 260.0));
 
+          float spurEx = smoothstep(0.0, 6.0, xz.x) * (1.0 - smoothstep(18.5, 25.5, xz.x));
+          float spurEz = exp(-((xz.y + 8.0) * (xz.y + 8.0)) / 24.0);
+          float dEast = length(vec2(xz.x - 18.5, xz.y + 8.0));
+          float eastWing = max(3.6 * spurEx * spurEz, 3.85 * exp(-(dEast * dEast) / 38.0));
+
+          float spurWx = smoothstep(0.0, 6.0, -xz.x) * (1.0 - smoothstep(18.5, 25.5, -xz.x));
+          float spurWz = exp(-((xz.y + 28.0) * (xz.y + 28.0)) / 24.0);
+          float dWest = length(vec2(xz.x + 18.5, xz.y + 28.0));
+          float westWing = max(3.6 * spurWx * spurWz, 3.85 * exp(-(dWest * dWest) / 38.0));
+
           float waves = (sin(xz.x * 0.095) * cos(xz.y * 0.085) * 1.45 +
                          sin(xz.x * 0.22 + xz.y * 0.17) * 0.42) * (1.0 - bridgeMask * 0.85);
 
           float rCenter = length(vec2(xz.x, xz.y + 18.0));
           float rim = max(0.0, rCenter - 62.0) * 0.26;
-          return spawnIsland + smoothCore + bridgeDeck + trenchDip + waves + rim;
+          return spawnIsland + smoothCore + bridgeDeck + trenchDip + eastWing + westWing + waves + rim;
         }
 
         // Analytical terrain normal so top-face lighting matches terrainMat seamlessly!
@@ -3275,21 +3686,23 @@ export class GlitchWorld {
             // Slow data pulses travel along the major seams, so the plaza feels alive rather than painted.
             float vein = sin(vWorldPos.z * 0.55 - uTime * 2.4) * 0.5 + 0.5;
             col += accentGlow * lineMajor * (0.38 + onPath * 0.42 * pathPulse + uAnomaly * 0.45) * (0.72 + vein * 0.55);
-            // Concave crevices collect darkness so the shear cliffs and inner cells read with volume.
+            // Darken along polygonal crevices & carve a PITCH-BLACK abyssal fracture fissure (NOT bright white wash!)
             float cav = clamp(vEdgeFactor, 0.0, 1.0);
-            col *= mix(0.58, 1.0, cav);
+            col *= mix(1.0, 0.52, pow(cav, 2.4) * vCrackGlow);
             col += vec3(0.25, 0.65, 1.0) * lineMinor * 0.12;
             col += accentGlow * railLine * (0.35 + 0.50 * pathPulse);
             col += vec3(0.45, 0.88, 1.0) * shoreGlow * 0.65;
 
-            // Razor-sharp polygonal Voronoi crack rim right along the exact fracture edge!
-            float seamRim = smoothstep(0.89, 0.995, vEdgeFactor) * vCrackGlow;
-            col = mix(col, vec3(0.92, 0.98, 1.0), clamp(seamRim * 1.25, 0.0, 1.0));
+            // Crisp dark-edged fracture bevel + pitch-black chasm gap right along the Voronoi crack!
+            float seamBevel = smoothstep(0.88, 0.94, cav) * (1.0 - smoothstep(0.94, 0.97, cav)) * vCrackGlow;
+            float seamChasm = smoothstep(0.945, 0.992, cav) * vCrackGlow;
+            col += vec3(0.14, 0.28, 0.44) * seamBevel;
+            col = mix(col, vec3(0.001, 0.003, 0.012), clamp(seamChasm * 0.98, 0.0, 0.98));
           } else {
-            // Newly-split 3D concrete fracture cliff wall!
-            vec3 cliffCol = mix(vec3(0.005, 0.025, 0.11), vec3(0.02, 0.19, 0.58), conc.r) * (0.38 + 0.62 * ndl);
-            vec3 fissureFire = vec3(0.78, 0.95, 1.0) * vCrackGlow * (0.45 + 0.55 * vEdgeFactor);
-            col = cliffCol + fissureFire;
+            // Newly-split 3D concrete fracture cliff wall — dark sheared stone with subtle deep cobalt fissure rim!
+            vec3 cliffCol = mix(vec3(0.003, 0.012, 0.045), vec3(0.012, 0.11, 0.34), conc.r) * (0.34 + 0.66 * ndl);
+            vec3 fissureRim = vec3(0.12, 0.30, 0.52) * vCrackGlow * pow(vEdgeFactor, 2.0) * 0.55;
+            col = cliffCol + fissureRim;
           }
 
           // --- Aerial perspective: trench mist pools on the basin floor, thinning with altitude,
@@ -3505,6 +3918,186 @@ export class GlitchWorld {
     this.collapseGroup.add(this.bedroomReturnPortal);
   }
 
+  private buildHostEffigyAndPhantoms(): void {
+    const obsidianMat = new THREE.MeshLambertMaterial({
+      color: 0x060d20,
+      emissive: 0x061a3d,
+      emissiveIntensity: 0.65,
+    });
+    const fleshMat = new THREE.MeshLambertMaterial({
+      color: 0x3b0412,
+      emissive: 0x990b2d,
+      emissiveIntensity: 0.78,
+    });
+    const silhouetteMat = new THREE.MeshLambertMaterial({
+      color: 0x030712,
+      emissive: 0x0b2548,
+      emissiveIntensity: 0.52,
+    });
+
+    // Silent Environmental Horror Monument beside the Sanctuary Threshold (-2.1, y, -44.2):
+    // Your own paralyzed silhouette slumped in an office chair facing a floating BSOD slab (no fetch-quest chores!)
+    const effigyX = -2.1;
+    const effigyZ = -44.2;
+    const effigyY = this.getTerrainHeight(effigyX, effigyZ);
+    const effigyGroup = new THREE.Group();
+    effigyGroup.position.set(effigyX, effigyY, effigyZ);
+    effigyGroup.rotation.y = 0.28;
+
+    const basePlinth = new THREE.Mesh(this.makeChamferedColumnGeometry(8, 1.55, 0.28), obsidianMat);
+    basePlinth.position.y = 0.12;
+    effigyGroup.add(basePlinth);
+
+    const chairSeat = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.08, 0.66), obsidianMat);
+    chairSeat.position.set(0, 0.72, 0.25);
+    effigyGroup.add(chairSeat);
+    const chairBack = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.76, 0.08), obsidianMat);
+    chairBack.position.set(0, 1.12, 0.56);
+    chairBack.rotation.x = 0.10;
+    effigyGroup.add(chairBack);
+
+    const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 0.68, 10), silhouetteMat);
+    torso.position.set(0, 1.12, 0.24);
+    torso.rotation.x = -0.14;
+    effigyGroup.add(torso);
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.19, 12, 10), silhouetteMat);
+    head.position.set(0, 1.60, 0.14);
+    effigyGroup.add(head);
+
+    const miniScreen = new THREE.Mesh(
+      new THREE.BoxGeometry(1.18, 0.68, 0.05),
+      new THREE.MeshBasicMaterial({ color: 0x0068c9 })
+    );
+    miniScreen.position.set(0, 1.56, -0.78);
+    effigyGroup.add(miniScreen);
+
+    for (const side of [-1, 1]) {
+      const clampCurve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(side * 0.18, 1.56, -0.74),
+        new THREE.Vector3(side * 0.46, 1.68, -0.30),
+        new THREE.Vector3(side * 0.19, 1.61, 0.14),
+      ]);
+      const clampMesh = new THREE.Mesh(new THREE.TubeGeometry(clampCurve, 10, 0.055, 6, false), fleshMat);
+      effigyGroup.add(clampMesh);
+    }
+    this.group.add(effigyGroup);
+
+    // 8 Peripheral Stalking Glitch Apparitions (100% GPU-animated via explicit InstancedBufferAttribute!)
+    const PHANTOM_COUNT = 8;
+    const figGeo = new THREE.CylinderGeometry(0.18, 0.28, 1.82, 8, 6);
+    figGeo.translate(0, 0.91, 0);
+    const phantomSpots: Array<[number, number]> = [
+      [-9.5, 4.0],
+      [10.2, -19.5],
+      [-11.5, -12.0],
+      [14.2, -3.5],
+      [-14.0, -32.0],
+      [9.4, -38.5],
+      [-8.8, -51.0],
+      [10.6, -54.0],
+    ];
+    const pData = new Float32Array(PHANTOM_COUNT * 4);
+    for (let i = 0; i < PHANTOM_COUNT; i++) {
+      const [px, pz] = phantomSpots[i];
+      pData[i * 4 + 0] = px;
+      pData[i * 4 + 1] = this.getTerrainHeight(px, pz);
+      pData[i * 4 + 2] = pz;
+      pData[i * 4 + 3] = i * 1.71;
+    }
+    figGeo.setAttribute('aPhantom4', new THREE.InstancedBufferAttribute(pData, 4));
+
+    this.phantomMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      uniforms: {
+        uTime: { value: 0 },
+        uAnomaly: { value: 0 },
+        uPlayerPos: { value: new THREE.Vector3(0, 2, 20) },
+      },
+      vertexShader: /* glsl */ `
+        attribute vec4 aPhantom4;
+        uniform float uTime;
+        uniform float uAnomaly;
+        uniform vec3 uPlayerPos;
+        varying float vH;
+        varying float vDissolve;
+        varying float vSeed;
+
+        void main() {
+          vH = clamp(position.y / 1.82, 0.0, 1.0);
+          vSeed = aPhantom4.w;
+          vec3 baseW = aPhantom4.xyz;
+
+          // Face silently toward the player on XZ!
+          vec2 toPlayer = uPlayerPos.xz - baseW.xz;
+          float dist = length(toPlayer);
+          vec2 fwd = dist > 1e-3 ? toPlayer / dist : vec2(0.0, 1.0);
+          vec2 right = vec2(fwd.y, -fwd.x);
+
+          // Dissolves into upward static ash whenever player walks within 12.5m!
+          float nearFade = 1.0 - smoothstep(7.5, 13.5, dist);
+          vDissolve = nearFade;
+
+          // Silhouette pinch at neck (vH ~ 0.76) + eerie head tilt!
+          float neckPinch = 1.0 - 0.55 * exp(-pow((vH - 0.76) * 14.0, 2.0));
+          float headSwell = 1.0 + 0.35 * smoothstep(0.78, 0.90, vH) * (1.0 - smoothstep(0.95, 1.0, vH));
+          float glitchX = sin(vH * 38.0 + uTime * 34.0 + vSeed) * 0.06 * (uAnomaly + nearFade * 2.5);
+          float headTilt = smoothstep(0.76, 0.98, vH) * 0.14 * sin(vSeed * 3.0);
+
+          vec3 lp = vec3((position.x * neckPinch * headSwell) + headTilt + glitchX, position.y + nearFade * vH * 1.4, position.z * neckPinch * 0.65);
+          vec3 worldPos = baseW + vec3(right * lp.x + fwd * lp.z, 0.0) + vec3(0.0, lp.y, 0.0);
+          gl_Position = projectionMatrix * viewMatrix * vec4(worldPos, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying float vH;
+        varying float vDissolve;
+        varying float vSeed;
+        uniform float uTime;
+        uniform float uAnomaly;
+
+        void main() {
+          float scan = fract(vH * 28.0 - uTime * 3.5 + vSeed);
+          if (vDissolve > 0.94) discard;
+          if (scan < vDissolve * 0.92) discard;
+
+          vec3 shadowCol = vec3(0.004, 0.012, 0.032);
+          // Two faint watching pinprick glow-eyes near head height (vH ~ 0.88)!
+          float eyeBand = exp(-pow((vH - 0.885) * 36.0, 2.0));
+          vec3 eyeCol = mix(vec3(0.65, 0.90, 1.0), vec3(1.0, 0.22, 0.36), uAnomaly);
+          vec3 col = shadowCol + eyeCol * eyeBand * 0.65;
+          float alpha = (0.78 + 0.18 * uAnomaly) * (1.0 - vDissolve) * smoothstep(0.0, 0.12, vH);
+          gl_FragColor = vec4(col, clamp(alpha, 0.0, 0.90));
+        }
+      `,
+    });
+    this.phantomMesh = new THREE.InstancedMesh(figGeo, this.phantomMat, PHANTOM_COUNT);
+    this.phantomMesh.frustumCulled = false;
+    this.group.add(this.phantomMesh);
+  }
+
+  /** True when the player ducks under Cathedral rib-arches or beside Sanctuary monoliths to break Sky-Eye gaze! */
+  public isPlayerSheltered(pos: THREE.Vector3): boolean {
+    // Cathedral rib-arch stations along z = 14, 2, -10, -22, -34 when near arch piers (|x| in 3.2..7.5)
+    for (const gz of [14, 2, -10, -22, -34]) {
+      if (Math.abs(pos.z - gz) < 2.6 && Math.abs(pos.x) > 2.4 && Math.abs(pos.x) < 8.2) {
+        return true;
+      }
+    }
+    // Close lee of Central Cray-1 Sanctuary cylinder
+    if (Math.hypot(pos.x - this.corePosition.x, pos.z - this.corePosition.z) < 6.4) {
+      return true;
+    }
+    return false;
+  }
+
+  /** Enables deferred collapse geometry for 1 offscreen warmup frame at boot so collapse never stutters! */
+  public setWarmupVisibility(active: boolean): void {
+    this.collapseGroup.visible = active;
+  }
+
   public startCollapseAt(playerPos: THREE.Vector3): void {
     const groundY = this.getTerrainHeight(playerPos.x, playerPos.z);
     this.collapseCenter.set(playerPos.x, groundY, playerPos.z);
@@ -3585,13 +4178,13 @@ export class GlitchWorld {
       this.anomalyIntensity = Math.min(1.0, 0.55 + collapseElapsed * 0.25);
     }
 
-    // 2. Check proximity to Central Cray-1 Sanctuary to magnetically align "WAKE_UP"!
+    // 2. Central Sanctuary WAKE_UP Stele Convergence (aligns seamlessly as player approaches the Core!)
     const distToCore = Math.hypot(
       playerPos.x - this.corePosition.x,
       playerPos.z - this.corePosition.z
     );
-    const alignT = THREE.MathUtils.smoothstep(22.0 - distToCore, 0.0, 9.5);
-    if (alignT > 0.82) {
+    const alignT = THREE.MathUtils.smoothstep(23.0 - distToCore, 0.0, 10.5);
+    if (alignT > 0.65) {
       this.coreSecretRevealed = true;
     }
 
@@ -3601,7 +4194,6 @@ export class GlitchWorld {
       wp.mesh.position.lerpVectors(wp.scatteredPos, wp.alignedPos, alignT);
       wp.mesh.position.y += hoverY;
 
-      // Anomaly jitter if not fully locked
       if (this.anomalyIntensity > 0.2) {
         wp.mesh.position.x += (Math.random() - 0.5) * 0.14 * this.anomalyIntensity;
       }
@@ -3612,27 +4204,17 @@ export class GlitchWorld {
         wp.scatteredRot.z * (1 - alignT)
       );
     }
-    this.corePlaqueMat.opacity = THREE.MathUtils.lerp(0.12, 0.98, alignT);
+    this.corePlaqueMat.opacity = THREE.MathUtils.lerp(0.28, 0.96, alignT);
 
-    // 3. Update Floating BSOD UI Shards (1 InstancedMesh update)
-    const anomalyJump = this.anomalyIntensity > 0.5 ? Math.sin(elapsed * 55.0) * 0.35 : 0;
-    for (let i = 0; i < FLOATING_SHARD_COUNT; i++) {
-      const st = this.shardStates[i];
-      this.dummy.position.set(
-        st.basePos.x + anomalyJump * ((i % 3) - 1),
-        st.basePos.y + Math.sin(elapsed * 0.9 + st.bobPhase) * 0.45,
-        st.basePos.z
-      );
-      this.dummy.rotation.set(
-        st.rot.x + elapsed * st.rotVel.x,
-        st.rot.y + elapsed * st.rotVel.y,
-        st.rot.z + elapsed * st.rotVel.z
-      );
-      this.dummy.scale.copy(st.scale);
-      this.dummy.updateMatrix();
-      this.floatingShards.setMatrixAt(i, this.dummy.matrix);
+    if (this.phantomMat) {
+      this.phantomMat.uniforms.uTime.value = elapsed;
+      this.phantomMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+      this.phantomMat.uniforms.uPlayerPos.value.copy(playerPos);
     }
-    this.floatingShards.instanceMatrix.needsUpdate = true;
+
+    // 3. 100% GPU Floating BSOD Shards (0.0ms CPU!)
+    this.floatingShardMat.uniforms.uTime.value = elapsed;
+    this.floatingShardMat.uniforms.uAnomaly.value = this.anomalyIntensity;
 
     // 4. Update Shaders & Gyroscopic Sanctuary Halo Rings
     this.terrainMat.uniforms.uTime.value = elapsed;
@@ -3654,6 +4236,11 @@ export class GlitchWorld {
     this.leviathanMat.uniforms.uTime.value = elapsed;
     this.leviathanMat.uniforms.uAnomaly.value = this.anomalyIntensity;
     this.skyRiftMat.uniforms.uTime.value = elapsed;
+    this.skyTunnelMat.uniforms.uTime.value = elapsed;
+    this.skyExitStreamMat.uniforms.uTime.value = elapsed;
+    this.skyFangMat.uniforms.uTime.value = elapsed;
+    this.causewayBusMat.uniforms.uTime.value = elapsed;
+    this.causewayBusMat.uniforms.uAnomaly.value = this.anomalyIntensity;
     if (this.landingShockTimer < 2.5) {
       this.landingShockTimer += dt;
       this.landingShockMat.uniforms.uShockT.value = this.landingShockTimer;
@@ -3663,6 +4250,8 @@ export class GlitchWorld {
     this.skyMat.uniforms.uTime.value = elapsed;
     this.skyMat.uniforms.uAnomaly.value = this.anomalyIntensity;
     this.skyMat.uniforms.uPlayerPos.value.copy(playerPos);
+    this.astrolabeMat.uniforms.uTime.value = elapsed;
+    this.astrolabeMat.uniforms.uAnomaly.value = this.anomalyIntensity;
     this.crtGlassMat.uniforms.uTime.value = elapsed;
     this.crtGlassMat.uniforms.uAnomaly.value = this.anomalyIntensity;
     this.dustMat.uniforms.uTime.value = elapsed;
@@ -3689,21 +4278,7 @@ export class GlitchWorld {
 
     // The shattered monitor wreckage orbits its own broken screen.
     this.skyDebris.rotation.z = elapsed * 0.045;
-    this.skyDebris.rotation.y = Math.sin(elapsed * 0.08) * 0.25;
-
-    // Sky traffic streams along elevated lanes and wraps around the basin.
-    for (let i = 0; i < this.trafficStates.length; i++) {
-      const ts = this.trafficStates[i];
-      const dir = ts.lane === 1 ? -1 : 1;
-      const travel = ((ts.baseX + dir * elapsed * ts.speed + 300) % 260) - 130;
-      const bob = Math.sin(elapsed * 0.7 + i) * 1.6;
-      this.dummy.position.set(travel, ts.y + bob, ts.z);
-      this.dummy.rotation.set(0, dir > 0 ? Math.PI * 0.5 : -Math.PI * 0.5, 0);
-      this.dummy.scale.set(1, 1, ts.len);
-      this.dummy.updateMatrix();
-      this.trafficMesh.setMatrixAt(i, this.dummy.matrix);
-    }
-    this.trafficMesh.instanceMatrix.needsUpdate = true;
+    this.skyDebris.rotation.y = Math.sin(elapsed * 0.08) * 0.15;
 
     const ringSpeedMult = isCollapsing ? 4.5 : 1.0 + this.anomalyIntensity * 2.2;
     for (let i = 0; i < this.gyroRings.length; i++) {
@@ -3712,6 +4287,13 @@ export class GlitchWorld {
       r.rotation.x = 0.65 * Math.sin(elapsed * 0.38 * ringSpeedMult + i * 1.2);
       r.rotation.y = elapsed * (0.45 + i * 0.18) * dir * ringSpeedMult;
       r.rotation.z = 0.52 * Math.cos(elapsed * 0.31 * ringSpeedMult + i * 0.9);
+    }
+    for (let i = 0; i < this.astrolabeRings.length; i++) {
+      const ar = this.astrolabeRings[i];
+      const dir = i % 2 === 0 ? 1 : -1;
+      ar.rotation.z = elapsed * (0.045 + i * 0.022) * dir * ringSpeedMult;
+      ar.rotation.x = 0.38 + i * 0.36 + 0.18 * Math.sin(elapsed * 0.09 + i * 1.7);
+      ar.rotation.y = 0.24 * Math.cos(elapsed * 0.07 + i * 2.1);
     }
 
     // 5. Update Act 4 True Voronoi Jigsaw Fracture & 245m Freefall Speed-Line Shaft!

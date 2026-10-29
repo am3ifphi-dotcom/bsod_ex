@@ -38,25 +38,25 @@ export class PostFX {
   /** Set if the post-process program cannot be linked — the game then renders straight to screen. */
   private disabled = false;
 
-  // Half-resolution bloom chain (bright pass -> horizontal blur -> vertical blur)
+  // Ultra-fast 2-pass 1/5-resolution anamorphic bloom (combined bright+H blur -> V blur)
   private rtBright: THREE.WebGLRenderTarget;
   private rtBlur: THREE.WebGLRenderTarget;
-  private readonly bloomScene = new THREE.Scene();
+  private readonly bloomSceneH = new THREE.Scene();
+  private readonly bloomSceneV = new THREE.Scene();
   private readonly brightMat: THREE.ShaderMaterial;
   private readonly blurMat: THREE.ShaderMaterial;
-  private readonly quadGeo: THREE.BufferGeometry;
   private bloomEnabled = true;
 
   constructor(width: number, height: number) {
+    // Default samples: 0 eliminates full-screen MSAA glBlitFramebuffer resolve stall every frame!
+    // stencilBuffer: true MUST remain enabled for BsodScreen portal stencil masking.
     this.rt = new THREE.WebGLRenderTarget(width, height, {
       minFilter: THREE.LinearFilter,
       magFilter: THREE.LinearFilter,
       type: THREE.UnsignedByteType,
       depthBuffer: true,
       stencilBuffer: true,
-      // 4x MSAA resolved inside the render target: the 3D world is made of hard architectural
-      // edges, and without this every tower and causeway edge stair-steps at 1x pixel ratio.
-      samples: 4,
+      samples: 0,
     });
 
     const triGeo = new THREE.BufferGeometry();
@@ -229,10 +229,11 @@ export class PostFX {
             }
           }
 
-          // ---------------------------------------------------------------- BASE SAMPLE
+          // ---------------------------------------------------------------- BASE SAMPLE + PERIPHERAL LENS FRINGE
           vec3 col;
-          float dispersion = uChromatic * 0.011 + waveMask * 0.011 + uWarp * 0.016 + seam * 0.02;
-          if (dispersion > 0.0012) {
+          float baseLensChr = smoothstep(0.10, 0.56, r2) * 0.0022;
+          float dispersion = baseLensChr + uChromatic * 0.011 + waveMask * 0.011 + uWarp * 0.016 + seam * 0.02;
+          if (dispersion > 0.0005) {
             vec2 dispVec = centered * dispersion * (0.45 + r2 * 2.1) + refractOffset * 0.38;
             col.r = fetch(uv + dispVec).r;
             col.g = fetch(uv).g;
@@ -302,9 +303,18 @@ export class PostFX {
             col += vec3(0.45, 0.85, 1.0) * ray * 0.26 * rimMask;
           }
 
-          // ---------------------------------------------------------------- GRADE
-          col = acesFilmic(col * 1.18);
-          col = pow(col, vec3(1.0 / 2.2));
+          // ---------------------------------------------------------------- ALWAYS-ON SUBTLE PLAYER OPTICAL FILTER
+          // Lifted highlights, crisp S-curve micro-contrast, nocturnal indigo toe, & fine optical weave
+          col = acesFilmic(col * 1.28);
+          col = pow(max(col, vec3(0.0)), vec3(1.0 / 2.2));
+
+          float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
+          vec3 sCurve = smoothstep(vec3(-0.015), vec3(1.015), col);
+          col = mix(col, sCurve, 0.24);
+
+          // Highlight boost & luminous shoulder halation (even before bloom adds wide glow)
+          float hiMask = smoothstep(0.42, 0.92, luma);
+          col += mix(vec3(0.09, 0.15, 0.23), vec3(0.22, 0.26, 0.30), hiMask) * hiMask * 0.44;
 
           // Subtle cold-teal / warm-magenta split-tone, breathing with the horror level
           if (uHorror > 0.01) {
@@ -312,13 +322,16 @@ export class PostFX {
             float edgeShadow = smoothstep(0.08, 0.42, r2) * uHorror * darkPulse;
             col = mix(col, col * vec3(0.74, 0.26, 0.32), edgeShadow * 0.62);
           }
-          col = mix(col, col * vec3(0.94, 1.0, 1.06) + vec3(0.0, 0.004, 0.010), 0.35);
+          vec3 shadowTint = col * vec3(0.92, 0.97, 1.07) + vec3(0.002, 0.006, 0.016) * (1.0 - luma);
+          vec3 hiTint = col * vec3(1.02, 1.05, 1.10);
+          col = mix(shadowTint, hiTint, smoothstep(0.24, 0.76, luma));
 
-          // Fine cinema sensor grain to kill dark gradient banding (0.014 = imperceptible)
-          float grain = (hash21(vUv * 512.0 + fract(uTime * 17.3)) - 0.5) * 0.013;
-          col += grain;
+          // Subtle always-on optical phosphor weave & fine cinema sensor grain
+          float microScan = 0.988 + 0.012 * sin(vUv.y * 1080.0 * 3.14159);
+          float grain = (hash21(vUv * 540.0 + fract(uTime * 19.7)) - 0.5) * 0.017;
+          col = col * microScan + grain;
 
-          // --- Bloom: half-res bright-pass glow, added after grading so neon bleeds over the image.
+          // --- Bloom: 1/5-res anamorphic bright-pass glow so highlights & neon bloom cleanly
           if (uBloom > 0.001) {
             vec3 glow = texture2D(tBloom, vUv).rgb;
             col += glow * uBloom;
@@ -339,7 +352,8 @@ export class PostFX {
     mesh.frustumCulled = false;
     this.quadScene.add(mesh);
 
-    this.quadGeo = triGeo;
+    const bw = Math.max(2, Math.floor(width / 5));
+    const bh = Math.max(2, Math.floor(height / 5));
     const bloomOpts: THREE.RenderTargetOptions = {
       minFilter: THREE.LinearFilter,
       magFilter: THREE.LinearFilter,
@@ -347,16 +361,17 @@ export class PostFX {
       depthBuffer: false,
       stencilBuffer: false,
     };
-    this.rtBright = new THREE.WebGLRenderTarget(Math.max(2, width >> 1), Math.max(2, height >> 1), bloomOpts);
-    this.rtBlur = new THREE.WebGLRenderTarget(Math.max(2, width >> 1), Math.max(2, height >> 1), bloomOpts);
+    this.rtBright = new THREE.WebGLRenderTarget(bw, bh, bloomOpts);
+    this.rtBlur = new THREE.WebGLRenderTarget(bw, bh, bloomOpts);
 
-    // Bright pass: soft-knee threshold so only genuine light sources survive.
+    // Pass 1: Combined Bright-Threshold + 5-Tap Wide Anamorphic Horizontal Blur -> rtBlur
     this.brightMat = new THREE.ShaderMaterial({
       depthTest: false,
       depthWrite: false,
       uniforms: {
         tDiffuse: { value: this.rt.texture },
-        uThreshold: { value: 0.62 },
+        uThreshold: { value: 0.44 },
+        uTexelX: { value: 1 / Math.max(2, bw) },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -369,23 +384,30 @@ export class PostFX {
         varying vec2 vUv;
         uniform sampler2D tDiffuse;
         uniform float uThreshold;
-        void main() {
-          vec3 c = texture2D(tDiffuse, vUv).rgb;
+        uniform float uTexelX;
+        vec3 thresh(vec2 p) {
+          vec3 c = texture2D(tDiffuse, p).rgb;
           float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
-          float knee = smoothstep(uThreshold, uThreshold + 0.28, luma);
-          gl_FragColor = vec4(c * knee, 1.0);
+          return c * smoothstep(uThreshold, uThreshold + 0.32, luma);
+        }
+        void main() {
+          float o1 = uTexelX * 1.38461538;
+          float o2 = uTexelX * 3.23076923;
+          vec3 sum = thresh(vUv) * 0.22702703;
+          sum += (thresh(vUv + vec2(o1, 0.0)) + thresh(vUv - vec2(o1, 0.0))) * 0.31621622;
+          sum += (thresh(vUv + vec2(o2, 0.0)) + thresh(vUv - vec2(o2, 0.0))) * 0.07027027;
+          gl_FragColor = vec4(sum, 1.0);
         }
       `,
     });
 
-    // Separable 9-tap gaussian; run twice (horizontal then vertical).
+    // Pass 2: 5-Tap Vertical Gaussian Blur (rtBlur -> rtBright)
     this.blurMat = new THREE.ShaderMaterial({
       depthTest: false,
       depthWrite: false,
       uniforms: {
-        tDiffuse: { value: null },
-        uDir: { value: new THREE.Vector2(1, 0) },
-        uTexel: { value: new THREE.Vector2(1 / Math.max(2, width >> 1), 1 / Math.max(2, height >> 1)) },
+        tDiffuse: { value: this.rtBlur.texture },
+        uTexelY: { value: 1 / Math.max(2, bh) },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -397,15 +419,13 @@ export class PostFX {
       fragmentShader: /* glsl */ `
         varying vec2 vUv;
         uniform sampler2D tDiffuse;
-        uniform vec2 uDir;
-        uniform vec2 uTexel;
+        uniform float uTexelY;
         void main() {
-          vec2 step0 = uDir * uTexel * 1.35;
-          vec3 sum = texture2D(tDiffuse, vUv).rgb * 0.227027;
-          sum += (texture2D(tDiffuse, vUv + step0).rgb + texture2D(tDiffuse, vUv - step0).rgb) * 0.1945946;
-          sum += (texture2D(tDiffuse, vUv + step0 * 2.0).rgb + texture2D(tDiffuse, vUv - step0 * 2.0).rgb) * 0.1216216;
-          sum += (texture2D(tDiffuse, vUv + step0 * 3.0).rgb + texture2D(tDiffuse, vUv - step0 * 3.0).rgb) * 0.0540540;
-          sum += (texture2D(tDiffuse, vUv + step0 * 4.0).rgb + texture2D(tDiffuse, vUv - step0 * 4.0).rgb) * 0.0162162;
+          float o1 = uTexelY * 1.38461538;
+          float o2 = uTexelY * 3.23076923;
+          vec3 sum = texture2D(tDiffuse, vUv).rgb * 0.22702703;
+          sum += (texture2D(tDiffuse, vUv + vec2(0.0, o1)).rgb + texture2D(tDiffuse, vUv - vec2(0.0, o1)).rgb) * 0.31621622;
+          sum += (texture2D(tDiffuse, vUv + vec2(0.0, o2)).rgb + texture2D(tDiffuse, vUv - vec2(0.0, o2)).rgb) * 0.07027027;
           gl_FragColor = vec4(sum, 1.0);
         }
       `,
@@ -413,27 +433,51 @@ export class PostFX {
 
     const brightMesh = new THREE.Mesh(triGeo, this.brightMat);
     brightMesh.frustumCulled = false;
-    this.bloomScene.add(brightMesh);
+    this.bloomSceneH.add(brightMesh);
+
+    const blurMesh = new THREE.Mesh(triGeo, this.blurMat);
+    blurMesh.frustumCulled = false;
+    this.bloomSceneV.add(blurMesh);
 
     this.mat.uniforms.tBloom.value = this.rtBright.texture;
   }
 
+  public setQuality(samples: number, bloomEnabled: boolean): void {
+    this.bloomEnabled = bloomEnabled;
+    if (this.rt.samples !== samples) {
+      const w = this.rt.width;
+      const h = this.rt.height;
+      this.rt.dispose();
+      this.rt = new THREE.WebGLRenderTarget(w, h, {
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        type: THREE.UnsignedByteType,
+        depthBuffer: true,
+        stencilBuffer: true,
+        samples,
+      });
+      this.mat.uniforms.tDiffuse.value = this.rt.texture;
+      this.brightMat.uniforms.tDiffuse.value = this.rt.texture;
+    }
+  }
+
   public setSize(width: number, height: number): void {
+    const bw = Math.max(2, Math.floor(width / 5));
+    const bh = Math.max(2, Math.floor(height / 5));
     this.rt.setSize(width, height);
-    this.rtBright.setSize(Math.max(2, width >> 1), Math.max(2, height >> 1));
-    this.rtBlur.setSize(Math.max(2, width >> 1), Math.max(2, height >> 1));
-    this.blurMat.uniforms.uTexel.value.set(
-      1 / Math.max(2, width >> 1),
-      1 / Math.max(2, height >> 1)
-    );
+    this.rtBright.setSize(bw, bh);
+    this.rtBlur.setSize(bw, bh);
+    this.brightMat.uniforms.uTexelX.value = 1 / bw;
+    this.blurMat.uniforms.uTexelY.value = 1 / bh;
   }
 
   /**
-   * Compiles the quad program once and disables the pass if the driver rejects it.
-   * A single GLSL typo must never be able to black out the whole game again.
+   * Pre-compiles PostFX + Bloom programs once at boot and disables the pass if the driver rejects it.
    */
   public validate(renderer: THREE.WebGLRenderer): void {
     try {
+      renderer.compile(this.bloomSceneH, this.quadCamera);
+      renderer.compile(this.bloomSceneV, this.quadCamera);
       renderer.compile(this.quadScene, this.quadCamera);
       const programs = (renderer.info?.programs ?? []) as Array<{
         diagnostics?: {
@@ -493,27 +537,11 @@ export class PostFX {
     const bloomStrength = this.bloomEnabled ? (opts.bloom ?? 0.55) : 0;
     u.uBloom.value = bloomStrength;
     if (bloomStrength > 0.001) {
-      const quad = this.bloomScene.children[0] as THREE.Mesh;
-      // 1) bright pass at half resolution
-      this.brightMat.uniforms.tDiffuse.value = this.rt.texture;
-      quad.material = this.brightMat;
-      renderer.setRenderTarget(this.rtBright);
-      renderer.clear(true, false, false);
-      renderer.render(this.bloomScene, this.quadCamera);
-
-      // 2) separable blur (horizontal then vertical)
-      this.blurMat.uniforms.tDiffuse.value = this.rtBright.texture;
-      this.blurMat.uniforms.uDir.value.set(1, 0);
-      quad.material = this.blurMat;
       renderer.setRenderTarget(this.rtBlur);
-      renderer.clear(true, false, false);
-      renderer.render(this.bloomScene, this.quadCamera);
+      renderer.render(this.bloomSceneH, this.quadCamera);
 
-      this.blurMat.uniforms.tDiffuse.value = this.rtBlur.texture;
-      this.blurMat.uniforms.uDir.value.set(0, 1);
       renderer.setRenderTarget(this.rtBright);
-      renderer.clear(true, false, false);
-      renderer.render(this.bloomScene, this.quadCamera);
+      renderer.render(this.bloomSceneV, this.quadCamera);
     }
 
     renderer.setRenderTarget(null);

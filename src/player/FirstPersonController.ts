@@ -18,7 +18,6 @@ function stepSpring(s: Spring1D, stiffness: number, damping: number, dt: number)
 }
 
 export class FirstPersonController {
-  // Open bedroom rug directly in front of the bed & facing the glowing BSOD PC setup!
   public readonly position = new THREE.Vector3(0.35, 0.017, 0.62);
   public readonly velocity = new THREE.Vector3();
   public yaw = 1.6264;
@@ -32,20 +31,18 @@ export class FirstPersonController {
   private lastStepHalfCycle = 0;
   private breathTime = 0;
 
-  // Inspection cursor in viewport CSS pixels
   public readonly inspectCursorPx = new THREE.Vector2(window.innerWidth * 0.5, window.innerHeight * 0.5);
   private readonly blendStartPos = new THREE.Vector3();
   private readonly blendStartQuat = new THREE.Quaternion();
   private blendStartFov = 64;
 
-  // CRITICAL: Must be a Camera (isCamera = true) so Three.js .lookAt() points -Z toward target instead of +Z!
+  // Must be a Camera (isCamera = true) so Three.js .lookAt() points -Z toward target!
   private readonly dummyCam = new THREE.PerspectiveCamera();
   private readonly scratchPos = new THREE.Vector3();
   private readonly scratchTarget = new THREE.Vector3();
   private readonly scratchDir = new THREE.Vector3();
   private readonly scratchRight = new THREE.Vector3();
 
-  // Human head/neck spring solver for forced-camera cutscenes
   public readonly yawSpring: Spring1D = { value: 0, vel: 0, target: 0 };
   public readonly pitchSpring: Spring1D = { value: 0, vel: 0, target: 0 };
   public readonly rollSpring: Spring1D = { value: 0, vel: 0, target: 0 };
@@ -73,7 +70,6 @@ export class FirstPersonController {
   }
 
   public applyLookDelta(dx: number, dy: number, inspectMode: boolean): void {
-    // Guard against Chrome/Windows synthetic pointer-lock re-centering spikes!
     if (Math.abs(dx) > 130 || Math.abs(dy) > 130) return;
 
     if (inspectMode) {
@@ -115,7 +111,7 @@ export class FirstPersonController {
       this.dummyCam.lookAt(monitorWorldPos);
       this.euler.setFromQuaternion(this.dummyCam.quaternion, 'YXZ');
       this.yaw = this.euler.y;
-      this.pitch = this.euler.x * 0.88; // Natural slight horizon framing with monitor dead-center!
+      this.pitch = this.euler.x * 0.88;
     } else {
       this.yaw = 1.6264;
       this.pitch = -0.24;
@@ -169,7 +165,6 @@ export class FirstPersonController {
     this.position.y = THREE.MathUtils.lerp(this.position.y, targetGroundY, Math.min(1, dt * 18));
 
     const speed = Math.hypot(this.velocity.x, this.velocity.z);
-    // Only advance footstep cycle when player is actively pressing movement AND physically moving across floor!
     if (inputEnabled && wishLen > 1e-3 && actualMoveSpeed > 0.35 && speed > 0.45) {
       this.walkPhase += dt * (4.6 + actualMoveSpeed * 1.35);
       const halfCycle = Math.floor(this.walkPhase / Math.PI);
@@ -208,9 +203,6 @@ export class FirstPersonController {
     this.blendStartFov = this.camera.fov;
   }
 
-  /**
-   * Smoothly blends back from PC inspection pose to standing free-roam pose (zero vertical jump!)
-   */
   public updateExitInspectBlend(blendT: number): void {
     const smoothT = THREE.MathUtils.smoothstep(blendT, 0, 1);
 
@@ -224,9 +216,6 @@ export class FirstPersonController {
     this.camera.updateProjectionMatrix();
   }
 
-  /**
-   * Smooth natural camera focus onto the PC monitor with subtle head breathing & cursor parallax
-   */
   public updateInspectPose(
     dt: number,
     elapsed: number,
@@ -243,9 +232,8 @@ export class FirstPersonController {
     desiredPos.z -= nx * 0.026;
     desiredPos.y += ny * 0.018 + Math.sin(elapsed * 1.6) * 0.0025;
 
-    // Creeping magnetic pull closer to the monitor as madness escalates — punctuated by violent fear-flinch recoil when clicked!
     this.scratchDir.copy(lookTarget).sub(targetPos).normalize();
-    const flinchRecoil = madness > 0.45 ? clickPulse * 0.14 : clickPulse * 0.03;
+    const flinchRecoil = madness > 0.45 ? clickPulse * 0.13 : clickPulse * 0.03;
     desiredPos.addScaledVector(this.scratchDir, madness * 0.11 - flinchRecoil);
 
     const lookPt = this.scratchTarget.copy(lookTarget);
@@ -257,10 +245,10 @@ export class FirstPersonController {
     this.dummyCam.lookAt(lookPt);
 
     if (madness > 0.08 || clickPulse > 0.01) {
-      const amt = madness * 0.012 + clickPulse * 0.038;
-      this.dummyCam.rotateZ(Math.sin(elapsed * 53.0) * amt + (madness > 0.5 ? Math.sin(elapsed * 3.7) * 0.035 * madness : 0));
-      this.dummyCam.rotateY(Math.cos(elapsed * 47.0) * amt * 0.55);
-      this.dummyCam.position.y += Math.cos(elapsed * 63.0) * amt * 0.5;
+      const amt = madness * 0.011 + clickPulse * 0.036;
+      this.dummyCam.rotateZ(Math.sin(elapsed * 53.0) * amt + (madness > 0.5 ? Math.sin(elapsed * 3.7) * 0.03 * madness : 0));
+      this.dummyCam.rotateY(Math.cos(elapsed * 47.0) * amt * 0.5);
+      this.dummyCam.position.y += Math.cos(elapsed * 63.0) * amt * 0.45;
     }
 
     const smoothT = THREE.MathUtils.smoothstep(blendT, 0, 1);
@@ -276,13 +264,16 @@ export class FirstPersonController {
 
   /**
    * Act 2 Predatory Suction Camera:
-   * Recoil -> neck-straining hesitation & glance toward bedroom door -> unstoppable plunge down the 3D throat!
+   * Recoil -> neck-straining resistance & glance toward bedroom -> unstoppable forward acceleration
+   * down the 3D BSOD throat straight into the glowing GlitchWorld horizon portal at the far end!
+   * Ends at u=1.0 aligned dead-center (yawOffset=0, pitchOffset=0, roll=+0.16, fov=98) for a 100% seamless handoff!
    */
   public updateSuctionCutscene(
     t: number,
     duration: number,
     monitorPos: THREE.Vector3,
-    monitorQuat: THREE.Quaternion
+    monitorQuat: THREE.Quaternion,
+    monitorScaleZ = 0.348
   ): { progress: number; insideTunnel: boolean } {
     const monFwd = this.scratchDir.set(0, 0, 1).applyQuaternion(monitorQuat);
     const monRight = this.scratchRight.set(1, 0, 0).applyQuaternion(monitorQuat);
@@ -296,7 +287,6 @@ export class FirstPersonController {
     let fov = 62;
 
     if (t < 0.78) {
-      // Stage 1: Violent initial bite-yank right up to the 3D fangs (0..0.24s) -> desperate recoil back (0.24..0.78s)!
       if (t < 0.24) {
         const b = t / 0.24;
         distOut = THREE.MathUtils.lerp(0.55, 0.34, Math.sin(b * Math.PI * 0.5));
@@ -307,39 +297,39 @@ export class FirstPersonController {
         const u = (t - 0.24) / 0.54;
         const easeOut = 1 - Math.pow(1 - u, 3);
         distOut = THREE.MathUtils.lerp(0.34, 0.90, easeOut);
-        vertOffset = THREE.MathUtils.lerp(-0.02, 0.09, easeOut);
+        vertOffset = THREE.MathUtils.lerp(-0.02, 0.08, easeOut);
         lookPitchOffset = Math.sin(u * Math.PI) * 0.095;
         headRoll = THREE.MathUtils.lerp(0.14, -0.08, easeOut);
         fov = THREE.MathUtils.lerp(76, 69, easeOut);
       }
-    } else if (t < 2.35) {
-      // Stage 2: Neck-straining physical resistance & desperate glance back toward the bedroom
-      const u = (t - 0.78) / 1.57;
+    } else if (t < 2.25) {
+      const u = (t - 0.78) / 1.47;
       distOut =
         0.88 -
         u * 0.50 +
-        Math.sin(u * Math.PI * 3.0) * 0.065 +
-        Math.sin(t * 46.0) * 0.008;
-      sideOffset = Math.sin(u * Math.PI * 1.5) * 0.085;
+        Math.sin(u * Math.PI * 3.0) * 0.055 +
+        Math.sin(t * 44.0) * 0.006;
+      sideOffset = Math.sin(u * Math.PI * 1.5) * 0.075 * (1 - u);
+      vertOffset = THREE.MathUtils.lerp(0.08, 0.0, THREE.MathUtils.smoothstep(u, 0, 1));
       const resistGlance = Math.sin(Math.pow(u, 0.82) * Math.PI);
-      // Wrench head ~62° toward the dark bedroom behind you — glimpsing the room crawling with eyes before getting yanked into the jaws!
-      lookYawOffset = 1.08 * resistGlance + Math.sin(t * 44.0) * 0.032;
-      lookPitchOffset = -0.09 * resistGlance + Math.cos(t * 49.0) * 0.024;
-      headRoll = -0.08 - 0.28 * resistGlance;
-      fov = THREE.MathUtils.lerp(69, 92, THREE.MathUtils.smoothstep(u, 0, 1));
+      lookYawOffset = 1.02 * resistGlance + Math.sin(t * 42.0) * 0.024 * (1 - u);
+      lookPitchOffset = -0.08 * resistGlance;
+      headRoll = -0.08 - 0.24 * resistGlance;
+      fov = THREE.MathUtils.lerp(69, 90, THREE.MathUtils.smoothstep(u, 0, 1));
     } else {
-      // Stage 3: Full 4.85-second high-velocity speed-line flight deep down the 40m 3D monitor throat!
-      const u = THREE.MathUtils.clamp((t - 2.35) / Math.max(0.5, duration - 2.35), 0, 1);
-      // Smooth continuous acceleration curve that maintains thrilling forward velocity right to climax!
+      const u = THREE.MathUtils.clamp((t - 2.25) / Math.max(0.5, duration - 2.25), 0, 1);
       const accel = Math.pow(u, 1.55);
-      distOut = THREE.MathUtils.lerp(0.38, -38.2, accel);
-      const spiralEnv = Math.sin(u * Math.PI) * 0.14;
-      sideOffset = Math.sin(u * 13.5) * spiralEnv;
-      vertOffset = Math.cos(u * 11.0) * spiralEnv * 0.85;
-      lookYawOffset = Math.sin(u * 9.0) * 0.045 * (1 - u * 0.5);
-      lookPitchOffset = Math.cos(u * 8.0) * 0.035 * (1 - u * 0.5);
-      headRoll = Math.sin(u * 7.5) * 0.28 + u * 0.18;
-      fov = THREE.MathUtils.lerp(92, 112, Math.sin(u * Math.PI * 0.82));
+      // Reach exact localZ = -88.56 (27.44 local units from z=-116 cap, matching GlitchWorld's -27.44m sleeve start 1:1!)
+      const endWorldDist = -88.56 * Math.max(0.1, monitorScaleZ);
+      distOut = THREE.MathUtils.lerp(0.38, endWorldDist, accel);
+      const damp = 1.0 - THREE.MathUtils.smoothstep(u, 0.58, 1.0);
+      const spiralEnv = Math.sin(u * Math.PI) * 0.095 * damp;
+      sideOffset = Math.sin(u * 12.0) * spiralEnv;
+      vertOffset = Math.cos(u * 10.0) * spiralEnv * 0.85;
+      lookYawOffset = Math.sin(u * 8.0) * 0.035 * damp;
+      lookPitchOffset = Math.cos(u * 7.0) * 0.028 * damp;
+      headRoll = THREE.MathUtils.lerp(Math.sin(u * 6.5) * 0.24, 0.12, THREE.MathUtils.smoothstep(u, 0.55, 1.0));
+      fov = THREE.MathUtils.lerp(90, 96, THREE.MathUtils.smoothstep(u, 0.0, 0.85));
     }
 
     const camPos = this.scratchPos
@@ -350,7 +340,7 @@ export class FirstPersonController {
 
     const baseLookTarget = this.scratchTarget
       .copy(monitorPos)
-      .addScaledVector(monFwd, Math.min(-6.0, distOut - 10.0));
+      .addScaledVector(monFwd, Math.min(-6.0, distOut - 27.44 * Math.max(0.1, monitorScaleZ)));
 
     this.dummyCam.position.copy(camPos);
     this.dummyCam.up.set(0, 1, 0);
@@ -400,26 +390,22 @@ export class FirstPersonController {
     let damping = 6.2;
 
     if (t < 0.72) {
-      // Panic glance right at sky fracture
       this.yawSpring.target = baseYaw + 0.68;
       this.pitchSpring.target = 0.16;
       this.rollSpring.target = -0.075;
       bodyDropY = -0.04 * Math.sin((t / 0.72) * Math.PI);
     } else if (t < 1.48) {
-      // Panic glance left at trembling horizon
       this.yawSpring.target = baseYaw - 0.82;
       this.pitchSpring.target = 0.08;
       this.rollSpring.target = 0.085;
       bodySideShift = -0.08;
     } else if (t < 2.25) {
-      // Snap gaze straight down at shoes right as Voronoi polygonal cracks split open!
       stiffness = 34;
       damping = 6.8;
       this.yawSpring.target = baseYaw - 0.08;
       this.pitchSpring.target = -1.04;
       this.rollSpring.target = -0.04;
     } else if (t < 3.75) {
-      // Watch Voronoi jigsaw seams widen beneath feet while stumbling 2 steps backward!
       const u = (t - 2.25) / 1.5;
       stiffness = 32;
       damping = 6.5;
@@ -447,7 +433,6 @@ export class FirstPersonController {
       }
       fovTarget = 74;
     } else if (t < 4.15) {
-      // Exact moment Voronoi jigsaw polygons shatter along the cracks & drop away beneath your heels!
       const u = (t - 3.75) / 0.4;
       bodyBackDist = 1.15;
       bodyDropY = -u * u * 1.35;
@@ -455,7 +440,6 @@ export class FirstPersonController {
       this.rollSpring.target = -0.24;
       fovTarget = 84;
     } else {
-      // 5.45-second high-velocity speed-line freefall down the 245m abyssal shaft!
       const fallT = t - 4.15;
       bodyBackDist = 1.15 + Math.sin(fallT * 1.7) * 0.45;
       bodySideShift = Math.cos(fallT * 1.4) * 0.45;
@@ -465,13 +449,11 @@ export class FirstPersonController {
       damping = 4.6;
 
       if (fallT < 2.85) {
-        // Tumbling backward looking UP at the jagged polygonal cliff rim receding high overhead!
         this.pitchSpring.target = 1.15;
         this.yawSpring.target = baseYaw + fallT * 0.52;
         this.rollSpring.target = 0.26 * Math.sin(fallT * 2.1);
         fovTarget = 98;
       } else {
-        // Flipping downward into blistering speed-lines toward the rushing bedroom threshold!
         this.pitchSpring.target = -1.28;
         this.yawSpring.target = baseYaw + 1.55;
         this.rollSpring.target = -0.18;
@@ -506,58 +488,129 @@ export class FirstPersonController {
   }
 
   /**
-   * Deep 3-Act Continuous Aerial Arrival Sequence into the 3D Glitch World (6.15s):
-   * 1) 0.00..1.65s: Tumble backward out of the 28m Sky-Monitor at (0, 94, 58), looking UP as it shrinks into the clouds!
-   * 2) 1.65..4.35s: Mid-air 180° skydiver roll over your right shoulder into a bold banking dive under the Sky-Aqueducts!
-   * 3) 4.35..6.15s: Heavy knee-buckling impact on the Overlook, breathless glance down, and smooth rise to standing!
+   * 100% Seamless Forward-Flying Tunnel-to-3D-World Arrival Sequence (6.20s):
+   * 1) 0.00..1.15s: Inside the Sky-Monitor's 56m 3D Data-Vortex Exit Sleeve (localZ: -31.5m -> 0.0m),
+   *    flying straight forward toward the open 28m shattered BSOD glass aperture with the live 3D
+   *    GlitchWorld Cathedral & Celestial Sky-Eye directly ahead through the mouth!
+   * 2) 1.15..4.55s: Burst straight out through the shattered Sky-Monitor glass & crystalline shards onto a
+   *    C1-continuous cubic Hermite flight spline sweeping gracefully under the colossal Sky-Aqueduct onto the Overlook!
+   * 3) 4.55..6.20s: Physical landing absorb on the Overlook octagonal medallion & rise to standing!
    */
   public updateGlitchArrivalCutscene(
     dt: number,
     t: number,
     spawnPos: THREE.Vector3,
-    corePos: THREE.Vector3
-  ): { finished: boolean; touchedDown: boolean; airSpeedFactor: number } {
-    const diveEnd = 4.35;
-    const totalDur = 6.15;
+    _corePos: THREE.Vector3,
+    skyPortalPos?: THREE.Vector3,
+    skyPortalQuat?: THREE.Quaternion
+  ): { finished: boolean; touchedDown: boolean; airSpeedFactor: number; crossedAperture: boolean } {
+    const tunnelDur = 1.12;
+    const glideDur = 3.18;
+    const diveEnd = tunnelDur + glideDur; // 4.30s
+    const totalDur = 5.95;
+
+    const p0x = skyPortalPos ? skyPortalPos.x : 0;
+    const p0y = skyPortalPos ? skyPortalPos.y : 46;
+    const p0z = skyPortalPos ? skyPortalPos.z : 86;
+
+    if (skyPortalQuat) {
+      this.scratchDir.set(0, 0, 1).applyQuaternion(skyPortalQuat).normalize();
+    } else {
+      this.scratchDir.set(0, 22.0 - p0y, -6.0 - p0z).normalize();
+    }
+    const fwdX = this.scratchDir.x;
+    const fwdY = this.scratchDir.y;
+    const fwdZ = this.scratchDir.z;
+    const tunnelPitch = Math.asin(THREE.MathUtils.clamp(fwdY, -0.99, 0.99));
+    const exitSpeed = 24.5; // m/s -> -27.44m sleeve start & 77.9m Hermite tangent matching the 76.7m sky chord!
+
+    if (t < tunnelDur) {
+      // Phase 1: Inside the Solid Circular Sky-Maw Sleeve (-27.44m -> 0.0m at 24.5 m/s)
+      const s = THREE.MathUtils.clamp(t / tunnelDur, 0, 1);
+      const localZ = -exitSpeed * tunnelDur * (1.0 - s);
+
+      const camX = p0x + fwdX * localZ;
+      const camY = p0y + fwdY * localZ;
+      const camZ = p0z + fwdZ * localZ;
+
+      const roll = THREE.MathUtils.lerp(0.12, 0.03, THREE.MathUtils.smoothstep(s, 0, 1));
+      const fov = 96.0 - 6.0 * s;
+
+      this.camera.position.set(camX, camY, camZ);
+      this.euler.set(tunnelPitch, 0, roll, 'YXZ');
+      this.camera.quaternion.setFromEuler(this.euler);
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+
+      this.position.copy(spawnPos);
+      return { finished: false, touchedDown: false, airSpeedFactor: 1.0, crossedAperture: false };
+    }
 
     if (t < diveEnd) {
-      const u = THREE.MathUtils.clamp(t / diveEnd, 0, 1);
-      const yCurve = 1.0 - Math.pow(u, 1.48);
-      const zCurve = 1.0 - Math.pow(u, 0.92);
+      // Phase 2: Velocity-Aligned C1/C2-Smooth Cubic Hermite Flight out through the 48 Sky-Maw Teeth onto Overlook!
+      const u = THREE.MathUtils.clamp((t - tunnelDur) / glideDur, 0, 1);
+      const u2 = u * u;
+      const u3 = u2 * u;
+      const h00 = 2 * u3 - 3 * u2 + 1;
+      const h10 = u3 - 2 * u2 + u;
+      const h01 = -2 * u3 + 3 * u2;
+      const h11 = u3 - u2;
 
-      // Sweeping S-bank dive from beneath the (0, 94, 58) Sky-Monitor down to (0, spawnY, 20)
-      const bankSway = Math.sin(u * Math.PI * 1.35) * (1.0 - u) * THREE.MathUtils.smoothstep(u, 0.08, 0.38);
-      const camX = spawnPos.x + bankSway * 19.5;
-      const camY = spawnPos.y + this.eyeHeight + 83.5 * yCurve;
-      const camZ = spawnPos.z + 34.0 * zCurve;
+      const m0x = fwdX * (exitSpeed * glideDur);
+      const m0y = fwdY * (exitSpeed * glideDur);
+      const m0z = fwdZ * (exitSpeed * glideDur);
 
-      // Singularity-free YXZ Euler skydiver choreography:
-      // 0..1.15s: Falling backward facing +Z/+Y (yaw=PI, pitch=+0.78) straight UP at the 28m Sky-Monitor!
-      // 1.15..2.95s: Smooth 180° shoulder roll (yaw: PI -> 0, pitch: +0.78 -> -0.46) into the Megacity dive!
-      // 2.95..4.35s: Banking wingover locking onto the Sanctuary & Overlook, matching touchdown pose at t=4.35s!
-      const flip = THREE.MathUtils.smoothstep(t, 1.10, 2.95);
-      const endLevel = THREE.MathUtils.smoothstep(t, 3.10, diveEnd);
+      const p1x = spawnPos.x;
+      const p1y = spawnPos.y + this.eyeHeight + 0.30;
+      const p1z = spawnPos.z;
 
-      const yaw = Math.PI * (1.0 - flip) - bankSway * 0.16 * flip * (1.0 - endLevel);
-      const divePitch = THREE.MathUtils.lerp(-0.46, -0.24, endLevel);
-      const pitch = THREE.MathUtils.lerp(0.78, divePitch, flip);
+      const m1x = 0;
+      const m1y = -9.5;
+      const m1z = -24.0;
 
-      const rollOver = Math.sin(flip * Math.PI) * -0.48;
-      const wingBank = -Math.sin(u * Math.PI * 1.35) * 0.34 * flip * (1.0 - endLevel);
-      const roll = THREE.MathUtils.lerp(0.18 * (1.0 - flip) + rollOver + wingBank, 0.06, endLevel)
-                 + Math.sin(t * 26.0) * 0.008 * (1.0 - endLevel);
+      // C2-smooth sin^2(u * PI) lateral bank: value=0 AND derivative=0 at u=0 and u=1!
+      const sinU = Math.sin(u * Math.PI);
+      const bankCurve = sinU * sinU * (1.0 - u * 0.35);
+      const camX = h00 * p0x + h10 * m0x + h01 * p1x + h11 * m1x + bankCurve * 3.0;
+      const camY = h00 * p0y + h10 * m0y + h01 * p1y + h11 * m1y;
+      const camZ = h00 * p0z + h10 * m0z + h01 * p1z + h11 * m1z;
+
+      // Analytic flight tangent dP/du so camera looks naturally along its true 3D swooping trajectory (0.000 deg jump at u=0!)
+      const dh00 = 6 * u2 - 6 * u;
+      const dh10 = 3 * u2 - 4 * u + 1;
+      const dh01 = -6 * u2 + 6 * u;
+      const dh11 = 3 * u2 - 2 * u;
+      const dBank = Math.PI * Math.sin(2 * Math.PI * u) * (1.0 - u * 0.35) - 0.35 * sinU * sinU;
+      const vx = dh00 * p0x + dh10 * m0x + dh01 * p1x + dh11 * m1x + dBank * 3.0;
+      const vy = dh00 * p0y + dh10 * m0y + dh01 * p1y + dh11 * m1y;
+      const vz = dh00 * p0z + dh10 * m0z + dh01 * p1z + dh11 * m1z;
+      const vLen = Math.max(1e-4, Math.hypot(vx, vy, vz));
+      const velPitch = Math.asin(THREE.MathUtils.clamp(vy / vLen, -0.92, 0.92));
+      const velYaw = Math.atan2(-vx, -vz);
+
+      const flareBlend = THREE.MathUtils.smoothstep(u, 0.52, 1.0);
+      const pitch = THREE.MathUtils.lerp(velPitch, -0.24, flareBlend);
+      const yaw = THREE.MathUtils.lerp(velYaw * 0.45, 0.0, flareBlend);
+      const roll = 0.03 - bankCurve * 0.13;
+      // C1-continuous FOV continuation from Phase 1 (90.0 -> 74.0, matching dfov/dt = -5.357 deg/s at u=0!)
+      const fov = 90.0 - 17.04 * u + 1.04 * u2;
 
       this.camera.position.set(camX, camY, camZ);
       this.euler.set(pitch, yaw, roll, 'YXZ');
       this.camera.quaternion.setFromEuler(this.euler);
-      this.camera.fov = THREE.MathUtils.lerp(98, 76, Math.pow(u, 0.82));
+      this.camera.fov = fov;
       this.camera.updateProjectionMatrix();
 
-      this.position.set(spawnPos.x, spawnPos.y, spawnPos.z);
-      return { finished: false, touchedDown: false, airSpeedFactor: 1.0 - u * 0.25 };
+      this.position.copy(spawnPos);
+      return {
+        finished: false,
+        touchedDown: false,
+        airSpeedFactor: 1.0 - u * 0.35,
+        crossedAperture: true,
+      };
     }
 
-    // Touchdown & staggered physical recovery (4.35s .. 6.15s)
+    // Phase 3: Touchdown & crisp athletic knee-absorb onto the Overlook octagonal plaza (4.55s .. 6.20s)
     const landT = t - diveEnd;
     const landDur = totalDur - diveEnd;
 
@@ -572,7 +625,7 @@ export class FirstPersonController {
       this.camera.fov = 66;
       this.camera.updateProjectionMatrix();
       this.applyFreeRoamCamera(0);
-      return { finished: true, touchedDown: true, airSpeedFactor: 0 };
+      return { finished: true, touchedDown: true, airSpeedFactor: 0, crossedAperture: true };
     }
 
     let eyeY = this.eyeHeight;
@@ -581,32 +634,29 @@ export class FirstPersonController {
     let roll = 0;
     let fov = 66;
 
-    if (landT < 0.34) {
-      // Heavy knee-buckling slam onto the wet basalt overlook!
-      const u = landT / 0.34;
+    if (landT < 0.32) {
+      const u = landT / 0.32;
       const ease = 1 - Math.pow(1 - u, 3);
-      eyeY = THREE.MathUtils.lerp(this.eyeHeight + 0.32, 0.46, ease);
-      pitch = THREE.MathUtils.lerp(-0.24, -0.62, ease);
-      roll = THREE.MathUtils.lerp(0.06, -0.20, ease);
-      yaw = THREE.MathUtils.lerp(0.0, 0.16, ease);
-      fov = THREE.MathUtils.lerp(76, 69, ease);
-    } else if (landT < 0.88) {
-      // Catching breath on one knee, glancing briefly at the glowing circuit stone under your hands
-      const u = (landT - 0.34) / 0.54;
-      eyeY = THREE.MathUtils.lerp(0.46, 0.58, u);
-      pitch = THREE.MathUtils.lerp(-0.62, -0.44, u);
-      roll = THREE.MathUtils.lerp(-0.20, -0.12, u);
-      yaw = THREE.MathUtils.lerp(0.16, -0.10, Math.sin(u * Math.PI * 0.5));
-      fov = 69;
+      eyeY = THREE.MathUtils.lerp(this.eyeHeight + 0.30, 0.56, ease);
+      pitch = THREE.MathUtils.lerp(-0.24, -0.52, ease);
+      roll = THREE.MathUtils.lerp(0.03, -0.14, ease);
+      yaw = THREE.MathUtils.lerp(0.0, 0.10, ease);
+      fov = THREE.MathUtils.lerp(74, 68, ease);
+    } else if (landT < 0.80) {
+      const u = (landT - 0.32) / 0.48;
+      eyeY = THREE.MathUtils.lerp(0.56, 0.68, u);
+      pitch = THREE.MathUtils.lerp(-0.52, -0.36, u);
+      roll = THREE.MathUtils.lerp(-0.14, -0.08, u);
+      yaw = THREE.MathUtils.lerp(0.10, -0.06, Math.sin(u * Math.PI * 0.5));
+      fov = 68;
     } else {
-      // Pushing off knee & rising smoothly to full standing posture facing the Sanctuary vista!
-      const u = (landT - 0.88) / (landDur - 0.88);
+      const u = (landT - 0.80) / (landDur - 0.80);
       const smooth = u * u * (3 - 2 * u);
-      eyeY = THREE.MathUtils.lerp(0.58, this.eyeHeight, smooth);
-      pitch = THREE.MathUtils.lerp(-0.44, 0.02, smooth);
-      roll = THREE.MathUtils.lerp(-0.12, 0.0, smooth);
-      yaw = THREE.MathUtils.lerp(-0.10, 0.0, smooth);
-      fov = THREE.MathUtils.lerp(69, 66, smooth);
+      eyeY = THREE.MathUtils.lerp(0.68, this.eyeHeight, smooth);
+      pitch = THREE.MathUtils.lerp(-0.36, 0.02, smooth);
+      roll = THREE.MathUtils.lerp(-0.08, 0.0, smooth);
+      yaw = THREE.MathUtils.lerp(-0.06, 0.0, smooth);
+      fov = THREE.MathUtils.lerp(68, 66, smooth);
     }
 
     this.position.copy(spawnPos);
@@ -615,13 +665,13 @@ export class FirstPersonController {
     this.camera.quaternion.setFromEuler(this.euler);
     this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, fov, Math.min(1, dt * 15));
     this.camera.updateProjectionMatrix();
-    return { finished: false, touchedDown: true, airSpeedFactor: 0 };
+    return { finished: false, touchedDown: true, airSpeedFactor: 0, crossedAperture: true };
   }
 
   public updateReturnLandingCutscene(dt: number, t: number): boolean {
     const landX = 0.65;
     const landZ = 0.35;
-    const targetYaw = 1.72; // Looking from rug straight toward the altered PC desk!
+    const targetYaw = 1.72;
 
     let eyeY = this.eyeHeight;
     let yaw = targetYaw;
@@ -630,14 +680,12 @@ export class FirstPersonController {
     let fov = 64;
 
     if (t < 0.26) {
-      // Continuous freefall momentum straight down from the dark bedroom ceiling onto the rug!
       const u = t / 0.26;
       eyeY = THREE.MathUtils.lerp(2.90, 0.36, u * u);
       pitch = THREE.MathUtils.lerp(-1.18, -0.58, u);
       roll = THREE.MathUtils.lerp(-0.18, -0.30, u);
       fov = THREE.MathUtils.lerp(102, 74, u);
     } else if (t < 1.45) {
-      // Sprawled on side/elbows on the rug, gasping and glancing wildly at the chair & floorboards!
       const u = (t - 0.26) / 1.19;
       const impactBounce = Math.sin(Math.min(1, u * 3.0) * Math.PI) * 0.045;
       eyeY = 0.36 - impactBounce + u * 0.16;
@@ -646,7 +694,6 @@ export class FirstPersonController {
       roll = THREE.MathUtils.lerp(-0.30, -0.14, u);
       fov = THREE.MathUtils.lerp(74, 68, u);
     } else if (t < 3.35) {
-      // Bracing hand against floor and rising unsteadily to standing posture!
       const u = (t - 1.45) / 1.90;
       const smooth = u * u * (3 - 2 * u);
       eyeY = THREE.MathUtils.lerp(0.52, this.eyeHeight, smooth);
