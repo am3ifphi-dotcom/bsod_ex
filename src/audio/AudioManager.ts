@@ -210,6 +210,28 @@ export class AudioManager {
     this.unlocked = true;
   }
 
+  /**
+   * Monotonic clock in seconds locked directly to WebAudio's hardware sample clock
+   * when running (falls back to monotonic wall-clock if audio is unavailable/suspended).
+   * Driving cutscene timelines from this clock guarantees ZERO audio/visual drift
+   * even across low frame rates or transient main-thread stalls.
+   */
+  public getClockSeconds(): number {
+    if (this.ctx && this.ctx.state === 'running') {
+      return this.ctx.currentTime;
+    }
+    return performance.now() * 0.001;
+  }
+
+  public setPaused(paused: boolean): void {
+    if (!this.ctx || !this.unlocked) return;
+    if (paused && this.ctx.state === 'running') {
+      this.ctx.suspend().catch(() => {});
+    } else if (!paused && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+    }
+  }
+
   private buildImpulseBuffer(ctx: AudioContext, durationSec: number, decay: number): AudioBuffer {
     const length = Math.floor(ctx.sampleRate * durationSec);
     const impulse = ctx.createBuffer(2, length, ctx.sampleRate);

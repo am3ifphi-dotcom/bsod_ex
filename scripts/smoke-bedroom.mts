@@ -61,6 +61,21 @@ bedroom.group.traverse((o: any) => {
 });
 console.log('meshes:', meshes, '| instanced:', instanced);
 
+// Verify 3D Parasyte BSOD anatomy: cleanly hidden at Stage 0, active during madness, hidden in aftermath!
+bedroom.setAftermathMode(false);
+bedroom.bsodScreen.update(1 / 60, 0, {
+  hoverFace: false,
+  cursorUv: new THREE.Vector2(0.5, 0.5),
+  clickCount: 0,
+  madness: 0,
+  jawOpen: 0,
+  suctionProgress: 0,
+  aftermath: false,
+}, 0);
+if (bedroom.bsodScreen.parasyteGroup.visible !== false) {
+  throw new Error('parasyteGroup must be hidden at clean Stage-0 BSOD!');
+}
+
 // exercise the runtime updates across a full escalation + aftermath
 for (let i = 0; i < 300; i++) {
   bedroom.bsodScreen.update(
@@ -77,10 +92,35 @@ for (let i = 0; i < 300; i++) {
     },
     0.4
   );
+  if (i === 120 && bedroom.bsodScreen.parasyteGroup.visible !== true) {
+    throw new Error('parasyteGroup must be visible during active BSOD madness!');
+  }
   bedroom.update(1 / 60, i / 60, Math.min(1, i / 200), Math.min(0.5, i / 400), false);
 }
+const bsodAny = bedroom.bsodScreen as any;
+if (
+  bsodAny.rimTeethMesh.count !== 52 ||
+  bsodAny.jawFlapsMesh.count !== 4 ||
+  Boolean(bsodAny.tongueMesh) ||
+  bsodAny.sinewMesh.count !== 32 ||
+  bsodAny.parasyteEyesMesh.count !== 11
+) {
+  throw new Error('Unexpected 3D Parasyte BSOD mesh counts!');
+}
 bedroom.setAftermathMode(true);
-bedroom.update(1 / 60, 5, 0, 0, true);
+bedroom.bsodScreen.update(1 / 60, 5, {
+  hoverFace: false,
+  cursorUv: new THREE.Vector2(0.5, 0.5),
+  clickCount: 0,
+  madness: 0,
+  jawOpen: 0,
+  suctionProgress: 0,
+  aftermath: true,
+}, 0);
+if (bsodAny.parasyteGroup.visible !== false) {
+  throw new Error('parasyteGroup must be hidden in aftermath!');
+}
+bedroom.update(1 / 60, 5, 0, 0, true, new THREE.Vector3(1.2, 0.017, -1.0));
 
 // floor surface lookup + collision sanity
 const p = new THREE.Vector3(0.35, 0.017, 0.62);

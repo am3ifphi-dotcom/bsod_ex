@@ -466,6 +466,16 @@ kbd {
   accent-color: var(--bsod-blue);
 }
 
+.setting-row select {
+  width: 55%;
+  padding: 5px 8px;
+  background: rgba(3, 18, 42, 0.92);
+  color: #eaf5ff;
+  border: 1px solid rgba(100, 182, 255, 0.45);
+  font-size: 12.5px;
+  outline: none;
+}
+
 .pause-actions {
   margin-top: 26px;
   display: flex;

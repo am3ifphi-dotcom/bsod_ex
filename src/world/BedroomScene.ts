@@ -2,6 +2,11 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { BsodScreen } from './BsodScreen';
+import {
+  getSharedNoiseTexture,
+  mergeStaticSubmeshes,
+  toAtmosphericMaterial,
+} from '../utils/ProceduralNoise';
 
 export interface BoxCollider2D {
   minX: number;
@@ -10,31 +15,17 @@ export interface BoxCollider2D {
   maxZ: number;
 }
 
-const PEEL_SHARD_COUNT = 56;
+const PEEL_SHARD_COUNT = 64;
 
 /**
- * Convert heavy MeshStandardMaterial to fast MeshLambertMaterial while preserving
- * albedo, emissive, alpha cutout, and double-sided flags — 4x faster fragment shading!
+ * Upgrades heavy PBR MeshStandardMaterial into a fast, specular + Fresnel-rim atmospheric material.
  */
 export function toFastLambert(src: THREE.Material): THREE.Material {
-  if (!(src as THREE.MeshStandardMaterial).isMeshStandardMaterial) return src;
-  const std = src as THREE.MeshStandardMaterial;
-  const lam = new THREE.MeshLambertMaterial({
-    name: std.name,
-    color: std.color.clone(),
-    map: std.map,
-    emissive: std.emissive.clone(),
-    emissiveMap: std.emissiveMap,
-    emissiveIntensity: std.emissiveIntensity,
-    transparent: std.transparent,
-    opacity: std.opacity,
-    alphaTest: std.alphaTest,
-    side: std.side,
-  });
-  return lam;
+  return toAtmosphericMaterial(src, { rimColor: 0x3b96ff });
 }
 
 export class BedroomScene {
+  public readonly scene = new THREE.Scene();
   public readonly group = new THREE.Group();
   public readonly bsodScreen = new BsodScreen();
 
@@ -52,6 +43,7 @@ export class BedroomScene {
   private monitorBeamMat!: THREE.ShaderMaterial;
   private monitorBeamMesh!: THREE.Mesh;
   private roomDustMat!: THREE.ShaderMaterial;
+  private rainGlassMat!: THREE.ShaderMaterial;
 
   private officeChair!: THREE.Object3D;
   private clockCanvas!: HTMLCanvasElement;
@@ -60,20 +52,14 @@ export class BedroomScene {
 
   private aftermathRelicGroup = new THREE.Group();
   private peelShards!: THREE.InstancedMesh;
-  private peelData: Array<{
-    origin: THREE.Vector3;
-    rot: THREE.Euler;
-    rotSpeed: THREE.Vector3;
-    scale: THREE.Vector3;
-    delay: number;
-    speed: number;
-  }> = [];
+  private peelShardMat!: THREE.ShaderMaterial;
 
   private readonly infectUniforms = {
     uInfect: { value: 0 },
     uPull: { value: 0 },
     uTime: { value: 0 },
     uPortalPos: { value: new THREE.Vector3(-1.723, 1.045, 0.735) },
+    uNoiseTex: { value: getSharedNoiseTexture() },
   };
 
   private readonly colliders: BoxCollider2D[] = [
@@ -83,7 +69,7 @@ export class BedroomScene {
     { minX: 1.18, maxX: 1.72, minZ: -2.58, maxZ: -1.88 },
     // PC Desk against -X wall (front edge at X = -1.25)
     { minX: -2.07, maxX: -1.23, minZ: -0.22, maxZ: 1.38 },
-    // Office chair pushed slightly aside toward +Z so front of monitor is 100% clear!
+    // Office chair pushed slightly aside toward +Z so front of monitor is 100% clear
     { minX: -1.06, maxX: -0.56, minZ: 1.06, maxZ: 1.54 },
     // +X Window counter / bookshelf / stool / storage box
     { minX: 1.98, maxX: 2.85, minZ: -2.25, maxZ: 1.65 },
@@ -91,6 +77,10 @@ export class BedroomScene {
   ];
 
   public async load(gltfLoader: GLTFLoader, texLoader: THREE.TextureLoader): Promise<void> {
+    this.scene.background = new THREE.Color(0x03050a);
+    this.scene.fog = new THREE.FogExp2(0x050914, 0.045);
+    this.scene.add(this.group);
+
     const [bedroomGltf, pcGltf, chairGltf, cablesGltf, clockTexWebp, lampTexWebp] =
       await Promise.all([
         gltfLoader.loadAsync('/models/bedroom.glb'),
@@ -104,7 +94,7 @@ export class BedroomScene {
     clockTexWebp.colorSpace = THREE.SRGBColorSpace;
     lampTexWebp.colorSpace = THREE.SRGBColorSpace;
 
-    // 1. Convert Bedroom materials to fast Lambert & inject infection shader ONLY onto large architectural surfaces!
+    // 1. Convert Bedroom materials to specular/rim AtmosphericMaterial & inject fast texture-backed infection shader
     const roomRoot = bedroomGltf.scene;
     const matCache = new Map<THREE.Material, THREE.Material>();
     let wallTemplateMat: THREE.MeshLambertMaterial | null = null;
@@ -117,10 +107,8 @@ export class BedroomScene {
         if (!m) return m;
         let cached = matCache.get(m);
         if (!cached) {
-          cached = toFastLambert(m);
           const mName = m.name || '';
-          // Inject room infection shader onto main architectural & large furniture surfaces
-          if (
+          const isInfectedArch =
             mName.includes('Walls') ||
             mName.includes('Floor') ||
             mName.includes('material_54') || // Rug
@@ -132,10 +120,28 @@ export class BedroomScene {
             mName === 'Window' ||
             mName === 'radiator' ||
             mName === 'Stool' ||
-            mName === 'material_47'
-          ) {
-            this.injectRoomInfectionShader(cached);
+            mName === 'material_47';
+
+          if (isInfectedArch) {
+            const std = m as THREE.MeshStandardMaterial;
+            const lam = new THREE.MeshLambertMaterial({
+              name: mName,
+              color: std.color ? std.color.clone() : new THREE.Color(0xffffff),
+              map: std.map ?? null,
+              emissive: std.emissive ? std.emissive.clone() : new THREE.Color(0x000000),
+              emissiveMap: std.emissiveMap ?? null,
+              emissiveIntensity: std.emissiveIntensity ?? 1,
+              transparent: std.transparent ?? false,
+              opacity: std.opacity ?? 1,
+              alphaTest: std.alphaTest ?? 0,
+              side: /Curtain|Window/i.test(mName) ? THREE.DoubleSide : THREE.FrontSide,
+            });
+            this.injectRoomInfectionShader(lam);
+            cached = lam;
+          } else {
+            cached = toAtmosphericMaterial(m, { rimColor: 0x3b96ff });
           }
+
           if (mName === 'Walls') {
             wallTemplateMat = cached as THREE.MeshLambertMaterial;
           }
@@ -145,13 +151,14 @@ export class BedroomScene {
       });
       mesh.material = Array.isArray(mesh.material) ? newMats : newMats[0];
     });
+    mergeStaticSubmeshes(roomRoot);
     this.group.add(roomRoot);
 
     // 2. Enclose cutaway -X wall, +Z wall, flat ceiling, door & nocturnal skyline
     this.buildEnclosedArchitecture(wallTemplateMat);
     this.buildNightExterior();
 
-    // 3. Place the SINGLE Gaming Desktop PC Setup against the -X wall
+    // 3. Place Gaming Desktop PC Setup against the -X wall
     const pcRoot = pcGltf.scene;
     pcRoot.position.set(-1.58, 0.73, 0.42);
     pcRoot.scale.setScalar(0.105);
@@ -178,7 +185,6 @@ export class BedroomScene {
         const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(this.monitorWorldQuat);
         this.bsodScreen.root.position.addScaledVector(fwd, 0.003);
 
-        // Comfortable seated/leaning-in inspection camera framing the full monitor + bezel + room glow
         this.inspectLookTarget.copy(this.monitorWorldPos);
         this.inspectCamPos.copy(this.monitorWorldPos).addScaledVector(fwd, 0.66);
         this.inspectCamPos.y += 0.035;
@@ -193,10 +199,22 @@ export class BedroomScene {
         if (!m) return m;
         let cached = pcMatCache.get(m);
         if (!cached) {
-          cached = toFastLambert(m);
           if (m.name === 'Material') {
-            // Desk tabletop infects cleanly during escalation
-            this.injectRoomInfectionShader(cached);
+            const std = m as THREE.MeshStandardMaterial;
+            const deskLam = new THREE.MeshLambertMaterial({
+              name: m.name,
+              color: std.color ? std.color.clone() : new THREE.Color(0xffffff),
+              map: std.map ?? null,
+              side: THREE.FrontSide,
+            });
+            this.injectRoomInfectionShader(deskLam);
+            cached = deskLam;
+          } else {
+            cached = toAtmosphericMaterial(m, {
+              rimColor: 0x4ca8ff,
+              specStrength: 0.36,
+              shininess: 48,
+            });
           }
           pcMatCache.set(m, cached);
         }
@@ -211,14 +229,14 @@ export class BedroomScene {
       this.bsodScreen.root.scale.set(0.348, 0.365, 0.348);
     }
 
+    mergeStaticSubmeshes(pcRoot, (o) => o.name === 'BSOD_SCREEN_NODE');
     this.infectUniforms.uPortalPos.value.copy(this.monitorWorldPos);
     this.group.add(pcRoot);
     this.group.add(this.bsodScreen.root);
 
-    // Add 4 steel desk legs & under-desk cable harness (no extra PC boards!)
     this.buildDeskLegsAndCables(cablesGltf.scene);
 
-    // 4. Office Chair (placed naturally slightly to the side so front of monitor is 100% open!)
+    // 4. Office Chair
     this.officeChair = chairGltf.scene;
     this.officeChair.position.set(-0.82, 0.017, 1.30);
     this.officeChair.scale.setScalar(0.75);
@@ -226,29 +244,20 @@ export class BedroomScene {
     this.officeChair.traverse((o) => {
       if ((o as THREE.Mesh).isMesh) {
         const mesh = o as THREE.Mesh;
-        mesh.material = toFastLambert(mesh.material as THREE.Material);
+        mesh.material = toAtmosphericMaterial(mesh.material as THREE.Material, {
+          rimColor: 0x3b96ff,
+          specStrength: 0.28,
+        });
       }
     });
     this.group.add(this.officeChair);
 
-    // 5. Lived-in Nocturnal Props (Desk Lamp, Coffee Mug, Digital Clock)
+    // 5. Nocturnal Props, Lighting, 100% GPU Peeling Shards, Relics & Architectural Trim
     this.buildNocturnalProps(clockTexWebp, lampTexWebp);
-
-    // 6. Lightweight Nocturnal Lighting (ONLY 1 HemisphereLight + 1 Desk Lamp PointLight + Monitor PointLight!)
     this.buildNocturnalLighting();
-
-    // 7. Instanced Peeling Room Shards (1 single draw call, hidden when idle!)
     this.buildPeelingRoomShards();
-
-    // 8. Act 5 Lingering Aftermath Relics
     this.buildAftermathRelics();
-
-    // 8b. Window moonlight spill + a dead pendant fixture under the ceiling rose.
     this.buildAmbientPracticals();
-
-    // 9. Architectural craftsmanship: wainscot panelling, chair rail, crown moulding,
-    //    a properly built door, ceiling rose and contact shadows. All merged into a
-    //    handful of draw calls so the room reads as a real, built space.
     this.buildArchitecturalDetail();
   }
 
@@ -261,73 +270,32 @@ export class BedroomScene {
     const trimMat = new THREE.MeshLambertMaterial({ color: 0x161922 });
     this.injectRoomInfectionShader(trimMat);
 
-    // -X Wall behind the Gaming PC setup
-    const westWall = new THREE.Mesh(new THREE.PlaneGeometry(4.56, 3.16, 12, 8), wallMat);
+    const westWall = new THREE.Mesh(new THREE.PlaneGeometry(4.56, 3.16, 10, 6), wallMat);
     westWall.rotation.y = Math.PI * 0.5;
     westWall.position.set(-2.062, 1.59, -0.60);
     this.group.add(westWall);
 
-    // +Z South Wall enclosing the room behind the player
-    const southWall = new THREE.Mesh(new THREE.PlaneGeometry(4.86, 3.16, 12, 8), wallMat);
+    const southWall = new THREE.Mesh(new THREE.PlaneGeometry(4.86, 3.16, 10, 6), wallMat);
     southWall.rotation.y = Math.PI;
     southWall.position.set(0.34, 1.59, 1.646);
     this.group.add(southWall);
 
-    // Flat Upper Ceiling seamlessly meeting the sloped skylight at Z = -1.501, Y = 3.153
-    const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(4.86, 3.18, 12, 10), wallMat);
+    const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(4.86, 3.18, 8, 8), wallMat);
     ceiling.rotation.x = Math.PI * 0.5;
     ceiling.position.set(0.34, 3.152, 0.08);
     this.group.add(ceiling);
 
-    // Baseboards
-    const westBase = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.09, 4.54), trimMat);
-    westBase.position.set(-2.05, 0.06, -0.60);
-    this.group.add(westBase);
-
-    const southBase = new THREE.Mesh(new THREE.BoxGeometry(4.84, 0.09, 0.025), trimMat);
-    southBase.position.set(0.34, 0.06, 1.635);
-    this.group.add(southBase);
-
-    // Bedroom Door on +Z Wall (at X = +1.18) with hallway light crack underneath
-    const doorGroup = new THREE.Group();
-    doorGroup.position.set(1.18, 0.017, 1.632);
-
-    const doorFrame = new THREE.Mesh(new THREE.BoxGeometry(0.98, 2.14, 0.045), trimMat);
-    doorFrame.position.y = 1.07;
-    doorGroup.add(doorFrame);
-
-    const doorPanelMat = new THREE.MeshLambertMaterial({ color: 0x1e222c });
-    this.injectRoomInfectionShader(doorPanelMat);
-    const doorPanel = new THREE.Mesh(new THREE.BoxGeometry(0.88, 2.06, 0.055), doorPanelMat);
-    doorPanel.position.set(0, 1.05, -0.008);
-    doorGroup.add(doorPanel);
-
-    const handle = new THREE.Mesh(
-      new THREE.BoxGeometry(0.12, 0.024, 0.06),
-      new THREE.MeshBasicMaterial({ color: 0x6e788c })
-    );
-    handle.position.set(-0.33, 1.0, -0.045);
-    doorGroup.add(handle);
-
+    // Hallway light crack underneath door on +Z Wall (at X = +1.18)
     const doorCrackGlow = new THREE.Mesh(
       new THREE.PlaneGeometry(0.86, 0.018),
-      new THREE.MeshBasicMaterial({ color: 0x3b4d6b })
+      new THREE.MeshBasicMaterial({ color: 0x45608a })
     );
     doorCrackGlow.rotation.y = Math.PI;
-    doorCrackGlow.position.set(0, 0.012, -0.038);
-    doorGroup.add(doorCrackGlow);
-
-    this.group.add(doorGroup);
+    doorCrackGlow.position.set(1.18, 0.029, 1.594);
+    this.group.add(doorCrackGlow);
   }
 
-  /**
-   * Practical lights that give the room a read: cold moon spill through the right-hand window
-   * (a soft pool plus a faint shaft), and a dead pendant hanging from the ceiling rose. Both are
-   * authored to be *dim* — the monitor is the only real light source in the room, and everything
-   * else exists to reveal that it isn't.
-   */
   private buildAmbientPracticals(): void {
-    // ------------------------------------------------ moonlight pool on the floor
     const poolCanvas = document.createElement('canvas');
     poolCanvas.width = 128;
     poolCanvas.height = 128;
@@ -339,12 +307,14 @@ export class BedroomScene {
     pctx.fillStyle = pgrad;
     pctx.fillRect(0, 0, 128, 128);
     const poolTex = new THREE.CanvasTexture(poolCanvas);
+    poolTex.minFilter = THREE.LinearFilter;
+    poolTex.generateMipmaps = false;
     const pool = new THREE.Mesh(
       new THREE.PlaneGeometry(2.6, 3.2),
       new THREE.MeshBasicMaterial({
         map: poolTex,
         transparent: true,
-        opacity: 0.30,
+        opacity: 0.28,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       })
@@ -354,7 +324,6 @@ export class BedroomScene {
     pool.position.set(1.55, 0.024, -0.55);
     this.group.add(pool);
 
-    // Faint volume of light falling in from the window
     const shaftMat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
@@ -375,9 +344,9 @@ export class BedroomScene {
         void main() {
           float across = smoothstep(0.0, 0.55, vUv.x) * smoothstep(1.0, 0.55, vUv.x);
           float along = smoothstep(0.0, 0.35, vUv.y) * smoothstep(1.0, 0.6, vUv.y);
-          float shimmer = 0.82 + 0.18 * sin(uTime * 0.6 + vUv.y * 2.0);
+          float shimmer = 0.84 + 0.16 * sin(uTime * 0.6 + vUv.y * 2.0);
           vec3 col = mix(vec3(0.24, 0.42, 0.85), vec3(0.10, 0.28, 0.75), uInfect);
-          gl_FragColor = vec4(col, across * along * shimmer * 0.075);
+          gl_FragColor = vec4(col, across * along * shimmer * 0.072);
         }
       `,
     });
@@ -386,12 +355,45 @@ export class BedroomScene {
     shaft.rotation.set(0, -Math.PI * 0.5, -0.34);
     this.group.add(shaft);
 
-    // Cool fill so the window side of the room is never pure black
-    const moonFill = new THREE.PointLight(0x6f92ff, 1.35, 4.4, 1.6);
-    moonFill.position.set(2.15, 2.05, -0.55);
-    this.group.add(moonFill);
+    // Subtle 2:47 AM rain-streaked window glass catching city neon & cold monitor reflections (1 ultra-light quad)
+    this.rainGlassMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: this.infectUniforms.uTime,
+        uInfect: this.infectUniforms.uInfect,
+        uNoiseTex: this.infectUniforms.uNoiseTex,
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec2 vUv;
+        uniform float uTime;
+        uniform float uInfect;
+        uniform sampler2D uNoiseTex;
+        void main() {
+          vec4 n1 = texture2D(uNoiseTex, vec2(vUv.x * 5.5, vUv.y * 1.4 + uTime * 0.055));
+          vec4 n2 = texture2D(uNoiseTex, vec2(vUv.x * 11.0 + 0.37, vUv.y * 2.2 + uTime * 0.095));
+          float streak = pow(n1.b, 4.0) * 0.55 + pow(n2.b, 5.0) * 0.65;
+          float edgeVig = smoothstep(0.0, 0.12, vUv.x) * smoothstep(1.0, 0.88, vUv.x)
+                        * smoothstep(0.0, 0.12, vUv.y) * smoothstep(1.0, 0.88, vUv.y);
+          vec3 tint = mix(vec3(0.32, 0.55, 0.95), vec3(0.08, 0.68, 1.0), uInfect);
+          gl_FragColor = vec4(tint, streak * edgeVig * 0.16);
+        }
+      `,
+    });
+    const rainPane = new THREE.Mesh(new THREE.PlaneGeometry(2.15, 1.75), this.rainGlassMat);
+    rainPane.rotation.y = -Math.PI * 0.5;
+    rainPane.position.set(2.68, 1.62, -0.55);
+    this.group.add(rainPane);
 
-    // ------------------------------------------------ dead pendant under the ceiling rose
+    // Dead pendant fixture under ceiling rose
     const cordMat = new THREE.MeshLambertMaterial({ color: 0x15181f });
     const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.42, 6), cordMat);
     cord.position.set(0.34, 2.935, 0.1);
@@ -399,20 +401,12 @@ export class BedroomScene {
 
     const shadeMat = new THREE.MeshLambertMaterial({ color: 0x2a2f3c, side: THREE.DoubleSide });
     this.injectRoomInfectionShader(shadeMat);
-    const shade = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.14, 14, 1, true), shadeMat);
+    const shade = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.14, 12, 1, true), shadeMat);
     shade.position.set(0.34, 2.66, 0.1);
     shade.rotation.x = Math.PI;
     this.group.add(shade);
-
-    const deadBulb = new THREE.Mesh(
-      new THREE.SphereGeometry(0.026, 10, 8),
-      new THREE.MeshBasicMaterial({ color: 0x2a2118 })
-    );
-    deadBulb.position.set(0.34, 2.695, 0.1);
-    this.group.add(deadBulb);
   }
 
-  /** Adds one transformed box to a merge batch (position + optional Euler in radians). */
   private pushBox(
     batch: THREE.BufferGeometry[],
     w: number,
@@ -436,46 +430,31 @@ export class BedroomScene {
     batch.push(geo);
   }
 
-  /**
-   * Real architectural joinery for the room. The previous room was bare planes, which is why it
-   * read as a grey box instead of a bedroom: what is missing is not texture but *edges* — the
-   * chair rail, the raised wainscot panels, the crown, the door casing and the skirting shadow
-   * that tell your eye how the room is constructed.
-   *
-   * Everything is merged into 3 geometries (trim / panel / door), so the whole pass costs 3 draws.
-   */
   private buildArchitecturalDetail(): void {
     const trimMat = new THREE.MeshLambertMaterial({ color: 0x2b3140 });
     this.injectRoomInfectionShader(trimMat);
     const panelMat = new THREE.MeshLambertMaterial({ color: 0x232936 });
     this.injectRoomInfectionShader(panelMat);
-    const doorMat = new THREE.MeshLambertMaterial({ color: 0x2a3040 });
-    this.injectRoomInfectionShader(doorMat);
 
     const trim: THREE.BufferGeometry[] = [];
     const panels: THREE.BufferGeometry[] = [];
 
-    // Room extents (matching the collision bounds and the enclosed walls)
     const WEST_X = -2.055;
     const SOUTH_Z = 1.638;
     const CEIL_Y = 3.145;
     const CHAIR_RAIL_Y = 0.94;
 
-    // ------------------------------------------------ WEST WALL (-X): wainscot + panels
     for (let i = 0; i < 7; i++) {
       const z0 = -2.72 + i * 0.62;
       const ph = 0.62;
       const pw = 0.5;
       const pz = z0 + 0.31;
-      // Raised-panel frame: 4 chamfered rails around a recessed field
       this.pushBox(panels, 0.018, ph, 0.045, WEST_X + 0.012, 0.52, pz - pw * 0.5);
       this.pushBox(panels, 0.018, ph, 0.045, WEST_X + 0.012, 0.52, pz + pw * 0.5);
       this.pushBox(panels, 0.018, 0.045, pw, WEST_X + 0.012, 0.52 + ph * 0.5, pz);
       this.pushBox(panels, 0.018, 0.045, pw, WEST_X + 0.012, 0.52 - ph * 0.5, pz);
-      // Recessed field sits a few mm back so it catches the lamp at a shallow angle
       this.pushBox(panels, 0.010, ph - 0.09, pw - 0.09, WEST_X + 0.005, 0.52, pz);
     }
-    // Chair rail + skirting (two-step profile) + crown (two-step)
     this.pushBox(trim, 0.05, 0.055, 4.6, WEST_X + 0.028, CHAIR_RAIL_Y, -0.6);
     this.pushBox(trim, 0.07, 0.022, 4.6, WEST_X + 0.036, CHAIR_RAIL_Y - 0.036, -0.6);
     this.pushBox(trim, 0.026, 0.115, 4.6, WEST_X + 0.015, 0.058, -0.6);
@@ -483,13 +462,12 @@ export class BedroomScene {
     this.pushBox(trim, 0.055, 0.05, 4.6, WEST_X + 0.028, CEIL_Y - 0.035, -0.6);
     this.pushBox(trim, 0.085, 0.03, 4.6, WEST_X + 0.042, CEIL_Y - 0.082, -0.6);
 
-    // ------------------------------------------------ SOUTH WALL (+Z): same treatment
     for (let i = 0; i < 7; i++) {
       const x0 = -2.0 + i * 0.62;
       const ph = 0.62;
       const pw = 0.5;
       const px = x0 + 0.31;
-      if (px > 0.62 && px < 1.76) continue; // leave the doorway clear
+      if (px > 0.62 && px < 1.76) continue;
       this.pushBox(panels, 0.045, ph, 0.018, px - pw * 0.5, 0.52, SOUTH_Z - 0.012);
       this.pushBox(panels, 0.045, ph, 0.018, px + pw * 0.5, 0.52, SOUTH_Z - 0.012);
       this.pushBox(panels, pw, 0.045, 0.018, px, 0.52 + ph * 0.5, SOUTH_Z - 0.012);
@@ -503,13 +481,23 @@ export class BedroomScene {
     this.pushBox(trim, 4.9, 0.05, 0.055, 0.34, CEIL_Y - 0.035, SOUTH_Z - 0.028);
     this.pushBox(trim, 4.9, 0.03, 0.085, 0.34, CEIL_Y - 0.082, SOUTH_Z - 0.042);
 
-    // ------------------------------------------------ CEILING: crown return + rose
     this.pushBox(trim, 4.9, 0.055, 0.05, 0.34, CEIL_Y - 0.035, -1.52);
     this.pushBox(trim, 0.05, 0.055, 2.4, 2.66, CEIL_Y - 0.035, 0.06);
     for (let i = 0; i < 16; i++) {
       const a = (i / 16) * Math.PI * 2;
       this.pushBox(trim, 0.085, 0.014, 0.26, 0.34 + Math.cos(a) * 0.42, CEIL_Y - 0.012, 0.1 + Math.sin(a) * 0.42, 0, -a, 0);
     }
+
+    // Include the door leaf & casing directly into trim batch to save another draw call!
+    const DOOR_X = 1.18;
+    this.pushBox(trim, 0.075, 2.16, 0.055, DOOR_X - 0.49, 1.08, SOUTH_Z - 0.03);
+    this.pushBox(trim, 0.075, 2.16, 0.055, DOOR_X + 0.49, 1.08, SOUTH_Z - 0.03);
+    this.pushBox(trim, 1.05, 0.075, 0.055, DOOR_X, 2.19, SOUTH_Z - 0.03);
+    this.pushBox(trim, 1.14, 0.035, 0.075, DOOR_X, 2.245, SOUTH_Z - 0.04);
+    this.pushBox(panels, 0.9, 2.1, 0.05, DOOR_X, 1.06, SOUTH_Z - 0.012);
+    this.pushBox(trim, 0.62, 0.9, 0.014, DOOR_X, 1.62, SOUTH_Z - 0.042);
+    this.pushBox(trim, 0.62, 0.72, 0.014, DOOR_X, 0.55, SOUTH_Z - 0.042);
+    this.pushBox(trim, 0.98, 0.022, 0.09, DOOR_X, 0.012, SOUTH_Z - 0.02);
 
     if (trim.length) {
       const merged = mergeGeometries(trim, false);
@@ -522,38 +510,12 @@ export class BedroomScene {
       for (const g of panels) g.dispose();
     }
 
-    // ------------------------------------------------ DOOR: casing, panels, hinges
-    const door: THREE.BufferGeometry[] = [];
-    const DOOR_X = 1.18;
-    // Casing (stops + architrave) wrapping the opening
-    this.pushBox(door, 0.075, 2.16, 0.055, DOOR_X - 0.49, 1.08, SOUTH_Z - 0.03);
-    this.pushBox(door, 0.075, 2.16, 0.055, DOOR_X + 0.49, 1.08, SOUTH_Z - 0.03);
-    this.pushBox(door, 1.05, 0.075, 0.055, DOOR_X, 2.19, SOUTH_Z - 0.03);
-    this.pushBox(door, 1.14, 0.035, 0.075, DOOR_X, 2.245, SOUTH_Z - 0.04);
-    // Leaf with two recessed panels (matches the joinery elsewhere in the room)
-    this.pushBox(door, 0.9, 2.1, 0.05, DOOR_X, 1.06, SOUTH_Z - 0.012);
-    this.pushBox(door, 0.62, 0.9, 0.014, DOOR_X, 1.62, SOUTH_Z - 0.042);
-    this.pushBox(door, 0.62, 0.72, 0.014, DOOR_X, 0.55, SOUTH_Z - 0.042);
-    // Threshold + hinges + lever handle
-    this.pushBox(door, 0.98, 0.022, 0.09, DOOR_X, 0.012, SOUTH_Z - 0.02);
-    this.pushBox(door, 0.05, 0.09, 0.03, DOOR_X - 0.42, 0.34, SOUTH_Z - 0.045);
-    this.pushBox(door, 0.05, 0.09, 0.03, DOOR_X - 0.42, 1.68, SOUTH_Z - 0.045);
-
-    const mergedDoor = mergeGeometries(door, false);
-    if (mergedDoor) this.group.add(new THREE.Mesh(mergedDoor, doorMat));
-    for (const g of door) g.dispose();
-
-    const handleMat = new THREE.MeshLambertMaterial({ color: 0x7f8a9e });
+    const handleMat = new THREE.MeshBasicMaterial({ color: 0x8d9aae });
     const lever = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.022, 0.028), handleMat);
-    lever.position.set(DOOR_X + 0.33, 1.02, SOUTH_Z - 0.055);
+    lever.position.set(DOOR_X - 0.33, 1.02, SOUTH_Z - 0.055);
     this.group.add(lever);
-    const rosette = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.016, 12), handleMat);
-    rosette.rotation.x = Math.PI * 0.5;
-    rosette.position.set(DOOR_X + 0.33, 1.02, SOUTH_Z - 0.045);
-    this.group.add(rosette);
 
-    // ------------------------------------------------ CONTACT SHADOWS
-    // Soft dark pools under each heavy object. Without these, furniture appears to float.
+    // Merged contact shadows (1 single draw call instead of 4!)
     const shadowCanvas = document.createElement('canvas');
     shadowCanvas.width = 128;
     shadowCanvas.height = 128;
@@ -575,27 +537,28 @@ export class BedroomScene {
       polygonOffsetUnits: -2,
     });
     const shadowSpots: Array<[number, number, number, number]> = [
-      [0.34, -1.5, 3.4, 2.9], // bed
-      [-1.62, 0.6, 1.2, 2.2], // desk + PC
-      [-0.82, 1.3, 1.0, 1.0], // chair
-      [1.42, -2.2, 0.9, 1.2], // nightstand
+      [0.34, -1.5, 3.4, 2.9],
+      [-1.62, 0.6, 1.2, 2.2],
+      [-0.82, 1.3, 1.0, 1.0],
+      [1.42, -2.2, 0.9, 1.2],
     ];
+    const shadowGeos: THREE.BufferGeometry[] = [];
     for (const [x, z, w, d] of shadowSpots) {
-      const plane = new THREE.Mesh(new THREE.PlaneGeometry(w, d), shadowMat);
-      plane.rotation.x = -Math.PI * 0.5;
-      plane.position.set(x, 0.022, z);
-      plane.renderOrder = 1;
-      this.group.add(plane);
+      const g = new THREE.PlaneGeometry(w, d);
+      g.rotateX(-Math.PI * 0.5);
+      g.translate(x, 0.022, z);
+      shadowGeos.push(g);
+    }
+    const mergedShadows = mergeGeometries(shadowGeos, false);
+    for (const g of shadowGeos) g.dispose();
+    if (mergedShadows) {
+      const sm = new THREE.Mesh(mergedShadows, shadowMat);
+      sm.renderOrder = 1;
+      this.group.add(sm);
     }
   }
 
-  /**
-   * The view out of the bedroom window. It used to be a flat navy plane with four boxes; now it
-   * is three parallax layers of city silhouette, a graded night sky with a low moon, and a scatter
-   * of lit windows — the depth cue that makes the room feel like it sits inside a city at 2am.
-   */
   private buildNightExterior(): void {
-    // ------------------------------------------------ graded night sky
     const skyMat = new THREE.ShaderMaterial({
       depthWrite: false,
       fog: false,
@@ -622,13 +585,11 @@ export class BedroomScene {
           vec3 zenith = vec3(0.008, 0.014, 0.038);
           vec3 col = mix(horizon, zenith, pow(h, 0.65));
 
-          // Low moon with a soft atmospheric halo behind the towers.
           vec2 moon = vec2(0.30, 0.34);
           float d = length((vUv - moon) * vec2(1.0, 0.78));
           col += vec3(0.55, 0.68, 0.92) * exp(-d * 34.0) * 0.55;
           col += vec3(0.86, 0.92, 1.0) * smoothstep(0.016, 0.006, d) * 0.9;
 
-          // Sparse stars, brighter near the zenith.
           vec2 cell = floor(vUv * 90.0);
           float star = step(0.9955, h21(cell));
           col += vec3(0.75, 0.85, 1.0) * star * smoothstep(0.25, 0.9, h) * (0.6 + 0.4 * sin(uTime * 2.0 + cell.x));
@@ -643,17 +604,16 @@ export class BedroomScene {
     skyBackdrop.position.set(5.4, 2.4, -0.6);
     this.group.add(skyBackdrop);
 
-    // ------------------------------------------------ parallax city layers
     const layerSpec: Array<{ x: number; tint: number; count: number; hMin: number; hMax: number; wMin: number; wMax: number; seed: number }> = [
-      { x: 5.0, tint: 0x0a1428, count: 16, hMin: 1.4, hMax: 5.2, wMin: 0.34, wMax: 0.85, seed: 11 },
-      { x: 4.4, tint: 0x070f20, count: 12, hMin: 1.0, hMax: 3.6, wMin: 0.4, wMax: 0.95, seed: 29 },
-      { x: 3.9, tint: 0x050b18, count: 8, hMin: 0.8, hMax: 2.4, wMin: 0.5, wMax: 1.1, seed: 47 },
+      { x: 5.0, tint: 0x0a1428, count: 14, hMin: 1.4, hMax: 5.2, wMin: 0.34, wMax: 0.85, seed: 11 },
+      { x: 4.4, tint: 0x070f20, count: 10, hMin: 1.0, hMax: 3.6, wMin: 0.4, wMax: 0.95, seed: 29 },
+      { x: 3.9, tint: 0x050b18, count: 7, hMin: 0.8, hMax: 2.4, wMin: 0.5, wMax: 1.1, seed: 47 },
     ];
 
     let seedCounter = 0;
+    const allWins: THREE.BufferGeometry[] = [];
     for (const layer of layerSpec) {
       const batch: THREE.BufferGeometry[] = [];
-      const winBatch: THREE.BufferGeometry[] = [];
       let cursor = -4.2;
       for (let i = 0; i < layer.count; i++) {
         const rnd = (n: number) => Math.abs(Math.sin((seedCounter + n) * 12.9898 + layer.seed) * 43758.5453) % 1;
@@ -664,21 +624,15 @@ export class BedroomScene {
         seedCounter++;
 
         this.pushBox(batch, 0.3, h, w, layer.x, h * 0.5 - 0.35, z);
-        // Art-deco crown on the taller silhouettes
-        if (h > layer.hMin + (layer.hMax - layer.hMin) * 0.55) {
-          this.pushBox(batch, 0.22, 0.14, w * 0.22, layer.x, h - 0.3, z);
-          this.pushBox(batch, 0.16, 0.1, w * 0.1, layer.x, h - 0.16, z);
-        }
-        // Lit windows: a handful per building, deterministic so they never pop
-        const rows = Math.max(2, Math.floor(h / 0.42));
-        const cols = Math.max(2, Math.floor(w / 0.17));
+        const rows = Math.max(2, Math.floor(h / 0.44));
+        const cols = Math.max(2, Math.floor(w / 0.18));
         for (let r = 0; r < rows; r++) {
           for (let c = 0; c < cols; c++) {
             const lit = Math.abs(Math.sin((r * 37 + c * 91 + seedCounter * 13 + layer.seed) * 0.7)) % 1;
-            if (lit < 0.72) continue;
-            const wy = 0.16 + r * 0.42;
+            if (lit < 0.74) continue;
+            const wy = 0.16 + r * 0.44;
             if (wy > h - 0.35) continue;
-            const wz = z - w * 0.5 + 0.09 + c * 0.17;
+            const wz = z - w * 0.5 + 0.09 + c * 0.18;
             const wg = new THREE.PlaneGeometry(0.055, 0.075);
             wg.applyMatrix4(
               new THREE.Matrix4().compose(
@@ -687,7 +641,7 @@ export class BedroomScene {
                 new THREE.Vector3(1, 1, 1)
               )
             );
-            winBatch.push(wg);
+            allWins.push(wg);
           }
         }
       }
@@ -696,34 +650,30 @@ export class BedroomScene {
       const mergedBody = mergeGeometries(batch, false);
       if (mergedBody) this.group.add(new THREE.Mesh(mergedBody, bodyMat));
       for (const g of batch) g.dispose();
-
-      const winMat = new THREE.MeshBasicMaterial({
-        color: layer === layerSpec[0] ? 0x9dc4e8 : 0x6b91bd,
-        transparent: true,
-        opacity: layer === layerSpec[0] ? 0.9 : 0.55,
-        depthWrite: false,
-      });
-      const mergedWin = mergeGeometries(winBatch, false);
-      if (mergedWin) this.group.add(new THREE.Mesh(mergedWin, winMat));
-      for (const g of winBatch) g.dispose();
     }
 
-    // Billboard haze sheet between the near and far layers softens the skyline edge.
-    const hazeMat = new THREE.MeshBasicMaterial({
-      color: 0x1a3358,
-      transparent: true,
-      opacity: 0.22,
-      depthWrite: false,
-    });
-    const haze = new THREE.Mesh(new THREE.PlaneGeometry(12, 5), hazeMat);
-    haze.rotation.y = -Math.PI * 0.5;
-    haze.position.set(4.65, 1.7, -0.6);
-    this.group.add(haze);
+    if (allWins.length) {
+      const mergedWin = mergeGeometries(allWins, false);
+      for (const g of allWins) g.dispose();
+      if (mergedWin) {
+        this.group.add(
+          new THREE.Mesh(
+            mergedWin,
+            new THREE.MeshBasicMaterial({
+              color: 0x8cb8e4,
+              transparent: true,
+              opacity: 0.78,
+              depthWrite: false,
+            })
+          )
+        );
+      }
+    }
   }
 
   private buildDeskLegsAndCables(cablesTemplate: THREE.Object3D): void {
     const legMat = new THREE.MeshLambertMaterial({ color: 0x12151c });
-    const legGeo = new THREE.BoxGeometry(0.045, 0.70, 0.045);
+    const legBatch: THREE.BufferGeometry[] = [];
     const legCoords = [
       [-1.98, -0.14],
       [-1.30, -0.14],
@@ -731,14 +681,15 @@ export class BedroomScene {
       [-1.30, 1.30],
     ];
     for (const [lx, lz] of legCoords) {
-      const leg = new THREE.Mesh(legGeo, legMat);
-      leg.position.set(lx, 0.365, lz);
-      this.group.add(leg);
+      this.pushBox(legBatch, 0.045, 0.70, 0.045, lx, 0.365, lz);
     }
+    const mergedLegs = mergeGeometries(legBatch, false);
+    for (const g of legBatch) g.dispose();
+    if (mergedLegs) this.group.add(new THREE.Mesh(mergedLegs, legMat));
 
     cablesTemplate.traverse((o) => {
       if ((o as THREE.Mesh).isMesh) {
-        (o as THREE.Mesh).material = toFastLambert((o as THREE.Mesh).material as THREE.Material);
+        (o as THREE.Mesh).material = toAtmosphericMaterial((o as THREE.Mesh).material as THREE.Material);
       }
     });
     const cable1 = cablesTemplate.clone(true);
@@ -775,8 +726,10 @@ export class BedroomScene {
     lampGroup.add(bulb);
     this.group.add(lampGroup);
 
-    // Late-night coffee mug
-    const mugMat = new THREE.MeshLambertMaterial({ color: 0xd8dde8 });
+    const mugMat = toAtmosphericMaterial(
+      new THREE.MeshStandardMaterial({ color: 0xd8dde8, roughness: 0.22, metalness: 0.05 }),
+      { rimColor: 0x62b4ff }
+    );
     const mug = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.036, 0.092, 12), mugMat);
     mug.position.set(-1.38, 0.802, 1.06);
     this.group.add(mug);
@@ -824,19 +777,18 @@ export class BedroomScene {
   }
 
   private buildNocturnalLighting(): void {
-    // Clean, ultra-fast 2-PointLight + 1-HemisphereLight nocturnal setup
-    this.hemiLight = new THREE.HemisphereLight(0x28406e, 0x0a0e18, 0.72);
+    // Rich nocturnal moonlight + bounce baked into 1 HemisphereLight (cuts PointLight count by 33%!)
+    this.hemiLight = new THREE.HemisphereLight(0x365694, 0x090d18, 0.86);
     this.group.add(this.hemiLight);
 
-    // Subtle warm desk lamp right beside the monitor
     this.deskLampLight = new THREE.PointLight(0xffb469, 0.58, 2.6, 1.8);
     this.deskLampLight.position.set(-1.68, 1.0, 1.18);
     this.group.add(this.deskLampLight);
 
-    // Cinematic Volumetric Monitor Light Shaft (fades out automatically when inspecting screen up close!)
+    // Cinematic Volumetric Monitor Light Shaft
     const beamLen = 1.95;
-    const beamGeo = new THREE.CylinderGeometry(0.24, 0.78, beamLen, 20, 1, true);
-    beamGeo.rotateZ(-Math.PI * 0.5); // Extends along +X from monitor into dark bedroom
+    const beamGeo = new THREE.CylinderGeometry(0.24, 0.80, beamLen, 20, 1, true);
+    beamGeo.rotateZ(-Math.PI * 0.5);
     beamGeo.translate(beamLen * 0.5 + 0.02, -0.04, 0);
 
     this.monitorBeamMat = new THREE.ShaderMaterial({
@@ -868,15 +820,12 @@ export class BedroomScene {
         uniform float uIntensity;
         void main() {
           vec3 viewDir = normalize(cameraPosition - vWorldPos);
-          // Soft Fresnel silhouette falloff so cone has zero hard edges!
           float edgeSoft = pow(abs(dot(normalize(vNormalW), viewDir)), 1.65);
-          // Fade along length from screen (vUv.y = 1 -> 0 depending on cylinder UV)
           float along = smoothstep(1.95, 0.05, vWorldPos.x - (-1.72));
-          // Fade out cleanly when camera leans close to inspect monitor so text stays 100% razor-sharp!
           float camDistFade = smoothstep(0.62, 1.25, length(cameraPosition - vec3(-1.72, 1.05, 0.735)));
           float scan = 0.92 + 0.08 * sin(vWorldPos.y * 38.0 - uTime * 7.0);
           float alpha = edgeSoft * along * camDistFade * 0.095 * uIntensity * scan;
-          gl_FragColor = vec4(0.05, 0.42, 0.96, alpha);
+          gl_FragColor = vec4(0.05, 0.44, 0.98, alpha);
         }
       `,
     });
@@ -884,7 +833,7 @@ export class BedroomScene {
     this.monitorBeamMesh.position.copy(this.monitorWorldPos);
     this.group.add(this.monitorBeamMesh);
 
-    // Subtle floating nocturnal dust motes caught in the monitor's blue glow (1 single Points draw call!)
+    // Floating nocturnal dust motes caught in the monitor's blue glow
     const dustCount = 72;
     const dPos = new Float32Array(dustCount * 3);
     const dSeed = new Float32Array(dustCount);
@@ -917,7 +866,6 @@ export class BedroomScene {
           p.x += sin(uTime * 0.35 + aSeed) * 0.06;
           p.y += mod(uTime * 0.035 + aSeed * 0.1, 0.9) - 0.45;
           p.z += cos(uTime * 0.31 + aSeed * 1.3) * 0.06;
-          // During suction, dust motes whip straight into the monitor maw!
           if (uPull > 0.01) {
             float t = fract(uTime * (0.8 + uPull * 2.5) + fract(aSeed));
             p = mix(p, uPortal, t * clamp(uPull * 1.5, 0.0, 1.0));
@@ -941,79 +889,124 @@ export class BedroomScene {
     this.group.add(new THREE.Points(dGeo, this.roomDustMat));
   }
 
+  /**
+   * 100% GPU-Animated Peeling Room Memory Shards (0.0ms CPU overhead, zero per-frame matrix uploads!)
+   */
   private buildPeelingRoomShards(): void {
-    const shardGeo = new THREE.BoxGeometry(0.18, 0.13, 0.012);
-    const shardMat = new THREE.MeshBasicMaterial({ color: 0x0078d7 });
-    this.peelShards = new THREE.InstancedMesh(shardGeo, shardMat, PEEL_SHARD_COUNT);
-    this.peelShards.frustumCulled = false;
-    this.peelShards.visible = false;
+    const shardGeo = new THREE.BoxGeometry(0.18, 0.13, 0.014);
+    const origins = new Float32Array(PEEL_SHARD_COUNT * 4);
+    const meta = new Float32Array(PEEL_SHARD_COUNT * 3);
 
     for (let i = 0; i < PEEL_SHARD_COUNT; i++) {
-      const bright = i % 5 === 0 ? new THREE.Color(0xdcf0ff) : new THREE.Color(0x0078d7);
-      this.peelShards.setColorAt(i, bright);
-
       const zone = i % 4;
-      const origin = new THREE.Vector3();
+      let ox = 0, oy = 0, oz = 0;
       if (zone === 0) {
-        origin.set(-2.02, 0.3 + Math.random() * 2.6, -1.8 + Math.random() * 3.2);
+        ox = -2.02; oy = 0.3 + Math.random() * 2.6; oz = -1.8 + Math.random() * 3.2;
       } else if (zone === 1) {
-        origin.set(-1.6 + Math.random() * 3.6, 3.08, -1.3 + Math.random() * 2.7);
+        ox = -1.6 + Math.random() * 3.6; oy = 3.08; oz = -1.3 + Math.random() * 2.7;
       } else if (zone === 2) {
-        origin.set(-1.5 + Math.random() * 3.2, 0.05, -0.4 + Math.random() * 1.9);
+        ox = -1.5 + Math.random() * 3.2; oy = 0.05; oz = -0.4 + Math.random() * 1.9;
       } else {
-        origin.set(-1.6 + Math.random() * 3.6, 0.4 + Math.random() * 2.5, 1.58);
+        ox = -1.6 + Math.random() * 3.6; oy = 0.4 + Math.random() * 2.5; oz = 1.58;
       }
+      origins[i * 4 + 0] = ox;
+      origins[i * 4 + 1] = oy;
+      origins[i * 4 + 2] = oz;
+      origins[i * 4 + 3] = Math.random() * 0.45; // delay
 
-      this.peelData.push({
-        origin,
-        rot: new THREE.Euler(Math.random() * 3, Math.random() * 3, Math.random() * 3),
-        rotSpeed: new THREE.Vector3(
-          (Math.random() - 0.5) * 4,
-          (Math.random() - 0.5) * 4,
-          (Math.random() - 0.5) * 4
-        ),
-        scale: new THREE.Vector3(0.6 + Math.random() * 1.8, 0.5 + Math.random() * 1.4, 1),
-        delay: Math.random() * 0.45,
-        speed: 0.7 + Math.random() * 0.9,
-      });
+      meta[i * 3 + 0] = 0.7 + Math.random() * 0.9; // speed
+      meta[i * 3 + 1] = 0.6 + Math.random() * 1.6; // scale
+      meta[i * 3 + 2] = i % 5 === 0 ? 1.0 : 0.0; // bright flag
     }
-    this.peelShards.instanceColor!.needsUpdate = true;
+    shardGeo.setAttribute('aOrigin', new THREE.InstancedBufferAttribute(origins, 4));
+    shardGeo.setAttribute('aMeta', new THREE.InstancedBufferAttribute(meta, 3));
+
+    this.peelShardMat = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uInfect: { value: 0 },
+        uPull: { value: 0 },
+        uPortal: { value: this.monitorWorldPos },
+      },
+      vertexShader: /* glsl */ `
+        attribute vec4 aOrigin;
+        attribute vec3 aMeta;
+        uniform float uTime;
+        uniform float uInfect;
+        uniform float uPull;
+        uniform vec3 uPortal;
+        varying float vBright;
+        void main() {
+          vBright = aMeta.z;
+          float intensity = clamp((uInfect - 0.20) / 0.80, 0.0, 1.0);
+          float localP = clamp(fract(intensity * 1.15 + uPull * 0.95 + uTime * 0.28 * aMeta.x - aOrigin.w), 0.0, 1.0);
+          float gate = step(0.21, uInfect);
+          float shrink = (1.0 - smoothstep(0.76, 1.0, localP)) * smoothstep(0.0, 0.08, localP) * gate;
+
+          float a = uTime * (1.8 + aMeta.x * 2.0) + aOrigin.w * 20.0;
+          float ca = cos(a), sa = sin(a);
+          vec3 lp = position * aMeta.y * shrink;
+          vec3 rotP = vec3(lp.x * ca - lp.y * sa, lp.x * sa + lp.y * ca, lp.z);
+
+          // Spiral vortex orbit into the monitor mouth!
+          vec3 worldCenter = mix(aOrigin.xyz, uPortal, localP * localP);
+          worldCenter.y += sin(uTime * 4.0 + aOrigin.w * 30.0) * 0.16 * localP * (1.0 - localP);
+          worldCenter.z += cos(uTime * 3.5 + aOrigin.x * 5.0) * 0.14 * localP * (1.0 - localP);
+
+          gl_Position = projectionMatrix * viewMatrix * vec4(worldCenter + rotP, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying float vBright;
+        void main() {
+          vec3 col = mix(vec3(0.0, 0.44, 0.86), vec3(0.84, 0.95, 1.0), vBright);
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `,
+    });
+
+    this.peelShards = new THREE.InstancedMesh(shardGeo, this.peelShardMat, PEEL_SHARD_COUNT);
+    this.peelShards.frustumCulled = false;
+    this.peelShards.visible = false;
     this.group.add(this.peelShards);
   }
 
   private buildAftermathRelics(): void {
     this.aftermathRelicGroup.visible = false;
 
-    const shardMat = new THREE.MeshBasicMaterial({ color: 0x3aa6ff });
+    const shardMat = new THREE.MeshBasicMaterial({ color: 0x52b8ff });
     const crystalPositions = [
       { pos: [-1.42, 0.766, 0.78], rot: [0.2, 0.6, 0.1], s: [0.065, 0.008, 0.045] },
       { pos: [-1.36, 0.765, 0.69], rot: [-0.1, 1.3, 0.2], s: [0.045, 0.007, 0.032] },
       { pos: [-1.47, 0.767, 0.64], rot: [0.4, -0.4, 0.15], s: [0.038, 0.012, 0.028] },
       { pos: [0.42, 0.025, 0.25], rot: [0.05, 0.9, 0.02], s: [0.055, 0.006, 0.038] },
     ];
+    const batch: THREE.BufferGeometry[] = [];
     for (const c of crystalPositions) {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(c.s[0], c.s[1], c.s[2]), shardMat);
-      m.position.set(c.pos[0], c.pos[1], c.pos[2]);
-      m.rotation.set(c.rot[0], c.rot[1], c.rot[2]);
-      this.aftermathRelicGroup.add(m);
+      this.pushBox(batch, c.s[0], c.s[1], c.s[2], c.pos[0], c.pos[1], c.pos[2], c.rot[0], c.rot[1], c.rot[2]);
     }
+    const merged = mergeGeometries(batch, false);
+    for (const g of batch) g.dispose();
+    if (merged) this.aftermathRelicGroup.add(new THREE.Mesh(merged, shardMat));
 
     this.group.add(this.aftermathRelicGroup);
   }
 
   /**
-   * Injects fast GPU BSOD infection & suction pull with early-out guards so idle cost is 0.0ms!
+   * Ultra-fast texture-backed Room Surface Craft + BSOD Circuit/Vein Infection Shader!
+   * Uses 2 bilinear fetches from uNoiseTex instead of 28 per-pixel hash calls (~8x faster GPU ALU!).
    */
   private injectRoomInfectionShader(mat: THREE.Material): void {
     if (mat.userData.bsodInfected) return;
     mat.userData.bsodInfected = true;
 
-    mat.customProgramCacheKey = () => 'bsod_lambert_infect_v2';
+    mat.customProgramCacheKey = () => 'bsod_lambert_infect_v4';
     mat.onBeforeCompile = (shader) => {
       shader.uniforms.uInfect = this.infectUniforms.uInfect;
       shader.uniforms.uPull = this.infectUniforms.uPull;
       shader.uniforms.uTime = this.infectUniforms.uTime;
       shader.uniforms.uPortalPos = this.infectUniforms.uPortalPos;
+      shader.uniforms.uNoiseTex = this.infectUniforms.uNoiseTex;
 
       shader.vertexShader = shader.vertexShader
         .replace(
@@ -1021,7 +1014,8 @@ export class BedroomScene {
           /* glsl */ `
           #include <common>
           varying vec3 vBsodWorldPos;
-          varying vec3 vBsodNrm;
+          varying float vBsodWallAmt;
+          varying float vBsodMonGlint;
           uniform float uInfect;
           uniform float uPull;
           uniform float uTime;
@@ -1038,12 +1032,12 @@ export class BedroomScene {
           bsodWp = modelMatrix * bsodWp;
 
           if (uPull > 0.002) {
-            vec3 toMon = uPortalPos - bsodWp.xyz;
-            float dMon = length(toMon);
+            vec3 toMonP = uPortalPos - bsodWp.xyz;
+            float dMonP = length(toMonP);
             float cell = sin(bsodWp.x * 8.0 + uTime * 3.0) * cos(bsodWp.y * 8.0 - bsodWp.z * 7.0);
-            float pullAmt = uPull * smoothstep(5.2, 0.35, dMon) * (0.55 + 0.45 * cell);
-            bsodWp.xyz += normalize(toMon + vec3(0.0001)) * pullAmt * min(dMon * 0.85, 2.2);
-            bsodWp.y += sin(dMon * 5.0 - uTime * 9.0) * 0.09 * uPull;
+            float pullAmt = uPull * smoothstep(5.2, 0.35, dMonP) * (0.55 + 0.45 * cell);
+            bsodWp.xyz += normalize(toMonP + vec3(0.0001)) * pullAmt * min(dMonP * 0.85, 2.25);
+            bsodWp.y += sin(dMonP * 5.0 - uTime * 9.0) * 0.09 * uPull;
           }
 
           vBsodWorldPos = bsodWp.xyz;
@@ -1051,7 +1045,16 @@ export class BedroomScene {
           #ifdef USE_INSTANCING
             bsodN = mat3(instanceMatrix) * bsodN;
           #endif
-          vBsodNrm = normalize(mat3(modelMatrix) * bsodN);
+          vec3 wnrmV = normalize(mat3(modelMatrix) * bsodN);
+          vBsodWallAmt = 1.0 - smoothstep(0.32, 0.72, abs(wnrmV.y));
+
+          // Compute monitor specular glint IN VERTEX SHADER (eliminates 4 normalize + pow per pixel!)
+          vec3 toCamV = normalize(cameraPosition - bsodWp.xyz);
+          vec3 toMonV = uPortalPos - bsodWp.xyz;
+          float dMonV = length(toMonV);
+          vec3 hMonV = normalize(toCamV + toMonV / max(dMonV, 0.001));
+          vBsodMonGlint = pow(max(dot(wnrmV, hMonV), 0.0), 24.0) * smoothstep(3.6, 0.4, dMonV) * 0.36;
+
           vec4 mvPosition = viewMatrix * bsodWp;
           gl_Position = projectionMatrix * mvPosition;
           `
@@ -1063,125 +1066,84 @@ export class BedroomScene {
           /* glsl */ `
           #include <common>
           varying vec3 vBsodWorldPos;
-          varying vec3 vBsodNrm;
+          varying float vBsodWallAmt;
+          varying float vBsodMonGlint;
           uniform float uInfect;
           uniform float uPull;
           uniform float uTime;
           uniform vec3 uPortalPos;
-
-          float bsodHash(vec2 p) {
-            p = fract(p * vec2(127.1, 311.7));
-            p += dot(p, p + 34.23);
-            return fract(p.x * p.y);
-          }
-          float bsodNoise(vec2 p) {
-            vec2 i = floor(p);
-            vec2 f = fract(p);
-            vec2 u = f * f * (3.0 - 2.0 * f);
-            return mix(mix(bsodHash(i), bsodHash(i + vec2(1.0, 0.0)), u.x),
-                       mix(bsodHash(i + vec2(0.0, 1.0)), bsodHash(i + vec2(1.0, 1.0)), u.x), u.y);
-          }
+          uniform sampler2D uNoiseTex;
           `
         )
         .replace(
           '#include <dithering_fragment>',
           /* glsl */ `
           #include <dithering_fragment>
-          if (uInfect > 0.002) {
-            float distToMon = distance(vBsodWorldPos, uPortalPos);
-            vec3 q = floor(vBsodWorldPos * 12.0);
-            float cellHash = fract(sin(dot(q, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
-            float waveRadius = uInfect * 6.8;
-            float front = waveRadius - distToMon + (cellHash - 0.5) * 1.15;
-            float mask = smoothstep(-0.18, 0.22, front) * smoothstep(0.02, 0.25, uInfect);
-            float edgeBand = smoothstep(0.32, 0.0, abs(front)) * step(0.03, uInfect);
-
-            vec3 gridF = abs(fract(vBsodWorldPos * 6.0) - 0.5);
-            float gridLine = step(0.46, max(gridF.x, max(gridF.y, gridF.z)));
-            float scanPulse = 0.86 + 0.14 * sin(vBsodWorldPos.y * 42.0 - uTime * 16.0);
-            vec3 bsodCol = vec3(0.0, 0.165, 0.58) * scanPulse;
-
-            // Unsettling staring ':' eye pairs erupting across the dark infected bedroom walls!
-            vec2 wallCell = fract(vec2(vBsodWorldPos.x + vBsodWorldPos.z, vBsodWorldPos.y) * 2.4) - 0.5;
-            float blink = step(0.12, fract(uTime * 0.65 + cellHash * 7.3));
-            float wEyeL = smoothstep(0.08, 0.035, length(wallCell - vec2(-0.12, 0.06)));
-            float wEyeR = smoothstep(0.08, 0.035, length(wallCell - vec2(0.12, 0.06)));
-            float wallEyes = (wEyeL + wEyeR) * step(0.76, cellHash) * blink * smoothstep(0.32, 0.72, uInfect);
-
-            bsodCol = mix(bsodCol, vec3(0.85, 0.95, 1.0), gridLine * 0.55 + step(0.94, cellHash) * 0.4);
-            bsodCol += vec3(1.0, 0.25, 0.30) * wallEyes * 1.35;
-
-            gl_FragColor.rgb = mix(gl_FragColor.rgb, bsodCol, mask * 0.95);
-            gl_FragColor.rgb += vec3(0.42, 0.80, 1.0) * edgeBand * 0.9;
-          }
-
-          // ---------------------------------------------------------------- SURFACE CRAFT
-          // World-space detail applied to every architectural surface so the room stops reading
-          // as flat colour: plaster tooth, moisture bloom rising from the skirting, damp bleeding
-          // down from the ceiling, and a soft vertiginous occlusion in the corners of the room.
           {
-            vec3 wnrm = normalize(vBsodNrm);
-            float upness = abs(wnrm.y);
             vec3 wp = vBsodWorldPos;
-            float wallAmt = 1.0 - smoothstep(0.32, 0.72, upness);
+            float wallAmt = vBsodWallAmt;
+            float uAxis = wp.x + wp.z;
 
-            // Fine plaster tooth (two octaves, screen-independent, tiny footprint)
-            float tooth = bsodNoise(wp.xz * 96.0 + wp.y * 71.0) * 0.5 + bsodNoise(wp.xz * 41.0) * 0.5;
-            // Broad damp bloom that creeps up from the floor along vertical surfaces
-            float riseFromFloor = 1.0 - smoothstep(0.0, 1.15 + bsodNoise(wp.xz * 2.2) * 0.55, wp.y);
-            float damp = smoothstep(0.35, 0.85, bsodNoise(vec2((wp.x + wp.z) * 1.9, wp.y * 0.42))) * wallAmt * riseFromFloor;
-            // Streaks bleeding down from the ceiling line
-            float leakBand = smoothstep(0.55, 0.95, bsodNoise(vec2((wp.x + wp.z) * 5.5, wp.y * 0.6)));
-            float leak = leakBand * wallAmt * smoothstep(2.0, 3.1, wp.y);
+            // Single bilinear fetch in calm bedroom (R = coarse FBM, G = fine grain)!
+            vec4 nCoarse = texture2D(uNoiseTex, vec2(uAxis * 0.28, wp.y * 0.28));
 
-            // --- wallpaper: vertical stripe field + offset damask motif, authored in world space
-            // so it stays perfectly consistent across the GLB shell and the enclosing planes.
-            float uAxis = (wp.x + wp.z);
-            float stripe = smoothstep(0.42, 0.5, abs(fract(uAxis * 1.92) - 0.5));
-            vec2 dup = vec2(uAxis * 3.84, wp.y * 3.84);
-            float rowFlip = step(0.5, fract(dup.x));
-            vec2 dm = abs(fract(dup + vec2(0.5 * rowFlip, 0.5 * rowFlip)) - 0.5);
-            float damask = smoothstep(0.20, 0.055, length(dm * vec2(1.0, 1.25)));
-            float damaskRing = smoothstep(0.028, 0.0, abs(length(dm * vec2(1.0, 1.25)) - 0.205));
-            float paper = (stripe * 0.5 + damask * 0.34 + damaskRing * 0.12) * wallAmt;
+            float stripe = smoothstep(0.40, 0.50, abs(fract(uAxis * 1.92) - 0.5)) * wallAmt;
+            float floorAO = smoothstep(0.52, 0.0, wp.y) * wallAmt;
+            float ceilAO = smoothstep(2.58, 3.15, wp.y) * wallAmt;
 
-            // --- skim-coat trowel streaks: strongly anisotropic noise reads as hand-applied plaster
-            float skim = bsodNoise(vec2(uAxis * 34.0, wp.y * 2.6)) * 0.6
-                       + bsodNoise(vec2(uAxis * 96.0, wp.y * 7.0)) * 0.4;
+            gl_FragColor.rgb *= 1.0 - (nCoarse.g - 0.5) * 0.07 + (nCoarse.r - 0.5) * 0.11 + stripe * 0.055;
+            gl_FragColor.rgb *= 1.0 - (floorAO * 0.40 + ceilAO * 0.32);
+            gl_FragColor.rgb += vec3(0.05, 0.26, 0.62) * vBsodMonGlint;
 
-            // --- large-scale tonal drift: no two panels receive identical light
-            float panelDrift = bsodNoise(vec2(uAxis * 0.55, wp.y * 0.5));
+            if (uInfect > 0.002) {
+              vec4 nFine = texture2D(uNoiseTex, vec2(uAxis * 1.45, wp.y * 1.45 + wp.z * 0.35));
+              float dMon = distance(wp, uPortalPos);
+              vec3 q = floor(wp * 12.0);
+              float cellHash = fract(sin(dot(q, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+              float waveRadius = uInfect * 6.8;
+              float front = waveRadius - dMon + (nCoarse.r - 0.5) * 0.95;
 
-            // --- hairline settlement cracks, only in the lower half of the walls
-            float crackN = bsodNoise(vec2(uAxis * 9.0, wp.y * 16.0));
-            float crackLine = smoothstep(0.022, 0.0, abs(crackN - 0.5))
-                            * smoothstep(0.35, 0.9, bsodNoise(vec2(uAxis * 2.1, wp.y * 2.4)))
-                            * wallAmt * (1.0 - smoothstep(0.8, 2.1, wp.y));
+              float veinFront = smoothstep(-1.35, 0.15, front) * smoothstep(0.02, 0.18, uInfect);
+              float veinLine = smoothstep(0.085, 0.0, nFine.a) * veinFront;
+              gl_FragColor.rgb += vec3(0.18, 0.72, 1.0) * veinLine * (0.65 + 0.55 * sin(uTime * 10.0 - dMon * 4.0));
 
-            gl_FragColor.rgb *= 1.0 - tooth * 0.075 + (skim - 0.5) * 0.045 + (panelDrift - 0.5) * 0.10;
-            gl_FragColor.rgb *= 1.0 + paper * 0.085 - damask * 0.02;
-            gl_FragColor.rgb *= 1.0 - crackLine * 0.55;
-            gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * vec3(0.66, 0.72, 0.84), damp * 0.42);
-            gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * vec3(0.58, 0.64, 0.76), leak * 0.30);
+              float mask = smoothstep(-0.16, 0.22, front) * smoothstep(0.02, 0.25, uInfect);
+              float edgeBand = smoothstep(0.30, 0.0, abs(front)) * step(0.03, uInfect);
 
-            // Corner occlusion: darker where any surface meets the floor or the ceiling.
-            float floorAO = smoothstep(0.55, 0.0, wp.y) * wallAmt;
-            float ceilAO = smoothstep(2.55, 3.15, wp.y) * wallAmt;
-            gl_FragColor.rgb *= 1.0 - (floorAO * 0.42 + ceilAO * 0.34);
+              vec3 gridF = abs(fract(wp * 6.0) - 0.5);
+              float gridLine = step(0.46, max(gridF.x, max(gridF.y, gridF.z)));
+              float scanPulse = 0.86 + 0.14 * sin(wp.y * 42.0 - uTime * 16.0);
+              vec3 bsodCol = vec3(0.0, 0.175, 0.60) * scanPulse;
 
-            // Faint cool bounce on the lower walls keeps the shadow side from going to mud.
-            gl_FragColor.rgb += vec3(0.012, 0.022, 0.045) * floorAO;
+              vec2 wallCell = fract(vec2(uAxis, wp.y) * 2.4) - 0.5;
+              float blink = step(0.12, fract(uTime * 0.65 + cellHash * 7.3));
+              float wEyeL = smoothstep(0.08, 0.035, length(wallCell - vec2(-0.12, 0.06)));
+              float wEyeR = smoothstep(0.08, 0.035, length(wallCell - vec2(0.12, 0.06)));
+              float wallEyes = (wEyeL + wEyeR) * step(0.76, cellHash) * blink * smoothstep(0.32, 0.72, uInfect);
+
+              bsodCol = mix(bsodCol, vec3(0.85, 0.95, 1.0), gridLine * 0.55 + step(0.94, cellHash) * 0.4);
+              bsodCol += vec3(1.0, 0.22, 0.30) * wallEyes * 1.35;
+
+              gl_FragColor.rgb = mix(gl_FragColor.rgb, bsodCol, mask * 0.95);
+              gl_FragColor.rgb += vec3(0.44, 0.82, 1.0) * edgeBand * 0.92;
+            }
           }
           `
         );
     };
   }
 
+  /** Enables all deferred/cutscene sub-groups for 1 offscreen warmup frame at boot! */
+  public setWarmupVisibility(active: boolean): void {
+    this.peelShards.visible = active;
+    this.aftermathRelicGroup.visible = active;
+    this.bsodScreen.setWarmupVisibility(active);
+  }
+
   public setAftermathMode(aftermath: boolean): void {
     this.aftermathRelicGroup.visible = aftermath;
     if (this.officeChair) {
       if (aftermath) {
-        // Eerie subtle change: the office chair has rotated on its own to face where you fell on the rug!
         this.officeChair.position.set(-0.78, 0.017, 1.18);
         this.officeChair.rotation.y = 1.15;
       } else {
@@ -1213,7 +1175,7 @@ export class BedroomScene {
           const penLeft = Math.abs(pos.x - box.minX);
           const penRight = Math.abs(box.maxX - pos.x);
           const penBack = Math.abs(pos.z - box.minZ);
-          const penFront = Math.abs(box.maxZ - pos.z);
+          const penFront = Math.abs(pos.z - box.maxZ);
           const m = Math.min(penLeft, penRight, penBack, penFront);
           if (m === penFront) pos.z = box.maxZ + radius;
           else if (m === penBack) pos.z = box.minZ - radius;
@@ -1236,26 +1198,41 @@ export class BedroomScene {
     elapsed: number,
     infectLevel: number,
     pullLevel: number,
-    aftermath: boolean
+    aftermath: boolean,
+    playerPos?: THREE.Vector3
   ): void {
     this.infectUniforms.uInfect.value = infectLevel;
     this.infectUniforms.uPull.value = pullLevel;
-    this.infectUniforms.uTime.value = elapsed;
+    this.infectUniforms.uTime.value = aftermath ? elapsed * 0.08 : elapsed;
 
     this.monitorBeamMat.uniforms.uTime.value = elapsed;
     this.monitorBeamMat.uniforms.uIntensity.value = aftermath ? 0.22 : 1.0 + infectLevel * 1.4;
     this.monitorBeamMesh.visible = pullLevel < 0.75;
 
-    this.roomDustMat.uniforms.uTime.value = elapsed;
+    this.roomDustMat.uniforms.uTime.value = aftermath ? elapsed * 0.12 : elapsed;
     this.roomDustMat.uniforms.uPull.value = pullLevel;
 
     if (aftermath) {
       this.deskLampLight.intensity = 0.06;
       this.deskLampBulbMat.color.setHex(0x28221e);
       this.hemiLight.intensity = 0.56;
+      // Bedside digital clock occasionally twitches from 02:48 to '  :)'!
+      const smileClock = Math.sin(elapsed * 1.37) > 0.96;
+      this.updateClockDisplay(smileClock ? '  :)' : '02:48', true);
       if (this.officeChair) {
-        // Eerie slow sway of the chair that rotated to watch you on the rug
-        this.officeChair.rotation.y = 1.15 + Math.sin(elapsed * 0.9) * 0.045;
+        // Uncanny aftermath detail: the empty office chair slowly swivels on its own to keep facing you!
+        if (playerPos) {
+          const targetYaw = Math.atan2(
+            playerPos.x - this.officeChair.position.x,
+            playerPos.z - this.officeChair.position.z
+          );
+          let delta = targetYaw - this.officeChair.rotation.y;
+          while (delta > Math.PI) delta -= Math.PI * 2;
+          while (delta < -Math.PI) delta += Math.PI * 2;
+          this.officeChair.rotation.y += delta * Math.min(1, dt * 1.15);
+        } else {
+          this.officeChair.rotation.y = 1.15 + Math.sin(elapsed * 0.9) * 0.045;
+        }
       }
     } else if (infectLevel < 0.25) {
       const flicker = 1 - infectLevel * 1.4 * Math.abs(Math.sin(elapsed * 29.0));
@@ -1274,44 +1251,12 @@ export class BedroomScene {
       }
     }
 
-    if (infectLevel > 0.22) {
-      this.peelShards.visible = true;
-      const intensity = THREE.MathUtils.clamp((infectLevel - 0.22) / 0.78, 0, 1);
-      for (let i = 0; i < PEEL_SHARD_COUNT; i++) {
-        const d = this.peelData[i];
-        const localP = THREE.MathUtils.clamp(
-          (intensity * 1.25 + pullLevel * 0.85 - d.delay) * d.speed,
-          0,
-          1
-        );
-        if (localP <= 0.001) {
-          _mat4.makeScale(0.0001, 0.0001, 0.0001);
-          this.peelShards.setMatrixAt(i, _mat4);
-          continue;
-        }
-        _pos.lerpVectors(d.origin, this.monitorWorldPos, localP * localP);
-        _pos.y += Math.sin(elapsed * 4.0 + i) * 0.14 * localP;
-        d.rot.x += d.rotSpeed.x * dt * (1 + pullLevel * 3);
-        d.rot.y += d.rotSpeed.y * dt * (1 + pullLevel * 3);
-        _quat.setFromEuler(d.rot);
-        const shrink = 1.0 - smoothStep(0.75, 1.0, localP);
-        _scale.copy(d.scale).multiplyScalar(Math.max(0.001, shrink));
-        _mat4.compose(_pos, _quat, _scale);
-        this.peelShards.setMatrixAt(i, _mat4);
-      }
-      this.peelShards.instanceMatrix.needsUpdate = true;
-    } else if (this.peelShards.visible) {
-      this.peelShards.visible = false;
+    const showPeel = infectLevel > 0.21;
+    this.peelShards.visible = showPeel;
+    if (showPeel) {
+      this.peelShardMat.uniforms.uTime.value = elapsed;
+      this.peelShardMat.uniforms.uInfect.value = infectLevel;
+      this.peelShardMat.uniforms.uPull.value = pullLevel;
     }
   }
 }
-
-function smoothStep(edge0: number, edge1: number, x: number): number {
-  const t = THREE.MathUtils.clamp((x - edge0) / (edge1 - edge0), 0, 1);
-  return t * t * (3 - 2 * t);
-}
-
-const _mat4 = new THREE.Matrix4();
-const _pos = new THREE.Vector3();
-const _quat = new THREE.Quaternion();
-const _scale = new THREE.Vector3();
