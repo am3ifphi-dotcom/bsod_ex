@@ -205,8 +205,50 @@ for (let step = 0; step <= 300; step++) {
   prevPos = cam.position.clone();
 }
 
-// 3) Verify ZERO tedious fetch-quest seals & seamless proximity WAKE_UP convergence at Central Cray-1 Sanctuary!
+// 3) Verify toothless tunnel exit, jumpable wing terraces, view-dependent world shaders, and player jump physics!
 const anyW = w as any;
+if (anyW.skyFangs || anyW.skyFangMat) {
+  throw new Error('Tunnel exit teeth (skyFangs / skyFangMat) MUST be completely removed!');
+}
+if (!anyW.skyApertureVeil || !anyW.skySleeveMesh) {
+  throw new Error('Flared toothless skySleeveMesh + skyApertureVeil seam-dissolve veil must exist!');
+}
+if (!anyW.monolithMat?.uniforms?.uCamForward || !anyW.phantomMat?.uniforms?.uCamForward || !anyW.errorCascadeMat?.uniforms?.uCamForward) {
+  throw new Error('View-dependent uCamForward uniforms missing on 3D world shaders!');
+}
+// Verify player jumping in FirstPersonController + jumpable Wing Pavilion terraces!
+ctrl.position.copy(spawn);
+ctrl.velocity.set(0, 0, 0);
+ctrl.isGrounded = true;
+let jumped = false;
+let landed = false;
+ctrl.onJump = () => { jumped = true; };
+ctrl.onLand = () => { landed = true; };
+ctrl.onKeyDown('Space');
+let maxJumpY = ctrl.position.y;
+for (let f = 0; f < 90; f++) {
+  ctrl.updateFreeRoam(
+    1 / 60,
+    5.5,
+    (x, z) => w.getFloorHeight(x, z, ctrl.position.y),
+    (p) => w.resolvePlayerBounds(p),
+    true,
+    { jumpSpeed: 6.35, gravity: 15.2 }
+  );
+  maxJumpY = Math.max(maxJumpY, ctrl.position.y);
+}
+ctrl.onKeyUp('Space');
+if (!jumped || !landed || maxJumpY - spawn.y < 1.15) {
+  throw new Error(`Jump physics check failed: jumped=${jumped}, landed=${landed}, gain=${(maxJumpY - spawn.y).toFixed(2)}`);
+}
+// Verify elevated jump terrace at East Pavilion observation deck (18.9, -8.2)
+const eastStepGround = w.getTerrainHeight(18.9, -8.2);
+const eastStepTop = w.getFloorHeight(18.9, -8.2, eastStepGround + 2.5);
+if (eastStepTop <= eastStepGround + 1.8) {
+  throw new Error(`East Pavilion jump terrace missing: ground=${eastStepGround}, stepTop=${eastStepTop}`);
+}
+
+// 4) Verify ZERO tedious fetch-quest seals & seamless proximity WAKE_UP convergence at Central Cray-1 Sanctuary!
 if (anyW.neuralSeals || typeof anyW.severSeal === 'function') {
   throw new Error('3-item Neural Seal collection system must be completely removed!');
 }

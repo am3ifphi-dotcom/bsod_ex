@@ -93,6 +93,8 @@ export class AudioManager {
     'bgm_glitch_world',
     'bgm_dread_drone',
     'earthquake',
+    'rain_window',
+    'rain_aftermath',
   ]);
 
   /**
@@ -150,6 +152,10 @@ export class AudioManager {
       this.reverbWetGain.gain.value = 0.25;
       this.reverbNode.connect(this.reverbWetGain);
       this.reverbWetGain.connect(this.masterGain);
+
+      // Synthesize realistic nocturnal window-rain & post-storm drip beds once at boot
+      this.storeDecoded('rain_window', this.buildWindowRainBuffer(this.ctx, false));
+      this.storeDecoded('rain_aftermath', this.buildWindowRainBuffer(this.ctx, true));
       return this.ctx;
     } catch {
       return null;
@@ -243,6 +249,75 @@ export class AudioManager {
       }
     }
     return impulse;
+  }
+
+  /**
+   * Synthesizes a realistic nocturnal rain-against-window-glass stereo bed:
+   *  - Multi-pole filtered pink/velvet exterior rain curtain with slow gust breathing
+   *  - Discrete physical droplet-on-glass damped resonances + metallic sill patters
+   */
+  private buildWindowRainBuffer(ctx: AudioContext, aftermathDrip: boolean): AudioBuffer {
+    const sr = ctx.sampleRate;
+    const dur = aftermathDrip ? 5.6 : 6.4;
+    const len = Math.floor(sr * dur);
+    const buf = ctx.createBuffer(2, len, sr);
+    const left = buf.getChannelData(0);
+    const right = buf.getChannelData(1);
+
+    let seed = aftermathDrip ? 918273 : 482719;
+    const rnd = (): number => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+
+    // 1. Muffled exterior rain curtain (pink-filtered + window-pane lowpass)
+    const curtainLevel = aftermathDrip ? 0.035 : 0.19;
+    for (let ch = 0; ch < 2; ch++) {
+      const out = ch === 0 ? left : right;
+      let b0 = 0, b1 = 0, b2 = 0, lp1 = 0, lp2 = 0;
+      for (let i = 0; i < len; i++) {
+        const t = i / len;
+        const gust = 0.78 + 0.22 * Math.sin(t * Math.PI * 2.0) + 0.10 * Math.sin(t * Math.PI * 6.0 + ch * 1.1);
+        const w = rnd() * 2 - 1;
+        b0 = 0.99765 * b0 + w * 0.099046;
+        b1 = 0.96300 * b1 + w * 0.2965164;
+        b2 = 0.57000 * b2 + w * 1.0526913;
+        const pink = (b0 + b1 + b2 + w * 0.1848) * 0.14;
+        // Double-glazed window muffling (~1.1kHz warm body)
+        lp1 += 0.14 * (pink - lp1);
+        lp2 += 0.22 * (lp1 - lp2);
+        out[i] = lp2 * curtainLevel * gust;
+      }
+    }
+
+    // 2. Discrete raindrop impacts against glass & exterior aluminum sill
+    const dropCount = aftermathDrip ? 34 : 310;
+    for (let d = 0; d < dropCount; d++) {
+      const start = Math.floor(rnd() * (len - Math.floor(sr * 0.08)));
+      const pan = rnd();
+      const gainL = Math.cos(pan * Math.PI * 0.5);
+      const gainR = Math.sin(pan * Math.PI * 0.5);
+      const isHeavySill = rnd() < (aftermathDrip ? 0.45 : 0.22);
+      const baseFreq = isHeavySill ? 340 + rnd() * 420 : 880 + rnd() * 1950;
+      const pitchDrop = isHeavySill ? 0.35 : -0.22; // water bubble chirp vs dull glass tap
+      const amp = (aftermathDrip ? 0.10 : 0.075) * (0.35 + Math.pow(rnd(), 1.6) * 0.95);
+      const decay = isHeavySill ? 72 + rnd() * 55 : 135 + rnd() * 160;
+      const tapSamples = Math.min(len - start, Math.floor(sr * 0.045));
+
+      let phase = rnd() * Math.PI * 2;
+      for (let k = 0; k < tapSamples; k++) {
+        const dtSec = k / sr;
+        const env = Math.exp(-dtSec * decay) * (1 - Math.exp(-dtSec * 1400));
+        const instFreq = baseFreq * (1 + pitchDrop * Math.min(1, dtSec * 45));
+        phase += (2 * Math.PI * instFreq) / sr;
+        const click = k < 18 ? (rnd() * 2 - 1) * 0.35 * (1 - k / 18) : 0;
+        const sample = (Math.sin(phase) * 0.8 + click) * amp * env;
+        left[start + k] += sample * gainL;
+        right[start + k] += sample * gainR;
+      }
+    }
+
+    return buf;
   }
 
   public setMasterVolume(v: number): void {
@@ -447,6 +522,42 @@ export class AudioManager {
         reverb: 0.42,
         lowpassHz: 1650,
         duration: 0.24,
+      });
+    }
+  }
+
+  public playJump(surface: 'wood' | 'rug' | 'glitch'): void {
+    this.stepIdx = (this.stepIdx % 4) + 1;
+    const stepId = this.buffers.has(`step${this.stepIdx}`) ? `step${this.stepIdx}` : 'footstep_wood';
+    this.playOneShot(stepId, {
+      volume: surface === 'rug' ? 0.26 : 0.34,
+      rate: surface === 'glitch' ? 1.08 : 1.16,
+      lowpassHz: surface === 'rug' ? 920 : 2400,
+      reverb: surface === 'glitch' ? 0.32 : 0.08,
+      duration: 0.18,
+    });
+  }
+
+  public playJumpLand(surface: 'wood' | 'rug' | 'glitch', impactNorm = 1.0): void {
+    this.lastFootstepTimeMs = performance.now();
+    this.stepIdx = (this.stepIdx % 4) + 1;
+    const stepId = this.buffers.has(`step${this.stepIdx}`) ? `step${this.stepIdx}` : 'footstep_wood';
+    const strength = THREE.MathUtils.clamp(impactNorm, 0.35, 1.35);
+    this.playOneShot(stepId, {
+      volume: (surface === 'rug' ? 0.32 : 0.46) * strength,
+      rate: (surface === 'glitch' ? 0.74 : 0.82) + Math.random() * 0.08,
+      lowpassHz: surface === 'rug' ? 760 : 1950,
+      reverb: surface === 'glitch' ? 0.46 : 0.12,
+      duration: 0.26,
+    });
+    if (strength > 0.72) {
+      this.playOneShot('land_impact', {
+        volume: (surface === 'rug' ? 0.10 : 0.18) * strength,
+        rate: surface === 'glitch' ? 1.18 : 1.32,
+        lowpassHz: surface === 'rug' ? 620 : 1350,
+        reverb: surface === 'glitch' ? 0.34 : 0.06,
+        duration: 0.32,
+        releaseSec: 0.14,
       });
     }
   }

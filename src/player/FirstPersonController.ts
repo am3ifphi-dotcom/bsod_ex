@@ -17,6 +17,12 @@ function stepSpring(s: Spring1D, stiffness: number, damping: number, dt: number)
   return s.value;
 }
 
+export interface FreeRoamJumpConfig {
+  jumpSpeed?: number;
+  gravity?: number;
+  ceilingY?: number;
+}
+
 export class FirstPersonController {
   public readonly position = new THREE.Vector3(0.35, 0.017, 0.62);
   public readonly velocity = new THREE.Vector3();
@@ -25,6 +31,18 @@ export class FirstPersonController {
   public roll = 0;
   public eyeHeight = 1.61;
   public sensitivity = 1.0;
+
+  // Jump & vertical movement state
+  public isGrounded = true;
+  private coyoteTimer = 0;
+  private jumpBufferTimer = 0;
+  private readonly jumpDipSpring: Spring1D = { value: 0, vel: 0, target: 0 };
+  private readonly jumpPitchSpring: Spring1D = { value: 0, vel: 0, target: 0 };
+
+  // Smoothed camera gaze angular velocity (rad/s) for view-dependent shaders & filters
+  public readonly gazeAngularVel = new THREE.Vector2(0, 0);
+  private prevCamYaw = 1.6264;
+  private prevCamPitch = -0.25;
 
   private readonly keys = new Set<string>();
   private walkPhase = 0;
@@ -52,16 +70,22 @@ export class FirstPersonController {
   private readonly rightVec = new THREE.Vector3();
 
   public onFootstep?: () => void;
+  public onJump?: () => void;
+  public onLand?: (impactNorm: number) => void;
 
   constructor(private readonly camera: THREE.PerspectiveCamera) {}
 
   public clearKeys(): void {
     this.keys.clear();
     this.velocity.set(0, 0, 0);
+    this.jumpBufferTimer = 0;
     this.lastStepHalfCycle = Math.floor(this.walkPhase / Math.PI);
   }
 
   public onKeyDown(code: string): void {
+    if (code === 'Space' && !this.keys.has('Space')) {
+      this.jumpBufferTimer = 0.13;
+    }
     this.keys.add(code);
   }
 
@@ -101,6 +125,13 @@ export class FirstPersonController {
   public resetToBedroomSpawn(monitorWorldPos?: THREE.Vector3): void {
     this.position.set(0.35, 0.017, 0.62);
     this.velocity.set(0, 0, 0);
+    this.isGrounded = true;
+    this.coyoteTimer = 0;
+    this.jumpBufferTimer = 0;
+    this.jumpDipSpring.value = 0;
+    this.jumpDipSpring.vel = 0;
+    this.jumpPitchSpring.value = 0;
+    this.jumpPitchSpring.vel = 0;
     this.roll = 0;
     this.walkPhase = 0;
     this.lastStepHalfCycle = 0;
@@ -116,6 +147,9 @@ export class FirstPersonController {
       this.yaw = 1.6264;
       this.pitch = -0.24;
     }
+    this.prevCamYaw = this.yaw;
+    this.prevCamPitch = this.pitch;
+    this.gazeAngularVel.set(0, 0);
 
     this.camera.fov = 64;
     this.camera.updateProjectionMatrix();
@@ -125,11 +159,25 @@ export class FirstPersonController {
   public updateFreeRoam(
     dt: number,
     moveSpeed: number,
-    groundYFn: (x: number, z: number) => number,
+    groundYFn: (x: number, z: number, currentY?: number) => number,
     collisionFn: (pos: THREE.Vector3) => void,
-    inputEnabled: boolean
+    inputEnabled: boolean,
+    jumpCfg?: FreeRoamJumpConfig
   ): void {
     this.breathTime += dt;
+
+    // Track angular gaze velocity for view-dependent optics & partial-FOV low-res filter
+    const safeDt = Math.max(dt, 1e-4);
+    let dYaw = this.yaw - this.prevCamYaw;
+    while (dYaw > Math.PI) dYaw -= Math.PI * 2;
+    while (dYaw < -Math.PI) dYaw += Math.PI * 2;
+    const dPitch = this.pitch - this.prevCamPitch;
+    this.prevCamYaw = this.yaw;
+    this.prevCamPitch = this.pitch;
+    const targetGx = THREE.MathUtils.clamp(dYaw / safeDt, -8.0, 8.0);
+    const targetGy = THREE.MathUtils.clamp(dPitch / safeDt, -8.0, 8.0);
+    this.gazeAngularVel.x = THREE.MathUtils.lerp(this.gazeAngularVel.x, targetGx, Math.min(1, dt * 14));
+    this.gazeAngularVel.y = THREE.MathUtils.lerp(this.gazeAngularVel.y, targetGy, Math.min(1, dt * 14));
 
     let moveForward = 0;
     let moveRight = 0;
@@ -138,6 +186,12 @@ export class FirstPersonController {
       if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) moveForward -= 1;
       if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) moveRight += 1;
       if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) moveRight -= 1;
+      if (this.keys.has('Space') && this.isGrounded && this.jumpBufferTimer <= 0) {
+        // Holding Space also re-jumps smoothly upon landing
+        this.jumpBufferTimer = 0.06;
+      }
+    } else {
+      this.jumpBufferTimer = 0;
     }
 
     this.fwdVec.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
@@ -150,7 +204,8 @@ export class FirstPersonController {
     const targetVx = wishLen > 1e-4 ? (wishX / wishLen) * moveSpeed : 0;
     const targetVz = wishLen > 1e-4 ? (wishZ / wishLen) * moveSpeed : 0;
 
-    const accel = wishLen > 1e-4 ? 12.0 : 10.5;
+    // Preserve responsive air control while slightly softening mid-air braking
+    const accel = this.isGrounded ? (wishLen > 1e-4 ? 12.0 : 10.5) : (wishLen > 1e-4 ? 7.8 : 2.6);
     this.velocity.x = THREE.MathUtils.lerp(this.velocity.x, targetVx, Math.min(1, dt * accel));
     this.velocity.z = THREE.MathUtils.lerp(this.velocity.z, targetVz, Math.min(1, dt * accel));
 
@@ -159,13 +214,71 @@ export class FirstPersonController {
     this.position.x += this.velocity.x * dt;
     this.position.z += this.velocity.z * dt;
     collisionFn(this.position);
-    const actualMoveSpeed = Math.hypot(this.position.x - prevX, this.position.z - prevZ) / Math.max(dt, 1e-4);
+    const actualMoveSpeed = Math.hypot(this.position.x - prevX, this.position.z - prevZ) / safeDt;
 
-    const targetGroundY = groundYFn(this.position.x, this.position.z);
-    this.position.y = THREE.MathUtils.lerp(this.position.y, targetGroundY, Math.min(1, dt * 18));
+    // --- Vertical Jump & Gravity Physics ---
+    const jumpSpeed = jumpCfg?.jumpSpeed ?? 4.55;
+    const gravity = jumpCfg?.gravity ?? 13.6;
+    const ceilingY = jumpCfg?.ceilingY;
+
+    const targetGroundY = groundYFn(this.position.x, this.position.z, this.position.y);
+
+    if (this.isGrounded) {
+      this.coyoteTimer = 0.11;
+    } else {
+      this.coyoteTimer = Math.max(0, this.coyoteTimer - dt);
+    }
+    this.jumpBufferTimer = Math.max(0, this.jumpBufferTimer - dt);
+
+    if (inputEnabled && this.jumpBufferTimer > 0 && this.coyoteTimer > 0) {
+      this.velocity.y = jumpSpeed;
+      this.isGrounded = false;
+      this.coyoteTimer = 0;
+      this.jumpBufferTimer = 0;
+      this.jumpDipSpring.vel = 0.85;
+      this.jumpPitchSpring.vel = 0.28;
+      this.onJump?.();
+    }
+
+    if (!this.isGrounded) {
+      this.velocity.y -= gravity * dt;
+      this.position.y += this.velocity.y * dt;
+
+      // Ceiling head-bump check (e.g., bedroom ceiling at 3.15m)
+      if (ceilingY !== undefined) {
+        const maxFootY = ceilingY - this.eyeHeight - 0.14;
+        if (this.position.y > maxFootY) {
+          this.position.y = maxFootY;
+          if (this.velocity.y > 0) this.velocity.y = -0.25;
+        }
+      }
+
+      if (this.position.y <= targetGroundY + 0.008 && this.velocity.y <= 0) {
+        const impactNorm = THREE.MathUtils.clamp(-this.velocity.y / Math.max(2.5, jumpSpeed), 0.25, 1.35);
+        this.position.y = targetGroundY;
+        this.velocity.y = 0;
+        this.isGrounded = true;
+        this.jumpDipSpring.vel -= 1.65 * impactNorm;
+        this.jumpPitchSpring.vel -= 0.42 * impactNorm;
+        this.lastStepHalfCycle = Math.floor(this.walkPhase / Math.PI);
+        this.onLand?.(impactNorm);
+      }
+    } else {
+      // If player walks off a taller step (> 0.28m drop), transition naturally into freefall
+      if (this.position.y - targetGroundY > 0.28) {
+        this.isGrounded = false;
+        this.velocity.y = Math.min(0, this.velocity.y);
+      } else {
+        this.position.y = THREE.MathUtils.lerp(this.position.y, targetGroundY, Math.min(1, dt * 18));
+        this.velocity.y = 0;
+      }
+    }
+
+    stepSpring(this.jumpDipSpring, 95, 14, dt);
+    stepSpring(this.jumpPitchSpring, 85, 13, dt);
 
     const speed = Math.hypot(this.velocity.x, this.velocity.z);
-    if (inputEnabled && wishLen > 1e-3 && actualMoveSpeed > 0.35 && speed > 0.45) {
+    if (this.isGrounded && inputEnabled && wishLen > 1e-3 && actualMoveSpeed > 0.35 && speed > 0.45) {
       this.walkPhase += dt * (4.6 + actualMoveSpeed * 1.35);
       const halfCycle = Math.floor(this.walkPhase / Math.PI);
       if (halfCycle !== this.lastStepHalfCycle) {
@@ -176,17 +289,24 @@ export class FirstPersonController {
       this.lastStepHalfCycle = Math.floor(this.walkPhase / Math.PI);
     }
 
-    this.applyFreeRoamCamera(Math.min(1, actualMoveSpeed / Math.max(1, moveSpeed)));
+    const groundBobFactor = this.isGrounded ? Math.min(1, actualMoveSpeed / Math.max(1, moveSpeed)) : 0;
+    this.applyFreeRoamCamera(groundBobFactor);
   }
 
   public applyFreeRoamCamera(moveFactor: number): void {
     const bobY =
       Math.sin(this.walkPhase * 2.0) * 0.022 * moveFactor +
-      Math.sin(this.breathTime * 1.5) * 0.003;
+      Math.sin(this.breathTime * 1.5) * 0.003 +
+      THREE.MathUtils.clamp(this.jumpDipSpring.value, -0.14, 0.08);
     const bobSway = Math.cos(this.walkPhase) * 0.012 * moveFactor;
     const subtleRoll = Math.cos(this.walkPhase) * 0.006 * moveFactor;
+    const pitchWithJump = THREE.MathUtils.clamp(
+      this.pitch + THREE.MathUtils.clamp(this.jumpPitchSpring.value, -0.06, 0.05),
+      -1.42,
+      1.38
+    );
 
-    this.euler.set(this.pitch, this.yaw, subtleRoll, 'YXZ');
+    this.euler.set(pitchWithJump, this.yaw, subtleRoll, 'YXZ');
     this.camera.quaternion.setFromEuler(this.euler);
 
     this.rightVec.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
@@ -617,8 +737,14 @@ export class FirstPersonController {
     if (landT >= landDur) {
       this.position.copy(spawnPos);
       this.velocity.set(0, 0, 0);
+      this.isGrounded = true;
+      this.coyoteTimer = 0.11;
+      this.jumpBufferTimer = 0;
       this.yaw = 0;
       this.pitch = 0.02;
+      this.prevCamYaw = 0;
+      this.prevCamPitch = 0.02;
+      this.gazeAngularVel.set(0, 0);
       this.roll = 0;
       this.walkPhase = 0;
       this.lastStepHalfCycle = 0;
@@ -703,8 +829,15 @@ export class FirstPersonController {
       fov = THREE.MathUtils.lerp(68, 64, smooth);
     } else {
       this.position.set(landX, 0.017, landZ);
+      this.velocity.set(0, 0, 0);
+      this.isGrounded = true;
+      this.coyoteTimer = 0.11;
+      this.jumpBufferTimer = 0;
       this.yaw = targetYaw;
       this.pitch = -0.1;
+      this.prevCamYaw = targetYaw;
+      this.prevCamPitch = -0.1;
+      this.gazeAngularVel.set(0, 0);
       this.roll = 0;
       this.camera.fov = 64;
       this.camera.updateProjectionMatrix();
