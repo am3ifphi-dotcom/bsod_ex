@@ -45,6 +45,7 @@ w.buildWorldLandmarks(new THREE.Object3D(), new THREE.Object3D(), new THREE.Obje
 w.buildFloatingAtmosphere();
 w.buildAtmosphericDepth();
 w.buildCausewayDetailAndMonoliths();
+w.buildViewpointReliquary();
 w.buildHostEffigyAndPhantoms();
 w.buildCollapseAndAbyss(tex, tex);
 console.log('all builders OK, group children =', w.group.children.length);

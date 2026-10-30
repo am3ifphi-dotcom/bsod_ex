@@ -28,6 +28,10 @@ export type PostFXOptions = {
   roll?: number;
   ghost?: number;
   bloom?: number;
+  /** 0..1 — a soft-edged patch of the frame degrades into a chunky low-resolution sensor read-out. */
+  lowRes?: number;
+  /** 0..1.4 — CAS-style unsharp mask that keeps the upscaled frame crisp. */
+  sharpen?: number;
 };
 
 export class PostFX {
@@ -84,6 +88,10 @@ export class PostFX {
         uSort: { value: 0 },
         uRoll: { value: 0 },
         uGhost: { value: 0 },
+        uLowRes: { value: 0 },
+        uLowResCenter: { value: new THREE.Vector2(0.62, 0.38) },
+        uSharpen: { value: 0 },
+        uTexel: { value: new THREE.Vector2(1 / Math.max(2, width), 1 / Math.max(2, height)) },
         tBloom: { value: null },
         uBloom: { value: 0.0 },
       },
@@ -110,6 +118,10 @@ export class PostFX {
         uniform float uSort;
         uniform float uRoll;
         uniform float uGhost;
+        uniform float uLowRes;
+        uniform vec2 uLowResCenter;
+        uniform float uSharpen;
+        uniform vec2 uTexel;
         uniform sampler2D tBloom;
         uniform float uBloom;
 
@@ -240,6 +252,51 @@ export class PostFX {
             col.b = fetch(uv - dispVec).b;
           } else {
             col = fetch(uv);
+          }
+
+          // ---------------------------------------------------------------- CAS SHARPEN
+          // Cheap contrast-adaptive unsharp mask. Keeps the internal-resolution upscale crisp
+          // (text, thin architecture, teeth) instead of turning soft at 0.6-0.9 render scale.
+          if (uSharpen > 0.001) {
+            vec3 nb = fetch(uv + vec2(uTexel.x, 0.0)) + fetch(uv - vec2(uTexel.x, 0.0))
+                    + fetch(uv + vec2(0.0, uTexel.y)) + fetch(uv - vec2(0.0, uTexel.y));
+            vec3 soft = nb * 0.25;
+            // Only push local contrast where the neighbourhood is not already clipping.
+            vec3 detail = col - soft;
+            float protect = smoothstep(0.0, 0.08, col.r + col.g + col.b) * smoothstep(3.0, 2.2, col.r + col.g + col.b);
+            col = clamp(col + detail * (0.55 + 0.85 * uSharpen) * protect, 0.0, 2.4);
+          }
+
+          // ---------------------------------------------------------------- DEGRADED SENSOR PATCH
+          // One feathered region of the frame falls into a coarse, blocky low-resolution read-out:
+          // a slow-drifting "damaged quadrant" of the optical feed, not full-screen noise.
+          if (uLowRes > 0.004) {
+            vec2 drift = vec2(sin(uTime * 0.11) * 0.05, cos(uTime * 0.083) * 0.033);
+            vec2 pc = vUv - (uLowResCenter + drift);
+            float ca = 0.809, sa = 0.588;
+            vec2 rp = vec2(ca * pc.x - sa * pc.y, sa * pc.x + ca * pc.y);
+            // Compact, rotated oval: always fully on-screen somewhere in the frame.
+            float d = length(rp * vec2(1.55, 1.95));
+            float patch = smoothstep(0.52, 0.15, d);
+
+            if (patch > 0.003) {
+              vec2 grid = vec2(46.0, 27.0);
+              vec2 cell = floor(vUv * grid);
+              vec2 q = (cell + 0.5) / grid;
+              // A few blocks flick to stale/dropped samples, like a failing sensor bus.
+              float flick = step(0.955, hash21(cell * 1.73 + floor(uTime * 5.0)));
+              vec2 slip = vec2((hash21(cell + 7.3) - 0.5) * 0.020, 0.0) * flick;
+              vec3 lr = fetch(q + slip);
+              // Chromatic lag between blocks (slow channels) + 5-bit colour crush.
+              lr.r = mix(lr.r, fetch(q + vec2(uTexel.x * 3.0, 0.0)).r, 0.45);
+              lr.b = mix(lr.b, fetch(q - vec2(uTexel.x * 3.0, 0.0)).b, 0.45);
+              float levels = mix(20.0, 9.0, patch);
+              lr = floor(lr * levels + 0.5) / levels;
+              // Sensor line roll + a couple of dead blue-green blocks.
+              lr *= 0.93 + 0.07 * sin(vUv.y * 620.0 + uTime * 2.0);
+              lr = mix(lr, vec3(0.04, 0.30, 0.34), step(0.985, hash21(cell * 2.31 + 4.7)) * 0.5);
+              col = mix(col, lr, patch * uLowRes);
+            }
           }
 
           // Ghost echo of the bend (double vision on strong spatial warps)
@@ -469,6 +526,7 @@ export class PostFX {
     this.rtBlur.setSize(bw, bh);
     this.brightMat.uniforms.uTexelX.value = 1 / bw;
     this.blurMat.uniforms.uTexelY.value = 1 / bh;
+    this.mat.uniforms.uTexel.value.set(1 / Math.max(2, width), 1 / Math.max(2, height));
   }
 
   /**
@@ -529,6 +587,8 @@ export class PostFX {
     u.uSort.value = opts.sort ?? 0;
     u.uRoll.value = opts.roll ?? 0;
     u.uGhost.value = opts.ghost ?? 0;
+    u.uLowRes.value = opts.lowRes ?? 0;
+    u.uSharpen.value = opts.sharpen ?? 0;
 
     renderer.setRenderTarget(this.rt);
     renderer.clear(true, true, true);

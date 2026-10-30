@@ -7,6 +7,7 @@ import {
   mergeStaticSubmeshes,
   toAtmosphericMaterial,
 } from '../utils/ProceduralNoise';
+import { maximizeTextureQuality } from '../utils/TextureQuality';
 
 export interface BoxCollider2D {
   minX: number;
@@ -152,6 +153,8 @@ export class BedroomScene {
       mesh.material = Array.isArray(mesh.material) ? newMats : newMats[0];
     });
     mergeStaticSubmeshes(roomRoot);
+    // Keep the room's albedo maps razor sharp at grazing angles (floor, rug, desk, bedding).
+    maximizeTextureQuality(roomRoot, 8);
     this.group.add(roomRoot);
 
     // 2. Enclose cutaway -X wall, +Z wall, flat ceiling, door & nocturnal skyline
@@ -355,11 +358,12 @@ export class BedroomScene {
     shaft.rotation.set(0, -Math.PI * 0.5, -0.34);
     this.group.add(shaft);
 
-    // Subtle 2:47 AM rain-streaked window glass catching city neon & cold monitor reflections (1 ultra-light quad)
+    // 02:47 AM rain on the window glass — condensation beads, running drops and neon-lit rivulets.
+    // Alpha-blended (not additive) so the beads can genuinely darken/refract the city behind them.
     this.rainGlassMat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
-      blending: THREE.AdditiveBlending,
+      blending: THREE.NormalBlending,
       uniforms: {
         uTime: this.infectUniforms.uTime,
         uInfect: this.infectUniforms.uInfect,
@@ -377,14 +381,79 @@ export class BedroomScene {
         uniform float uTime;
         uniform float uInfect;
         uniform sampler2D uNoiseTex;
+
+        float h21(vec2 p) {
+          p = fract(p * vec2(233.34, 851.73));
+          p += dot(p, p + 23.45);
+          return fract(p.x * p.y);
+        }
+
         void main() {
-          vec4 n1 = texture2D(uNoiseTex, vec2(vUv.x * 5.5, vUv.y * 1.4 + uTime * 0.055));
-          vec4 n2 = texture2D(uNoiseTex, vec2(vUv.x * 11.0 + 0.37, vUv.y * 2.2 + uTime * 0.095));
-          float streak = pow(n1.b, 4.0) * 0.55 + pow(n2.b, 5.0) * 0.65;
-          float edgeVig = smoothstep(0.0, 0.12, vUv.x) * smoothstep(1.0, 0.88, vUv.x)
-                        * smoothstep(0.0, 0.12, vUv.y) * smoothstep(1.0, 0.88, vUv.y);
-          vec3 tint = mix(vec3(0.32, 0.55, 0.95), vec3(0.08, 0.68, 1.0), uInfect);
-          gl_FragColor = vec4(tint, streak * edgeVig * 0.16);
+          vec2 uv = vUv;
+          // Glass edge: the pane never covers the frame/mullions.
+          float edge = smoothstep(0.0, 0.045, uv.x) * smoothstep(1.0, 0.955, uv.x)
+                     * smoothstep(0.0, 0.045, uv.y) * smoothstep(1.0, 0.955, uv.y);
+          if (edge < 0.006) discard;
+
+          vec3 neon = mix(vec3(0.34, 0.56, 0.98), vec3(0.10, 0.72, 1.0), uInfect);
+
+          // ---- 1. CONDENSATION BEADS: dense, static, lens-shaped droplets -----------------
+          vec2 g = uv * vec2(30.0, 25.0);
+          vec2 id = floor(g);
+          vec2 f = fract(g) - 0.5;
+          float rnd = h21(id * 1.13);
+          vec2 cOff = (vec2(h21(id + 3.7), h21(id + 9.2)) - 0.5) * 0.62;
+          float rad = 0.085 + 0.26 * h21(id + 5.5);
+          vec2 dlt = f - cOff;
+          // Gravity squashes each bead into a vertical lens.
+          float d = length(dlt * vec2(1.0, 0.82));
+          float present = step(0.34, rnd);
+          float bead = smoothstep(rad, rad * 0.5, d) * present;
+          // A tight specular pip on the upper-left, a dark refracted core, a cool rim below.
+          vec2 ldir = normalize(vec2(-0.42, 0.68));
+          float pip = smoothstep(rad * 0.62, rad * 0.06, length(dlt - ldir * rad * 0.38)) * present;
+          float underRim = smoothstep(rad, rad * 0.62, d) * smoothstep(-0.05, 0.55, dlt.y) * present;
+          vec3 beadCol = mix(vec3(0.020, 0.045, 0.085), mix(neon * 0.55, vec3(0.90, 0.96, 1.0), pip) , underRim * 0.55 + pip);
+          beadCol += vec3(0.85, 0.94, 1.0) * pip * 0.9;
+
+          // ---- 2. RUNNING DROPS: head bead + wet rivulet trail ---------------------------
+          float columns = 13.0;
+          float colId = floor(uv.x * columns);
+          float ph = h21(vec2(colId, 4.1));
+          float spd = 0.030 + 0.075 * h21(vec2(colId, 8.3));
+          float headY = fract(ph + uTime * spd);
+          float wob = sin(uv.y * 46.0 + ph * 21.0) * 0.0035 + sin(uTime * 1.6 + ph * 8.0) * 0.0055;
+          float xc = (colId + 0.5) / columns + wob;
+          float dx = abs(uv.x - xc);
+          float head = smoothstep(0.0135, 0.0038, length(vec2(dx, (uv.y - headY) * 0.72)));
+          head *= step(0.42, h21(vec2(colId, 2.7)));
+          float trailMask = smoothstep(headY + 0.004, headY - 0.02, uv.y) * smoothstep(0.0, 0.10, uv.y);
+          float trail = smoothstep(0.0068, 0.0, dx) * trailMask;
+          // Beads caught in the rivulet's path swell a little.
+          float wetPath = smoothstep(0.020, 0.0, dx) * trailMask * 0.5;
+          beadCol = mix(beadCol, mix(vec3(0.10, 0.20, 0.34), vec3(0.80, 0.92, 1.0), 0.25), wetPath);
+
+          // ---- 3. OUTSIDE RAIN BEHIND THE GLASS: fast, defocused neon-lit streaks --------
+          vec2 sp = vec2(uv.x * 2.2 + uv.y * 0.55, uv.y * 0.55 + uTime * 1.25);
+          float s1 = pow(texture2D(uNoiseTex, sp).b, 5.0);
+          float s2 = pow(texture2D(uNoiseTex, sp * 2.1 + vec2(0.37, uTime * 0.9)).b, 7.0);
+          float streak = s1 * 0.75 + s2 * 0.55;
+          float streakCol = streak * (0.30 + 0.25 * smoothstep(0.15, 0.75, uv.y));
+
+          // ---- composite -----------------------------------------------------------------
+          vec3 col = neon * streakCol;
+          col = mix(col, mix(vec3(0.14, 0.26, 0.40), neon, 0.35), clamp(trail * 0.55, 0.0, 0.75));
+          col = mix(col, beadCol, clamp(bead, 0.0, 1.0));
+          col += vec3(0.90, 0.96, 1.0) * head * 0.85;
+
+          float alpha = bead * 0.88 + trail * 0.32 + streak * 0.13 + head * 0.9;
+          alpha = clamp(alpha, 0.0, 0.94) * edge;
+          // Faint cold sheet reflection so the whole pane reads as wet glass, not stickers.
+          vec3 sheet = mix(vec3(0.05, 0.10, 0.18), vec3(0.35, 0.60, 0.95), 0.15 + 0.2 * sin(uTime * 0.35 + uv.y * 2.4));
+          col = mix(sheet * 0.35, col, clamp(alpha * 2.4, 0.0, 1.0));
+          alpha = max(alpha, 0.035 * edge);
+
+          gl_FragColor = vec4(col, alpha);
         }
       `,
     });

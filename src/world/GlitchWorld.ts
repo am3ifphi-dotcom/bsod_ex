@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { toFastLambert } from './BedroomScene';
 import { getSharedNoiseTexture } from '../utils/ProceduralNoise';
+import { maximizeTextureQuality } from '../utils/TextureQuality';
 
 const FLOATING_SHARD_COUNT = 120;
 const ABYSS_DEBRIS_COUNT = 96;
@@ -61,7 +62,6 @@ export class GlitchWorld {
   private skyRiftMat!: THREE.ShaderMaterial;
   private skyTunnelMat!: THREE.ShaderMaterial;
   private skyExitStreamMat!: THREE.ShaderMaterial;
-  private skyFangMat!: THREE.ShaderMaterial;
   private causewayBusMat!: THREE.ShaderMaterial;
   private floatingShardMat!: THREE.ShaderMaterial;
   private landingShockMat!: THREE.ShaderMaterial;
@@ -82,6 +82,12 @@ export class GlitchWorld {
   private spireMat!: THREE.ShaderMaterial;
   private lanternMat!: THREE.ShaderMaterial;
   private monolithMat!: THREE.ShaderMaterial;
+  private reliquaryMat?: THREE.ShaderMaterial;
+  public readonly reliquaryAnchor = new THREE.Vector3(0, 4.35, -28);
+  private reliquaryReveal = 0;
+  public get reliquaryAlignment(): number {
+    return this.reliquaryReveal;
+  }
 
   // Central WAKE_UP glyph plates & Gyroscopic Sanctuary Rings!
   private readonly wakePlates: Array<{
@@ -220,6 +226,11 @@ export class GlitchWorld {
 
     concreteDiff.wrapS = concreteDiff.wrapT = THREE.RepeatWrapping;
     concreteDisp.wrapS = concreteDisp.wrapT = THREE.RepeatWrapping;
+    concreteDiff.anisotropy = 8;
+    concreteDisp.anisotropy = 8;
+    for (const gltf of [crayGltf, rackGltf, crtGltf, moboGltf, cablesGltf]) {
+      maximizeTextureQuality(gltf.scene, 8);
+    }
 
     this.spawnPosition.y = this.getTerrainHeight(this.spawnPosition.x, this.spawnPosition.z);
     this.corePosition.y = this.getTerrainHeight(0, -56);
@@ -251,6 +262,9 @@ export class GlitchWorld {
 
     // 5c. Hand-placed scale & wayfinding detail (causeway lanterns, sanctuary monoliths).
     this.buildCausewayDetailAndMonoliths();
+
+    // 5c-2. Viewpoint-dependent reliquary — the west monoliths only resolve into a face from one spot.
+    this.buildViewpointReliquary();
 
     // 5d. Threshold Host Effigy & Peripheral Stalking Glitch Apparitions
     this.buildHostEffigyAndPhantoms();
@@ -1147,23 +1161,65 @@ export class GlitchWorld {
     this.group.add(finMesh);
     this.finMat = finMat;
 
-    // D) Colossal Circular Single-Row Parasyte Sky-Maw & Solid 58m Vortex Exit Sleeve at (0, 46, 86)
-    //    Aimed cleanly at (0, 22, -6) (-14.62 deg pitch) so you fly seamlessly out through the physical 3D tooth rim!
+    // D) THE THROAT — a single continuous, organically-flaring exit funnel at (0, 46, 86)
+    //    Aimed cleanly at (0, 22, -6) (-14.62 deg pitch). The tube never "ends" on a hard rim:
+    //    it swells open like a throat relaxing and dissolves into the sky, so flying out has no seam.
     const skyMonGroup = new THREE.Group();
     skyMonGroup.position.copy(this.skyPortalPos);
     skyMonGroup.lookAt(0, 22.0, -6.0);
     this.skyPortalQuat.copy(skyMonGroup.quaternion);
 
-    // 58m Solid Vortex Sleeve (radius 3.8m deep -> flared 6.4m Parasyte lip right at z=0, ZERO premature wall fade!)
-    const sleeveLen = 58.0;
-    const sleeveGeo = new THREE.CylinderGeometry(5.6, 3.8, sleeveLen, 32, 28, true);
-    sleeveGeo.rotateX(Math.PI * 0.5);
-    sleeveGeo.translate(0, 0, -sleeveLen * 0.5);
+    const THROAT_START = -62.0; // deep inside the monitor throat
+    const THROAT_END = 24.0; // out into the open sky, fully dissolved
+    const CAMERA_START_Z = -27.44; // must match FirstPersonController's arrival sleeve entry exactly
+    const throatRadialSegs = 72;
+    const throatRingSegs = 132;
+    // Radius profile engineered to match BsodScreen's actual throat at the handoff:
+    // a tight ~0.85m gullet around the camera, relaxing open into a 4.35m mouth, then dissolving.
+    const throatRadius = (z: number): number => {
+      if (z > 0.0) {
+        const f = THREE.MathUtils.clamp(z / THROAT_END, 0, 1);
+        return 4.35 + 15.5 * Math.pow(f, 1.85);
+      }
+      const a = THREE.MathUtils.smoothstep(z, THROAT_START, CAMERA_START_Z);
+      if (z < CAMERA_START_Z) return 0.52 + 0.33 * a;
+      const b = THREE.MathUtils.smoothstep(z, CAMERA_START_Z, -1.0);
+      return 0.85 + 3.50 * Math.pow(b, 1.25);
+    };
+    const throatPos: number[] = [];
+    const throatUv: number[] = [];
+    const throatIdx: number[] = [];
+    for (let iz = 0; iz <= throatRingSegs; iz++) {
+      // Slightly denser rings toward the mouth, where the curvature actually lives.
+      const tz = iz / throatRingSegs;
+      const z = THREE.MathUtils.lerp(THROAT_START, THROAT_END, Math.pow(tz, 0.86));
+      const r = throatRadius(z);
+      for (let ia = 0; ia <= throatRadialSegs; ia++) {
+        const a = (ia / throatRadialSegs) * Math.PI * 2;
+        throatPos.push(Math.cos(a) * r, Math.sin(a) * r, z);
+        throatUv.push(ia / throatRadialSegs, (z - THROAT_START) / (THROAT_END - THROAT_START));
+      }
+    }
+    const throatStride = throatRadialSegs + 1;
+    for (let iz = 0; iz < throatRingSegs; iz++) {
+      for (let ia = 0; ia < throatRadialSegs; ia++) {
+        const a = iz * throatStride + ia;
+        const b = a + 1;
+        const c = a + throatStride;
+        const d = c + 1;
+        throatIdx.push(a, c, b, b, c, d);
+      }
+    }
+    const throatGeo = new THREE.BufferGeometry();
+    throatGeo.setAttribute('position', new THREE.Float32BufferAttribute(throatPos, 3));
+    throatGeo.setAttribute('uv', new THREE.Float32BufferAttribute(throatUv, 2));
+    throatGeo.setIndex(throatIdx);
+    throatGeo.computeVertexNormals();
 
     this.skyTunnelMat = new THREE.ShaderMaterial({
-      side: THREE.BackSide,
-      transparent: false,
-      depthWrite: true,
+      side: THREE.DoubleSide,
+      transparent: true,
+      depthWrite: false,
       uniforms: {
         uTime: { value: 0 },
         uNoiseTex: { value: getSharedNoiseTexture() },
@@ -1172,14 +1228,21 @@ export class GlitchWorld {
         varying vec2 vUv;
         varying vec3 vLocalPos;
         varying float vDepth;
+        varying float vFade;
+        uniform float uTime;
         void main() {
           vUv = uv;
-          float d = clamp(-position.z / 58.0, 0.0, 1.0);
-          vDepth = d;
-          // Bell-flare organic lip collar right over the final 3.5m (-3.5m .. 0.0m) where the 48 teeth root!
-          float lipFlare = 1.0 + 0.145 * exp(position.z * 0.65);
-          vec3 p = vec3(position.xy * lipFlare, position.z);
+          vDepth = clamp(-position.z / 62.0, 0.0, 1.0);
+          // Living organic wall wobble — gives the throat flesh instead of a perfect cylinder.
+          float ang = atan(position.y, position.x);
+          float wob = 1.0
+            + 0.034 * sin(ang * 5.0 + position.z * 0.085)
+            + 0.019 * sin(ang * 9.0 - position.z * 0.052 + uTime * 0.30)
+            + 0.012 * sin(ang * 14.0 + position.z * 0.21 - uTime * 0.55);
+          vec3 p = vec3(position.xy * wob, position.z);
           vLocalPos = p;
+          // Dissolve the far flare into the sky so the throat has NO hard silhouette edge.
+          vFade = (1.0 - smoothstep(2.0, 22.0, position.z));
           gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
         }
       `,
@@ -1187,158 +1250,94 @@ export class GlitchWorld {
         varying vec2 vUv;
         varying vec3 vLocalPos;
         varying float vDepth;
+        varying float vFade;
         uniform float uTime;
         uniform sampler2D uNoiseTex;
         void main() {
           float safeX = (abs(vLocalPos.x) < 1e-5 && abs(vLocalPos.y) < 1e-5) ? 1e-5 : vLocalPos.x;
           float angle = atan(vLocalPos.y, safeX);
-          float zScroll = vLocalPos.z * 0.62 + uTime * 48.0;
-          vec4 nSample = texture2D(uNoiseTex, vec2(angle * 0.3183, vLocalPos.z * 0.025 + uTime * 0.18));
+          float zScroll = vLocalPos.z * 0.62 + uTime * 44.0;
+          vec4 nSample = texture2D(uNoiseTex, vec2(angle * 0.3183, vLocalPos.z * 0.025 + uTime * 0.16));
 
-          vec2 cell = vec2(angle * 6.366, zScroll);
-          vec2 f = fract(cell);
-          float line = smoothstep(0.075, 0.0, min(f.x, 1.0 - f.x)) + smoothstep(0.06, 0.0, min(f.y, 1.0 - f.y));
-          float helixA = pow(max(0.0, sin(angle * 6.0 + vLocalPos.z * 0.22 + uTime * 17.2)), 8.0);
-          float helixB = pow(max(0.0, cos(angle * 10.0 - vLocalPos.z * 0.16 + uTime * 12.7)), 10.0);
-          float shockRing = smoothstep(0.92, 1.0, fract(vLocalPos.z * 0.09 + uTime * 7.0));
+          // Soft flowing striations (wet muscle / data current), no grid-lines so nothing reads as CGI tube edges.
+          float striation = 0.5 + 0.5 * sin(angle * 13.0 + nSample.r * 3.2 + vLocalPos.z * 0.11 - uTime * 2.2);
+          float helixA = pow(max(0.0, sin(angle * 6.0 + vLocalPos.z * 0.22 + uTime * 15.2)), 8.0);
+          float helixB = pow(max(0.0, cos(angle * 10.0 - vLocalPos.z * 0.16 + uTime * 11.4)), 10.0);
+          float shockRing = smoothstep(0.90, 1.0, fract(vLocalPos.z * 0.075 + uTime * 6.0));
+          float thread = pow(0.5 + 0.5 * sin(angle * 27.0 - vLocalPos.z * 0.4 + uTime * 5.0), 6.0);
 
-          // Matches BsodScreen's deep sleeveBase palette 1:1, darkening into a fleshy crimson-obsidian gum rim right at z=0!
-          vec3 col = mix(vec3(0.006, 0.12, 0.44), vec3(0.004, 0.065, 0.28), smoothstep(0.08, 0.65, vDepth));
-          col += vec3(0.28, 0.76, 1.0) * line * 0.46;
-          col += vec3(0.32, 0.84, 1.0) * (helixA * 0.55 + helixB * 0.45) * 0.88;
-          col += vec3(0.70, 0.94, 1.0) * shockRing * 0.72;
+          // Matches BsodScreen's deep esophageal sleeve palette 1:1 for a seamless scene handoff.
+          vec3 col = mix(vec3(0.006, 0.115, 0.42), vec3(0.004, 0.062, 0.27), smoothstep(0.06, 0.62, vDepth));
+          col += vec3(0.10, 0.42, 0.78) * striation * 0.16;
+          col += vec3(0.32, 0.84, 1.0) * (helixA * 0.55 + helixB * 0.45) * 0.74;
+          col += vec3(0.70, 0.94, 1.0) * shockRing * 0.55;
+          col += vec3(0.55, 0.90, 1.0) * thread * 0.14;
 
-          // Anatomical dark gum collar at the very mouth lip (z = -2.2m .. 0.0m) anchoring the 48 single-row teeth!
-          float gumLip = smoothstep(0.045, 0.0, vDepth);
-          float socketWave = 0.5 + 0.5 * cos(angle * 48.0);
-          vec3 lipGumCol = mix(vec3(0.16, 0.008, 0.038), vec3(0.015, 0.04, 0.14), socketWave * 0.6);
-          col = mix(col, lipGumCol + nSample.r * 0.02, gumLip * 0.88);
-          gl_FragColor = vec4(col, 1.0);
+          // The opening breathes a cold rim light that bleeds into the sky — no gum ring, no teeth.
+          float opening = smoothstep(-6.0, 3.0, vLocalPos.z);
+          col = mix(col, col * 1.35 + vec3(0.30, 0.72, 1.0) * 0.32, opening * 0.85);
+
+          gl_FragColor = vec4(col, clamp(vFade, 0.0, 1.0));
         }
       `,
     });
-    const sleeveMesh = new THREE.Mesh(sleeveGeo, this.skyTunnelMat);
+    const sleeveMesh = new THREE.Mesh(throatGeo, this.skyTunnelMat);
     sleeveMesh.frustumCulled = false;
+    sleeveMesh.renderOrder = -1;
     skyMonGroup.add(sleeveMesh);
     this.skySleeveMesh = sleeveMesh;
 
     const backCap = new THREE.Mesh(
-      new THREE.CircleGeometry(4.0, 24),
+      new THREE.CircleGeometry(1.2, 24),
       new THREE.MeshBasicMaterial({ color: 0x00081c, side: THREE.DoubleSide })
     );
-    backCap.position.z = -sleeveLen - 0.1;
+    backCap.position.z = THROAT_START - 0.1;
     skyMonGroup.add(backCap);
     this.skySleeveBackCap = backCap;
 
-    // Soft Radial Corona + Single-Row Sky Maw Iris right around the 6.4m flared lip!
-    const riftGeo = new THREE.PlaneGeometry(30.0, 30.0);
+    // Soft breathing corona ringed AROUND the opening (never across it, so flying through the
+    // mouth can't wash the screen): the exit reads as pure light from every angle and the funnel's
+    // silhouette dissolves into it, which is what removes the old hard "tube-end" seam.
+    const glowGeo = new THREE.RingGeometry(3.2, 26.0, 72, 1);
     this.skyRiftMat = new THREE.ShaderMaterial({
       transparent: true,
       side: THREE.DoubleSide,
       depthWrite: false,
+      blending: THREE.AdditiveBlending,
       uniforms: {
         uTime: { value: 0 },
       },
       vertexShader: /* glsl */ `
-        varying vec2 vUv;
+        varying vec2 vLocal;
         void main() {
-          vUv = uv;
+          vLocal = position.xy;
           gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
       `,
       fragmentShader: /* glsl */ `
-        varying vec2 vUv;
+        varying vec2 vLocal;
         uniform float uTime;
         void main() {
-          vec2 d = (vUv - 0.5) * 2.0; // -1..+1 over 30m -> r=0.427 is 6.4m flared sleeve lip!
-          float safeX = (abs(d.x) < 1e-5 && abs(d.y) < 1e-5) ? 1e-5 : d.x;
-          float ang = atan(d.y, safeX);
-          float r = length(d);
-          // Completely clear inside the 6.1m mouth opening (r < 0.405), dark solid lip shroud from 0.41..0.58, feathered corona outside!
-          float lipBand = smoothstep(0.395, 0.425, r) * (1.0 - smoothstep(0.54, 0.94, r));
-          if (lipBand < 0.008) discard;
-          float rimGlow = exp(-abs(r - 0.435) * 24.0);
-          vec3 col = mix(vec3(0.025, 0.012, 0.045), vec3(0.28, 0.72, 1.0), rimGlow * 0.85);
-          gl_FragColor = vec4(col, clamp(lipBand * 0.92, 0.0, 0.95));
+          float R = length(vLocal); // metres from the throat axis
+          float safeR = max(R, 0.0001);
+          float ang = atan(vLocal.y, vLocal.x);
+          // Bright collar hugging the 4.35m lip, then a long feathered halo outward.
+          float collar = exp(-pow((R - 4.35) * 0.62, 2.0));
+          float halo = exp(-max(R - 4.35, 0.0) * 0.115) * 0.42;
+          float breathe = 0.78 + 0.22 * sin(uTime * 1.15 + ang * 2.0);
+          float outerFade = smoothstep(26.0, 12.0, R); // dissolve before the ring's own edge
+          float innerFade = smoothstep(3.2, 4.4, R);
+          vec3 col = mix(vec3(0.10, 0.52, 1.0), vec3(0.74, 0.95, 1.0), clamp(collar, 0.0, 1.0));
+          float alpha = clamp(collar * 0.55 + halo, 0.0, 0.8) * breathe * outerFade * innerFade;
+          gl_FragColor = vec4(col, alpha * smoothstep(0.0, 0.06, safeR));
         }
       `,
     });
-    const skyRift = new THREE.Mesh(riftGeo, this.skyRiftMat);
+    const skyRift = new THREE.Mesh(glowGeo, this.skyRiftMat);
+    skyRift.position.z = 1.2;
     skyRift.frustumCulled = false;
+    skyRift.renderOrder = 2;
     skyMonGroup.add(skyRift);
-
-    // 48 Single-Row 3D Sculpted Parasyte Sky-Maw Teeth rooted cleanly into the flared 6.2m lip (ZERO multi-tier floating rings!)
-    const skyFangCount = 48;
-    const skyFangGeo = new THREE.ConeGeometry(0.40, 2.15, 6, 2);
-    skyFangGeo.translate(0, 1.075, 0);
-    const sfSeed = new Float32Array(skyFangCount * 4);
-    for (let i = 0; i < skyFangCount; i++) {
-      sfSeed[i * 4 + 0] = (i / skyFangCount) * Math.PI * 2;
-      sfSeed[i * 4 + 1] = 0.0;
-      sfSeed[i * 4 + 2] = 0.74 + ((i * 0.618034) % 1) * 0.55;
-      sfSeed[i * 4 + 3] = (i * 2.39996) % (Math.PI * 2);
-    }
-    skyFangGeo.setAttribute('aSkyFang4', new THREE.InstancedBufferAttribute(sfSeed, 4));
-
-    this.skyFangMat = new THREE.ShaderMaterial({
-      side: THREE.DoubleSide,
-      uniforms: {
-        uTime: { value: 0 },
-      },
-      vertexShader: /* glsl */ `
-        attribute vec4 aSkyFang4;
-        uniform float uTime;
-        varying float vTip;
-        varying vec3 vNrm;
-        varying vec3 vViewPos;
-        void main() {
-          float ang = aSkyFang4.x;
-          float lenSc = aSkyFang4.z;
-          float phase = aSkyFang4.w;
-
-          // Hinged wide open around the 6.25m flared lip so the Sky-Maw holds gaping open without pakupaku flapping!
-          float chomp = sin(uTime * 1.1 + phase * 0.25) * 0.02;
-          float rad = 6.22;
-          vec2 dir = vec2(cos(ang), sin(ang));
-          vec2 tang = vec2(-dir.y, dir.x);
-          vec3 fangAxis = normalize(vec3(-dir * (0.58 + chomp), 0.76));
-          vec3 sideAxis = vec3(tang, 0.0);
-          vec3 hookAxis = normalize(cross(sideAxis, fangAxis));
-
-          vec3 root = vec3(dir * rad, -0.22);
-          float w = 0.96;
-          vec3 lp = root + sideAxis * (position.x * w) + fangAxis * (position.y * lenSc) + hookAxis * (position.z * w * 0.68);
-          vec3 ln = normalize(sideAxis * normal.x + fangAxis * normal.y + hookAxis * normal.z);
-
-          vec4 mv = modelViewMatrix * vec4(lp, 1.0);
-          vViewPos = -mv.xyz;
-          vNrm = normalize(normalMatrix * ln);
-          vTip = clamp(position.y / 2.15, 0.0, 1.0);
-          gl_Position = projectionMatrix * mv;
-        }
-      `,
-      fragmentShader: /* glsl */ `
-        varying float vTip;
-        varying vec3 vNrm;
-        varying vec3 vViewPos;
-        void main() {
-          vec3 N = normalize(vNrm);
-          vec3 V = normalize(vViewPos);
-          vec3 L = normalize(vec3(0.2, 0.6, 0.78));
-          vec3 H = normalize(L + V);
-          float diff = 0.28 + 0.72 * max(dot(N, L), 0.0);
-          float spec = pow(max(dot(N, H), 0.0), 48.0);
-          float rim = pow(1.0 - abs(dot(N, V)), 2.4);
-          vec3 col = mix(vec3(0.18, 0.015, 0.055), vec3(0.88, 0.86, 0.80), smoothstep(0.0, 0.32, vTip));
-          col = mix(col, vec3(0.96, 0.98, 1.0), smoothstep(0.35, 0.92, vTip));
-          col = col * diff + vec3(0.95, 0.99, 1.0) * spec * 1.2 + vec3(0.32, 0.82, 1.0) * rim * 0.55;
-          gl_FragColor = vec4(col, 1.0);
-        }
-      `,
-    });
-    const skyFangs = new THREE.InstancedMesh(skyFangGeo, this.skyFangMat, skyFangCount);
-    skyFangs.frustumCulled = false;
-    skyMonGroup.add(skyFangs);
 
     // 140 Continuous Outward-Streaming Hyperspace Speed-Lines & Mist Filaments (-48m inside sleeve -> +42m in open sky!)
     // Bridges the tunnel-to-sky transition so speed filaments fly right out into the 3D world around the player!
@@ -1347,7 +1346,7 @@ export class GlitchWorld {
     const eSeed = new Float32Array(exitLineCount * 4);
     for (let i = 0; i < exitLineCount; i++) {
       eSeed[i * 4 + 0] = (i / exitLineCount) * Math.PI * 2 + (i % 5) * 0.11;
-      eSeed[i * 4 + 1] = 1.65 + ((i * 0.381966) % 1) * 4.8; // radius 1.65m..6.45m (clear center corridor!)
+      eSeed[i * 4 + 1] = 0.62 + ((i * 0.381966) % 1) * 5.85; // radius 0.62m..6.47m (fills the tight gullet too!)
       eSeed[i * 4 + 2] = (i * 0.618034) % 1;
       eSeed[i * 4 + 3] = 0.65 + ((i * 0.271828) % 1) * 1.35;
     }
@@ -3286,6 +3285,186 @@ export class GlitchWorld {
     this.group.add(busMesh);
   }
 
+  /**
+   * VIEWPOINT RELIQUARY
+   * Three colossal steles hang off the western rim of the causeway. They carry an anamorphic
+   * ':(' built by projecting every fragment back through a single "witness point" on the bridge:
+   * from anywhere else the same slabs read as broken glyph fields. Walking the causeway —
+   * or simply turning your head — literally changes what the architecture says.
+   */
+  private buildViewpointReliquary(): void {
+    const wallX = -34.0;
+    const anchor = this.reliquaryAnchor;
+    anchor.y = this.getTerrainHeight(anchor.x, anchor.z) + 1.62;
+
+    const centerZ = -28.0;
+    const panelW = 10.0;
+    const panelH = 18.5;
+    const baseY = 6.0;
+
+    // Exact anamorphic basis: the witness point looks WEST at the steles (-X), right is +Z, up is +Y.
+    const fwd = new THREE.Vector3(-1, 0, 0);
+    const right = new THREE.Vector3(0, 0, 1);
+    const up = new THREE.Vector3(0, 1, 0);
+    const distX = Math.abs(wallX - anchor.x);
+    // Projection half-extents chosen so the three slabs span the emissive image exactly.
+    const tanX = 16.0 / distX;
+    const tanY = panelH * 0.5 / distX;
+    const centerYOffset = baseY + panelH * 0.5 - anchor.y;
+
+    this.reliquaryMat = new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
+      uniforms: {
+        uTime: { value: 0 },
+        uAnomaly: { value: 0 },
+        uNoiseTex: { value: getSharedNoiseTexture() },
+        uAnchor: { value: anchor.clone() },
+        uFwd: { value: fwd },
+        uRight: { value: right },
+        uUp: { value: up },
+        uTanX: { value: tanX },
+        uTanY: { value: tanY },
+        uCenterY: { value: centerYOffset },
+      },
+      vertexShader: /* glsl */ `
+        varying vec3 vWorldPos;
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          vec4 wp = modelMatrix * vec4(position, 1.0);
+          vWorldPos = wp.xyz;
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec3 vWorldPos;
+        varying vec2 vUv;
+        uniform float uTime;
+        uniform float uAnomaly;
+        uniform sampler2D uNoiseTex;
+        uniform vec3 uAnchor;
+        uniform vec3 uFwd;
+        uniform vec3 uRight;
+        uniform vec3 uUp;
+        uniform float uTanX;
+        uniform float uTanY;
+        uniform float uCenterY;
+
+        float h21(vec2 p) {
+          p = fract(p * vec2(127.1, 311.7));
+          return fract(p.x * p.y * 0.5773 + p.x);
+        }
+
+        void main() {
+          vec3 rel = vWorldPos - uAnchor;
+          // Pinhole anamorphic projection — exact only along rays leaving the witness point.
+          float depth = max(0.5, dot(rel, uFwd));
+          vec2 p = vec2(
+            (dot(rel, uRight) / depth) / uTanX,
+            ((dot(rel, uUp) - uCenterY) / depth) / uTanY
+          );
+
+          // How tightly the viewer is standing in the sweet spot.
+          float dCam = distance(cameraPosition, uAnchor);
+          float reveal = smoothstep(15.0, 4.5, dCam);
+
+          // ---------------- stone body (broken glyph field, reads as noise when misaligned)
+          float azim = atan(cameraPosition.z - vWorldPos.z, cameraPosition.x - vWorldPos.x);
+          vec4 n1 = texture2D(uNoiseTex, vec2(vUv.x * 2.2 + azim * 0.05, vUv.y * 0.9 + uTime * 0.006));
+          vec4 n2 = texture2D(uNoiseTex, vec2(vUv.x * 7.0 - azim * 0.09, vUv.y * 3.4 - uTime * 0.012));
+          float stone = 0.5 + 0.5 * (n1.r * 0.65 + n2.g * 0.35);
+          vec3 col = mix(vec3(0.012, 0.030, 0.062), vec3(0.045, 0.105, 0.185), stone);
+
+          // etched horizontal error registers (view-dependent drift)
+          float rows = fract(vUv.y * 26.0 + azim * 0.35 + n1.b * 0.4);
+          float rowLine = smoothstep(0.06, 0.0, min(rows, 1.0 - rows));
+          col += vec3(0.10, 0.34, 0.62) * rowLine * 0.30;
+
+          // ---------------- the anamorphic ':('
+          float ink = 0.0;
+          float eyeR = 0.082;
+          float eL = length(p - vec2(-0.300, 0.285)) - eyeR;
+          float eR = length(p - vec2( 0.300, 0.285)) - eyeR;
+          ink += smoothstep(0.030, 0.0, abs(eL));
+          ink += smoothstep(0.030, 0.0, abs(eR));
+          ink += smoothstep(0.062, 0.010, eL) * 0.55;
+          ink += smoothstep(0.062, 0.010, eR) * 0.55;
+          // frown: a parabola sagging at the corners
+          float mouthY = -0.185 - 1.15 * p.x * p.x;
+          float mouth = abs(p.y - mouthY) - 0.020;
+          ink += smoothstep(0.026, 0.0, mouth) * step(abs(p.x), 0.455);
+          // faint orbital sockets so the countenance holds up at grazing angles
+          ink += smoothstep(0.020, 0.0, abs(length(p - vec2(-0.300, 0.285)) - 0.175)) * 0.30;
+          ink += smoothstep(0.020, 0.0, abs(length(p - vec2( 0.300, 0.285)) - 0.175)) * 0.30;
+          ink = clamp(ink, 0.0, 1.0);
+
+          vec3 calmInk = vec3(0.42, 0.86, 1.0);
+          vec3 panicInk = vec3(1.0, 0.16, 0.24);
+          vec3 inkCol = mix(calmInk, panicInk, uAnomaly * 0.9);
+          float pulse = 0.72 + 0.28 * sin(uTime * 0.9);
+
+          // Misaligned: the ink survives as a dull scar. Aligned: it ignites into the face.
+          col += inkCol * ink * (0.10 + reveal * 1.55 * pulse);
+          col += inkCol * ink * reveal * 0.35 * (1.0 + uAnomaly * 1.6);
+
+          // rim light on the slab edge
+          float edge = smoothstep(0.0, 0.02, vUv.x) * smoothstep(1.0, 0.98, vUv.x);
+          col += vec3(0.16, 0.55, 1.0) * (1.0 - edge) * 0.35;
+
+          // register-lock flash when the viewer stands in the exact spot
+          float lock = smoothstep(0.86, 1.0, reveal);
+          col += inkCol * lock * 0.35 * pulse;
+
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `,
+    });
+
+    const panelGeo = new THREE.PlaneGeometry(panelW, panelH, 1, 1);
+    const spineMat = new THREE.MeshBasicMaterial({ color: 0x050b16 });
+    // Coplanar, edge-to-edge: the anamorphic image has to survive crossing from slab to slab.
+    const panelZs = [centerZ - panelW, centerZ, centerZ + panelW];
+    for (let i = 0; i < panelZs.length; i++) {
+      const holder = new THREE.Group();
+      holder.position.set(wallX, baseY + panelH * 0.5, panelZs[i]);
+      holder.rotation.y = Math.PI * 0.5;
+      const panel = new THREE.Mesh(panelGeo, this.reliquaryMat);
+      holder.add(panel);
+
+      // Dark structural spine behind each stele so it reads as carved mass, not a floating card.
+      const spine = new THREE.Mesh(new THREE.BoxGeometry(panelW * 0.985, panelH * 0.985, 0.85), spineMat);
+      spine.position.z = -0.55;
+      holder.add(spine);
+      this.group.add(holder);
+    }
+
+    // Suspended support ribs beneath the steles
+    const ribMat = new THREE.MeshBasicMaterial({ color: 0x081222 });
+    for (const z of panelZs) {
+      const rib = new THREE.Mesh(new THREE.BoxGeometry(1.1, 7.0, 1.1), ribMat);
+      rib.position.set(wallX + 0.2, baseY - 3.4, z);
+      this.group.add(rib);
+    }
+
+    // A small floor glyph marks the witness spot so attentive players can find it.
+    const markGeo = new THREE.RingGeometry(1.35, 1.62, 48);
+    markGeo.rotateX(-Math.PI * 0.5);
+    const markMat = new THREE.MeshBasicMaterial({
+      color: 0x1f6fae,
+      transparent: true,
+      opacity: 0.5,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const mark = new THREE.Mesh(markGeo, markMat);
+    mark.position.set(anchor.x, this.getTerrainHeight(anchor.x, anchor.z) + 0.06, anchor.z);
+    this.group.add(mark);
+    const inner = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.5, 32).rotateX(-Math.PI * 0.5), markMat);
+    inner.position.copy(mark.position);
+    this.group.add(inner);
+  }
+
   private buildCollapseAndAbyss(concreteDiff: THREE.Texture, concreteDisp: THREE.Texture): void {
     this.collapseGroup.visible = false;
     this.group.add(this.collapseGroup);
@@ -4235,10 +4414,18 @@ export class GlitchWorld {
     this.errorCascadeMat.uniforms.uAnomaly.value = this.anomalyIntensity;
     this.leviathanMat.uniforms.uTime.value = elapsed;
     this.leviathanMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+    if (this.reliquaryMat) {
+      this.reliquaryMat.uniforms.uTime.value = elapsed;
+      this.reliquaryMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+    }
+    this.reliquaryReveal = 1.0 - THREE.MathUtils.smoothstep(
+      Math.hypot(playerPos.x - this.reliquaryAnchor.x, playerPos.z - this.reliquaryAnchor.z),
+      3.0,
+      12.0
+    );
     this.skyRiftMat.uniforms.uTime.value = elapsed;
     this.skyTunnelMat.uniforms.uTime.value = elapsed;
     this.skyExitStreamMat.uniforms.uTime.value = elapsed;
-    this.skyFangMat.uniforms.uTime.value = elapsed;
     this.causewayBusMat.uniforms.uTime.value = elapsed;
     this.causewayBusMat.uniforms.uAnomaly.value = this.anomalyIntensity;
     if (this.landingShockTimer < 2.5) {

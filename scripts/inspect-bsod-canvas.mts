@@ -211,19 +211,19 @@ screen.root.traverse((o: any) => {
 });
 console.log('All BsodScreen stages (0..6) & GLSL uniform types verified OK!');
 
-// Verify throatTeeth (144 deep esophageal fangs) + gaping open 3D Parasyte rig (52 rimTeeth + 4 jawFlaps + 32 sinews + 11 eyes, NO tongueMesh, NO cyclic pakupaku closing) + zero-recompile setInsideTunnelMode!
+// Verify throatTeeth (144 deep esophageal fangs) + gaping open 3D Parasyte rig (40 broad rimTeeth + 4 jawFlaps + 32 sinews + 11 eyes, NO tongueMesh, NO cyclic pakupaku closing) + zero-recompile setInsideTunnelMode!
 if (!anyS.throatTeeth || anyS.throatTeeth.count !== 144) {
   throw new Error(`Expected 144 3D throatTeeth instances, got ${anyS.throatTeeth?.count}`);
 }
 if (
-  anyS.rimTeethMesh?.count !== 52 ||
+  anyS.rimTeethMesh?.count !== 40 ||
   anyS.jawFlapsMesh?.count !== 4 ||
   Boolean(anyS.tongueMesh) ||
   anyS.sinewMesh?.count !== 32 ||
   anyS.parasyteEyesMesh?.count !== 11
 ) {
   throw new Error(
-    `Expected 52 rimTeeth / 4 jawFlaps / NO tongueMesh / 32 sinews / 11 parasyteEyes, got ${anyS.rimTeethMesh?.count}/${anyS.jawFlapsMesh?.count}/${Boolean(anyS.tongueMesh)}/${anyS.sinewMesh?.count}/${anyS.parasyteEyesMesh?.count}`
+    `Expected 40 rimTeeth / 4 jawFlaps / NO tongueMesh / 32 sinews / 11 parasyteEyes, got ${anyS.rimTeethMesh?.count}/${anyS.jawFlapsMesh?.count}/${Boolean(anyS.tongueMesh)}/${anyS.sinewMesh?.count}/${anyS.parasyteEyesMesh?.count}`
   );
 }
 if (/snapDown|chewActive/.test(anyS.screenMat.fragmentShader)) {

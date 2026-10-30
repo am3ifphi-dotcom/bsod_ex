@@ -290,6 +290,23 @@ class BsodExperienceApp {
   }
 
   private bindCallbacks(): void {
+    this.player.onJump = () => {
+      if (this.phase === 'ROAM_BEDROOM' || this.phase === 'AFTERMATH_ROAM' || this.phase === 'ROAM_GLITCH') {
+        this.audio.playOneShot('footstep_wood', { volume: 0.22, rate: 1.35, reverb: 0.18 });
+      }
+    };
+
+    this.player.onLand = (impact: number) => {
+      if (this.phase === 'ROAM_BEDROOM' || this.phase === 'AFTERMATH_ROAM') {
+        this.audio.playOneShot('step4', { volume: 0.34, rate: 1.0, reverb: 0.2 });
+      } else if (this.phase === 'ROAM_GLITCH') {
+        this.audio.playOneShot('land_impact', { volume: Math.min(0.34, 0.14 + impact * 0.03), rate: 1.35, reverb: 0.3 });
+      }
+      if (impact > 4.4 && (this.phase === 'ROAM_GLITCH' || this.phase === 'ROAM_BEDROOM' || this.phase === 'AFTERMATH_ROAM')) {
+        this.audio.playOneShot('sub_boom', { volume: 0.20, rate: 1.25, reverb: 0.2 });
+      }
+    };
+
     this.player.onFootstep = () => {
       if (this.phase === 'ROAM_BEDROOM' || this.phase === 'AFTERMATH_ROAM') {
         const surf = this.bedroom.getFloorSurface(this.player.position.x, this.player.position.z);
@@ -452,6 +469,8 @@ class BsodExperienceApp {
         return;
       }
 
+      // Space is the jump input — never let the browser scroll the page with it.
+      if (e.code === 'Space') e.preventDefault();
       this.player.onKeyDown(e.code);
     });
 
@@ -587,29 +606,30 @@ class BsodExperienceApp {
 
   private computeAutoBaseScale(): number {
     const area = Math.max(1, window.innerWidth * window.innerHeight);
-    const maxPixels = this.isLowTierGpu ? 880_000 : 1_440_000;
-    return THREE.MathUtils.clamp(Math.sqrt(maxPixels / area), 0.55, 1.0);
+    const maxPixels = this.isLowTierGpu ? 1_250_000 : 2_800_000;
+    // Allow a mild supersample on smaller windows so the bedroom/LCD text reads razor sharp.
+    return THREE.MathUtils.clamp(Math.sqrt(maxPixels / area), 0.60, 1.35);
   }
 
   private applyQualityMode(mode: 'auto' | 'low' | 'medium' | 'high'): void {
     this.qualityMode = mode;
     if (mode === 'low') {
-      this.renderScale = 0.65;
+      this.renderScale = 0.70;
       this.autoBloomEnabled = false;
       this.postFX.setQuality(0, false);
     } else if (mode === 'medium') {
-      this.renderScale = 0.90;
-      this.autoBloomEnabled = true;
-      this.postFX.setQuality(0, true);
-    } else if (mode === 'high') {
-      this.renderScale = Math.min(window.devicePixelRatio || 1, 1.25);
+      this.renderScale = 1.0;
       this.autoBloomEnabled = true;
       this.postFX.setQuality(this.isLowTierGpu ? 0 : 2, true);
+    } else if (mode === 'high') {
+      this.renderScale = Math.max(1.0, Math.min(window.devicePixelRatio || 1, 1.5));
+      this.autoBloomEnabled = true;
+      this.postFX.setQuality(this.isLowTierGpu ? 0 : 4, true);
     } else {
       this.renderScale = +this.computeAutoBaseScale().toFixed(2);
       // Keep the cheap 1/5-res 2-pass bloom active in auto mode so the player's highlight-lift filter is always on!
       this.autoBloomEnabled = true;
-      this.postFX.setQuality(0, true);
+      this.postFX.setQuality(this.isLowTierGpu ? 0 : 2, true);
     }
     this.applyViewportResolution();
   }
@@ -1419,11 +1439,11 @@ class BsodExperienceApp {
       if (this.scaleCheckAccum > 0.40) {
         this.scaleCheckAccum = 0;
         const maxAuto = this.computeAutoBaseScale();
-        if (this.emaFrameMs > 18.8 && this.renderScale > 0.56) {
-          this.renderScale = Math.max(0.55, +(this.renderScale - 0.10).toFixed(2));
+        if (this.emaFrameMs > 19.6 && this.renderScale > 0.6) {
+          this.renderScale = Math.max(0.60, +(this.renderScale - 0.08).toFixed(2));
           this.applyViewportResolution();
-        } else if (this.emaFrameMs < 12.2 && this.renderScale < maxAuto - 0.04) {
-          this.renderScale = Math.min(maxAuto, +(this.renderScale + 0.08).toFixed(2));
+        } else if (this.emaFrameMs < 13.0 && this.renderScale < maxAuto - 0.04) {
+          this.renderScale = Math.min(maxAuto, +(this.renderScale + 0.05).toFixed(2));
           this.applyViewportResolution();
         }
       }
@@ -1483,6 +1503,12 @@ class BsodExperienceApp {
     let horrorAmt = this.horrorPulse;
     // Always-on subtle highlight-lift & bloom glow across all phases
     let bloomAmt = 0.58 + bendAmt * 0.16 + ghostAmt * 0.12;
+    // Signatures: inside the glitch realm a drifting patch of the frame reads as a coarse,
+    // damaged sensor quadrant. It breathes with the horror level, so the image itself feels
+    // unstable when you look around. The bedroom stays clean and sharp (it is the "real" room).
+    let lowResAmt = 0.0;
+    // CAS sharpen compensates for the internal render scale so text/metal stay crisp.
+    const sharpenAmt = this.renderScale < 0.999 ? THREE.MathUtils.clamp((1.0 - this.renderScale) * 2.3, 0.15, 1.1) : 0.18;
 
     if (this.phase === 'ROAM_BEDROOM') {
       vigAmt = 0.36;
@@ -1494,6 +1520,7 @@ class BsodExperienceApp {
       horrorAmt = Math.max(horrorAmt, this.madness * 0.45);
       bloomAmt = 0.64 + this.madness * 0.55;
     } else if (this.phase === 'SUCTION_CUTSCENE') {
+      lowResAmt = Math.max(lowResAmt, 0.16 + this.suctionTimer * 0.03);
       const tunnelRush = THREE.MathUtils.smoothstep(this.suctionTimer, 2.1, 6.2);
       const handoffClean = 1.0 - THREE.MathUtils.smoothstep(this.suctionTimer, 5.4, 7.1);
       distortAmt = Math.max(distortAmt, 0.14 + (1.0 - tunnelRush) * 0.34);
@@ -1505,6 +1532,7 @@ class BsodExperienceApp {
       ghostAmt = Math.max(ghostAmt, tunnelRush * 0.12 * handoffClean);
       bloomAmt = 0.78 + tunnelRush * 0.28;
     } else if (this.phase === 'GLITCH_ARRIVAL_CUTSCENE') {
+      lowResAmt = Math.max(lowResAmt, 0.26);
       // Crystal-clear C0-continuous match to SUCTION_CUTSCENE (t=7.20s -> arrival t=0.00s), ZERO hitch at exit!
       const diveFrac = THREE.MathUtils.clamp(1.0 - this.glitchArrivalTimer / 4.30, 0, 1);
       distortAmt = Math.max(distortAmt, diveFrac * 0.14);
@@ -1513,6 +1541,8 @@ class BsodExperienceApp {
       warpAmt = diveFrac * 0.38;
       bloomAmt = 0.84 + diveFrac * 0.22;
     } else if (this.phase === 'ROAM_GLITCH') {
+      // The damaged-sensor quadrant never fully leaves you alone out here.
+      lowResAmt = Math.max(lowResAmt, 0.24 + this.glitchWorld.anomalyIntensity * 0.36);
       // Crisp view with always-on lifted highlights, warping smoothly ONLY during periodic waves & anomalies!
       distortAmt = Math.max(distortAmt, this.glitchWorld.anomalyIntensity * 0.65);
       chromaAmt = Math.max(chromaAmt, this.glitchWorld.anomalyIntensity * 0.42);
@@ -1520,7 +1550,10 @@ class BsodExperienceApp {
       warpAmt = this.glitchWorld.anomalyIntensity * 0.12;
       horrorAmt = Math.max(horrorAmt, this.glitchWorld.anomalyIntensity * 0.28);
       bloomAmt = 0.84 + this.glitchWorld.anomalyIntensity * 0.42;
+    } else if (this.phase === 'AFTERMATH_ROAM') {
+      lowResAmt = 0.0;
     } else if (this.phase === 'COLLAPSE_CUTSCENE') {
+      lowResAmt = Math.max(lowResAmt, 0.42);
       const fallFactor = THREE.MathUtils.clamp((this.collapseTimer - 3.8) / 4.8, 0, 1);
       distortAmt = Math.max(distortAmt, 0.24 + fallFactor * 0.38);
       chromaAmt = 0.28 + fallFactor * 0.45;
@@ -1546,6 +1579,8 @@ class BsodExperienceApp {
       roll: rollAmt,
       ghost: ghostAmt,
       bloom: bloomAmt,
+      lowRes: lowResAmt,
+      sharpen: sharpenAmt,
     });
   };
 
@@ -1925,7 +1960,7 @@ class BsodExperienceApp {
           this.opticStrain = 0;
           this.periodicWarpCooldown = 6.5;
           this.crosshairEl.classList.remove('hidden');
-          this.worldHintEl.textContent = '[WASD] 探索  |  [C] コンソールを開く';
+          this.worldHintEl.textContent = '[WASD] 探索  |  [SPACE] 跳ぶ  |  [C] コンソール';
           this.worldHintEl.classList.remove('hidden');
           this.showSubtitle('正面の大橋の先に光の柱が見える——消化が100%に達する前に中央聖堂へ向かえ。', 5200);
         }
@@ -1992,6 +2027,14 @@ class BsodExperienceApp {
           this.horrorPulse = Math.max(this.horrorPulse, 0.48);
           this.audio.playOneShot('heartbeat', { volume: 0.46, rate: 1.15 });
           this.showSubtitle('聖堂の階段脇——午前2時47分の「自分」がオフィスチェアに座ったまま固まっている……！', 4800);
+        }
+
+        if (!this.glitchMilestones.reliquary && this.glitchWorld.reliquaryAlignment > 0.8) {
+          this.glitchMilestones.reliquary = true;
+          this.audio.playOneShot('dissonance', { volume: 0.26, duration: 3.2, fadeInSec: 0.3, releaseSec: 1.0, reverb: 0.6 });
+          this.audio.playOneShot('core_scanner', { volume: 0.30, rate: 0.8, reverb: 0.5 });
+          this.triggerGlitch('ghost', 0.34, 0.9);
+          this.showSubtitle('橋の上から西を見上げると——三本の石柱が、ひとつの「:(」に揃って見えた。', 5600);
         }
 
         if (!wasRevealed && this.glitchWorld.coreSecretRevealed) {

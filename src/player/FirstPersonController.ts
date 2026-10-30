@@ -52,6 +52,18 @@ export class FirstPersonController {
   private readonly rightVec = new THREE.Vector3();
 
   public onFootstep?: () => void;
+  public onJump?: () => void;
+  public onLand?: (impactSpeed: number) => void;
+
+  // --- Vertical locomotion (true jumping + gravity instead of a hard ground snap) ---
+  private verticalVel = 0;
+  private grounded = true;
+  private jumpLatch = false;
+  private landDip = 0;
+  private landDipVel = 0;
+  private airTime = 0;
+  private readonly gravity = 15.0;
+  private readonly jumpSpeed = 4.9;
 
   constructor(private readonly camera: THREE.PerspectiveCamera) {}
 
@@ -101,6 +113,11 @@ export class FirstPersonController {
   public resetToBedroomSpawn(monitorWorldPos?: THREE.Vector3): void {
     this.position.set(0.35, 0.017, 0.62);
     this.velocity.set(0, 0, 0);
+    this.verticalVel = 0;
+    this.grounded = true;
+    this.landDip = 0;
+    this.landDipVel = 0;
+    this.airTime = 0;
     this.roll = 0;
     this.walkPhase = 0;
     this.lastStepHalfCycle = 0;
@@ -161,8 +178,50 @@ export class FirstPersonController {
     collisionFn(this.position);
     const actualMoveSpeed = Math.hypot(this.position.x - prevX, this.position.z - prevZ) / Math.max(dt, 1e-4);
 
+    // ---------------------------------------------------------------- JUMP / GRAVITY
     const targetGroundY = groundYFn(this.position.x, this.position.z);
-    this.position.y = THREE.MathUtils.lerp(this.position.y, targetGroundY, Math.min(1, dt * 18));
+    const wantsJump = inputEnabled && this.keys.has('Space');
+    if (!wantsJump) this.jumpLatch = false;
+
+    if (wantsJump && this.grounded && !this.jumpLatch) {
+      this.jumpLatch = true;
+      this.grounded = false;
+      this.verticalVel = this.jumpSpeed;
+      this.airTime = 0;
+      this.onJump?.();
+    }
+
+    if (this.grounded) {
+      // Walking a slope / stepping off a ledge: hug the ground, but fall if it drops away.
+      if (this.position.y - targetGroundY > 0.62) {
+        this.grounded = false;
+        this.verticalVel = Math.min(0, this.verticalVel);
+      } else {
+        this.verticalVel = 0;
+        this.position.y = THREE.MathUtils.lerp(this.position.y, targetGroundY, Math.min(1, dt * 18));
+      }
+    }
+
+    if (!this.grounded) {
+      this.airTime += dt;
+      this.verticalVel -= this.gravity * dt;
+      this.position.y += this.verticalVel * dt;
+      if (this.position.y <= targetGroundY) {
+        const impact = Math.max(0, -this.verticalVel);
+        this.position.y = targetGroundY;
+        this.verticalVel = 0;
+        this.grounded = true;
+        if (this.airTime > 0.12) {
+          this.landDip = THREE.MathUtils.clamp(0.020 + impact * 0.021, 0.03, 0.17);
+          this.onLand?.(impact);
+        }
+        this.airTime = 0;
+      }
+    }
+
+    // Landing absorb spring (reads as knees bending instead of a hard camera snap)
+    this.landDipVel += (-this.landDip * 120.0 - this.landDipVel * 17.0) * dt;
+    this.landDip += this.landDipVel * dt;
 
     const speed = Math.hypot(this.velocity.x, this.velocity.z);
     if (inputEnabled && wishLen > 1e-3 && actualMoveSpeed > 0.35 && speed > 0.45) {
@@ -185,6 +244,8 @@ export class FirstPersonController {
       Math.sin(this.breathTime * 1.5) * 0.003;
     const bobSway = Math.cos(this.walkPhase) * 0.012 * moveFactor;
     const subtleRoll = Math.cos(this.walkPhase) * 0.006 * moveFactor;
+    // Airborne stretch + landing compression
+    const airStretch = this.grounded ? 0 : THREE.MathUtils.clamp(this.verticalVel * 0.006, -0.02, 0.025);
 
     this.euler.set(this.pitch, this.yaw, subtleRoll, 'YXZ');
     this.camera.quaternion.setFromEuler(this.euler);
@@ -192,7 +253,7 @@ export class FirstPersonController {
     this.rightVec.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
     this.camera.position.set(
       this.position.x + this.rightVec.x * bobSway,
-      this.position.y + this.eyeHeight + bobY,
+      this.position.y + this.eyeHeight + bobY - this.landDip + airStretch,
       this.position.z + this.rightVec.z * bobSway
     );
   }
@@ -522,6 +583,8 @@ export class FirstPersonController {
     const fwdY = this.scratchDir.y;
     const fwdZ = this.scratchDir.z;
     const tunnelPitch = Math.asin(THREE.MathUtils.clamp(fwdY, -0.99, 0.99));
+    // World-space yaw of the throat axis, so the tunnel look direction can never snap at the handoff.
+    const tunnelYaw = Math.atan2(-fwdX, -fwdZ);
     const exitSpeed = 24.5; // m/s -> -27.44m sleeve start & 77.9m Hermite tangent matching the 76.7m sky chord!
 
     if (t < tunnelDur) {
@@ -537,7 +600,7 @@ export class FirstPersonController {
       const fov = 96.0 - 6.0 * s;
 
       this.camera.position.set(camX, camY, camZ);
-      this.euler.set(tunnelPitch, 0, roll, 'YXZ');
+      this.euler.set(tunnelPitch, tunnelYaw, roll, 'YXZ');
       this.camera.quaternion.setFromEuler(this.euler);
       this.camera.fov = fov;
       this.camera.updateProjectionMatrix();
@@ -590,7 +653,8 @@ export class FirstPersonController {
 
       const flareBlend = THREE.MathUtils.smoothstep(u, 0.52, 1.0);
       const pitch = THREE.MathUtils.lerp(velPitch, -0.24, flareBlend);
-      const yaw = THREE.MathUtils.lerp(velYaw * 0.45, 0.0, flareBlend);
+      // C0-welded to Phase 1: at u=0 the look direction equals the throat axis exactly.
+      const yaw = THREE.MathUtils.lerp(velYaw, tunnelYaw * 0.12, flareBlend);
       const roll = 0.03 - bankCurve * 0.13;
       // C1-continuous FOV continuation from Phase 1 (90.0 -> 74.0, matching dfov/dt = -5.357 deg/s at u=0!)
       const fov = 90.0 - 17.04 * u + 1.04 * u2;
