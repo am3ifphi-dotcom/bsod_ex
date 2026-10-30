@@ -135,7 +135,11 @@ cam.getWorldDirection(suctionEndDir);
 const suctionAxisDot = suctionEndDir.dot(monFwd.clone().negate());
 const suctionEndFov = cam.fov;
 
-ctrl.updateGlitchArrivalCutscene(1 / 60, 0.0, spawn, w.corePosition, w.skyPortalPos, w.skyPortalQuat);
+const handoff = {
+  depth: ctrl.suctionHandoffDepth,
+  speed: ctrl.suctionExitSpeed,
+};
+ctrl.updateGlitchArrivalCutscene(1 / 60, 0.0, spawn, w.corePosition, w.skyPortalPos, w.skyPortalQuat, handoff);
 const portalFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(w.skyPortalQuat).normalize();
 const arrivalStartDir = new THREE.Vector3();
 cam.getWorldDirection(arrivalStartDir);
@@ -157,22 +161,24 @@ if (
   );
 }
 
-// 2) Verify C1 velocity + quaternion + FOV continuity right across the mouth exit at t = 1.12s!
-const exitT = 1.12;
+// 2) Verify C1 velocity + quaternion + FOV continuity right across the mouth exit.
+//    The sleeve now starts at the BSOD throat's exact hand-off depth and enters with its exit speed,
+//    so the exit time is derived from that quadratic depth profile instead of being hard-coded.
+const exitT = (2 * handoff.depth) / (handoff.speed + 24.5);
 const dtEps = 0.001;
-ctrl.updateGlitchArrivalCutscene(dtEps, exitT - dtEps * 2, spawn, w.corePosition, w.skyPortalPos, w.skyPortalQuat);
+ctrl.updateGlitchArrivalCutscene(dtEps, exitT - dtEps * 2, spawn, w.corePosition, w.skyPortalPos, w.skyPortalQuat, handoff);
 const pBefore2 = cam.position.clone();
-ctrl.updateGlitchArrivalCutscene(dtEps, exitT - dtEps, spawn, w.corePosition, w.skyPortalPos, w.skyPortalQuat);
+ctrl.updateGlitchArrivalCutscene(dtEps, exitT - dtEps, spawn, w.corePosition, w.skyPortalPos, w.skyPortalQuat, handoff);
 const pBefore1 = cam.position.clone();
 const qBefore = cam.quaternion.clone();
 const fovBefore = cam.fov;
 const velIn = pBefore1.clone().sub(pBefore2).divideScalar(dtEps);
 
-ctrl.updateGlitchArrivalCutscene(dtEps, exitT + dtEps, spawn, w.corePosition, w.skyPortalPos, w.skyPortalQuat);
+ctrl.updateGlitchArrivalCutscene(dtEps, exitT + dtEps, spawn, w.corePosition, w.skyPortalPos, w.skyPortalQuat, handoff);
 const pAfter1 = cam.position.clone();
 const qAfter = cam.quaternion.clone();
 const fovAfter = cam.fov;
-ctrl.updateGlitchArrivalCutscene(dtEps, exitT + dtEps * 2, spawn, w.corePosition, w.skyPortalPos, w.skyPortalQuat);
+ctrl.updateGlitchArrivalCutscene(dtEps, exitT + dtEps * 2, spawn, w.corePosition, w.skyPortalPos, w.skyPortalQuat, handoff);
 const pAfter2 = cam.position.clone();
 const velOut = pAfter2.clone().sub(pAfter1).divideScalar(dtEps);
 
@@ -180,7 +186,7 @@ const velJump = velOut.distanceTo(velIn);
 const angJumpDeg = THREE.MathUtils.radToDeg(qBefore.angleTo(qAfter));
 const exitFovJump = Math.abs(fovAfter - fovBefore);
 console.log(
-  `aperture exit C1 check (t=1.12s): velJump=${velJump.toFixed(4)} m/s | angJump=${angJumpDeg.toFixed(4)} deg | fovJump=${exitFovJump.toFixed(4)} deg`
+  `aperture exit C1 check (t=${exitT.toFixed(2)}s): velJump=${velJump.toFixed(4)} m/s | angJump=${angJumpDeg.toFixed(4)} deg | fovJump=${exitFovJump.toFixed(4)} deg`
 );
 if (velJump > 0.25 || angJumpDeg > 0.08 || exitFovJump > 0.05) {
   throw new Error(`Discontinuity at tunnel exit mouth: velJump=${velJump}, angJump=${angJumpDeg}, fovJump=${exitFovJump}`);
@@ -188,15 +194,16 @@ if (velJump > 0.25 || angJumpDeg > 0.08 || exitFovJump > 0.05) {
 
 let prevPos: THREE.Vector3 | null = null;
 let maxStepJump = 0;
-for (let step = 0; step <= 300; step++) {
-  const t = (step / 300) * 5.95;
-  ctrl.updateGlitchArrivalCutscene(1 / 60, t, spawn, w.corePosition, w.skyPortalPos, w.skyPortalQuat);
+const arrivalTotal = exitT + 3.18 + 1.65;
+for (let step = 0; step <= 340; step++) {
+  const t = (step / 340) * arrivalTotal;
+  ctrl.updateGlitchArrivalCutscene(1 / 60, t, spawn, w.corePosition, w.skyPortalPos, w.skyPortalQuat, handoff);
   const lookDir = new THREE.Vector3();
   cam.getWorldDirection(lookDir);
   if (lookDir.z > -0.25) {
     throw new Error(`Camera flipped backward during tunnel->world arrival at t=${t.toFixed(2)}: lookDir.z=${lookDir.z.toFixed(3)}`);
   }
-  if (prevPos && t > 0.05 && t < 4.28) {
+  if (prevPos && t > 0.05 && t < exitT + 3.1) {
     if (cam.position.z > prevPos.z + 1e-4 || cam.position.y > prevPos.y + 1e-4) {
       throw new Error(`Hermite flight overshot/reversed at t=${t.toFixed(2)}!`);
     }

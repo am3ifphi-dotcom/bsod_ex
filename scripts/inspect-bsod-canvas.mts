@@ -211,9 +211,9 @@ screen.root.traverse((o: any) => {
 });
 console.log('All BsodScreen stages (0..6) & GLSL uniform types verified OK!');
 
-// Verify throatTeeth (144 deep esophageal fangs) + gaping open 3D Parasyte rig (52 rimTeeth + 4 jawFlaps + 32 sinews + 11 eyes, NO tongueMesh, NO cyclic pakupaku closing) + zero-recompile setInsideTunnelMode!
-if (!anyS.throatTeeth || anyS.throatTeeth.count !== 144) {
-  throw new Error(`Expected 144 3D throatTeeth instances, got ${anyS.throatTeeth?.count}`);
+// Verify throatTeeth (112 deep esophageal fangs = 4 rings x 28 broad Parasyte blades) + gaping open 3D Parasyte rig (52 rimTeeth + 4 jawFlaps + 32 sinews + 11 eyes, NO tongueMesh, NO cyclic pakupaku closing) + zero-recompile setInsideTunnelMode!
+if (!anyS.throatTeeth || anyS.throatTeeth.count !== 112) {
+  throw new Error(`Expected 112 3D throatTeeth instances, got ${anyS.throatTeeth?.count}`);
 }
 if (
   anyS.rimTeethMesh?.count !== 52 ||
@@ -238,7 +238,7 @@ for (let i = 0; i < versionsBefore.length; i++) {
     throw new Error(`Throat material[${i}] triggered shader recompile or lost stencilWriteMask=0!`);
   }
 }
-console.log('throatTeeth (144 deep fangs), gaping open 3D parasyteGroup (52 teeth + 4 jawFlaps + 32 sinews + 11 eyes, zero pakupaku) & zero-recompile stencil toggle verified OK!');
+console.log('throatTeeth (112 broad Parasyte fangs), gaping open 3D parasyteGroup (52 teeth + 4 jawFlaps + 32 sinews + 11 eyes, zero pakupaku) & zero-recompile stencil toggle verified OK!');
 
 // Does the body canvas carry the expected cerulean fill?
 const ctx2 = body.getContext('2d');

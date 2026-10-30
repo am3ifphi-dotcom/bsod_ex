@@ -14,7 +14,7 @@ export interface BsodScreenState {
 const THROAT_RING_COUNT = 40;
 const THROAT_SHARD_COUNT = 128;
 const THROAT_LINE_COUNT = 180;
-const THROAT_TOOTH_COUNT = 144;
+const THROAT_TOOTH_COUNT = 112;
 const RIM_TOOTH_COUNT = 52;
 const JAW_FLAP_COUNT = 4;
 const SINEW_COUNT = 32;
@@ -65,16 +65,20 @@ function buildParasyteMandibleGeometry(): THREE.BufferGeometry {
 }
 
 function buildParasyteToothGeometry(): THREE.BufferGeometry {
-  // Single-row sculpted 3D Parasyte tooth: fleshy cervical root -> thick dentin body -> sharp biting crown
-  const rings = 5;
-  const segs = 8;
+  // Sculpted 3D Parasyte tooth (寄生獣): a broad, heavy dentin blade with a bulging bony shoulder,
+  // a flared fleshy cervical root and a hooked, razor crown. The old profile tapered so hard that
+  // the deep esophageal rows read as thin needles — these are deliberately thick and blade-like.
+  const rings = 7;
+  const segs = 10;
   const profile: Array<[number, number, number, number]> = [
-    // [y (0..1), rx (mesial-distal width), rz (labial-lingual thickness), hookZ (slight anatomical curve)]
-    [0.0, 0.062, 0.050, 0.0],
-    [0.22, 0.056, 0.042, 0.005],
-    [0.54, 0.054, 0.030, 0.016],
-    [0.82, 0.028, 0.014, 0.034],
-    [1.0, 0.004, 0.003, 0.048],
+    // [y (0..1), rx (mesial-distal width), rz (labial-lingual thickness), hookZ (anatomical curve)]
+    [0.0, 0.086, 0.070, 0.0],
+    [0.12, 0.094, 0.080, 0.002],
+    [0.30, 0.100, 0.076, 0.008],
+    [0.52, 0.092, 0.058, 0.020],
+    [0.72, 0.070, 0.040, 0.036],
+    [0.88, 0.040, 0.022, 0.054],
+    [1.0, 0.006, 0.005, 0.070],
   ];
   const positions: number[] = [];
   const uvs: number[] = [];
@@ -83,7 +87,7 @@ function buildParasyteToothGeometry(): THREE.BufferGeometry {
     const [ty, rx, rz, hz] = profile[r];
     for (let s = 0; s <= segs; s++) {
       const a = (s / segs) * Math.PI * 2;
-      positions.push(Math.cos(a) * rx, ty * 0.27, Math.sin(a) * rz + hz);
+      positions.push(Math.cos(a) * rx, ty * 0.30, Math.sin(a) * rz + hz);
       uvs.push(s / segs, ty);
     }
   }
@@ -183,8 +187,8 @@ export class BsodScreen {
 
     // 2. Separate Face Channel Map (R = ':' eyes, G = '(' mouth stroke)
     this.faceCanvas = document.createElement('canvas');
-    this.faceCanvas.width = 512;
-    this.faceCanvas.height = 512;
+    this.faceCanvas.width = 768;
+    this.faceCanvas.height = 768;
     this.renderFaceChannelTexture();
     this.faceTex = new THREE.CanvasTexture(this.faceCanvas);
     this.faceTex.minFilter = THREE.LinearFilter;
@@ -337,7 +341,7 @@ export class BsodScreen {
           col += vec3(0.70, 0.94, 1.0) * shockRing * mix(0.10, 0.72, sleeveZone);
 
           // === SEAMLESS DEAD-CENTER FAR-END PORTAL VISTA (MATCHING GLITCH WORLD SKY-MAW OPENING 1:1) ===
-          float portalMask = smoothstep(0.94, 0.996, depthFactor);
+          float portalMask = smoothstep(0.88, 0.995, depthFactor);
           vec2 radialP = vTubePos.xy / 5.6;
           float skyY = clamp(radialP.y * 0.55 + 0.18, -0.35, 1.0);
           vec3 gwHorizon = vec3(0.012, 0.24, 0.76);
@@ -349,11 +353,13 @@ export class BsodScreen {
           float eyeDist = length(eyeRel);
           float eyeCorona = exp(-eyeDist * 3.2) * 0.65 + exp(-abs(eyeDist - 0.21) * 19.0) * 0.95;
           gwSky += vec3(0.58, 0.90, 1.0) * eyeCorona * (0.45 + 0.55 * uSuction);
-          // Tooth-serrated silhouette around the distant exit rim matching GlitchWorld's 48 Sky-Maw teeth!
+          // The far end is a smooth, soft-edged organic aperture (no teeth, no serrated rim):
+          // the silhouette feathers into the throat tone so the hand-off to GlitchWorld's sleeve
+          // cannot read as a hard cut.
           float rimR = length(radialP);
-          float fangSil = abs(fract((angle * 0.1591549 + 0.5) * 48.0) - 0.5) * 2.0;
-          float toothShadow = smoothstep(0.82 + fangSil * 0.14, 0.98, rimR);
-          gwSky = mix(gwSky, vec3(0.02, 0.04, 0.12), toothShadow * 0.85);
+          float softRim = smoothstep(0.74, 1.0, rimR);
+          gwSky = mix(gwSky, vec3(0.010, 0.045, 0.150), softRim * 0.55);
+          gwSky += vec3(0.35, 0.72, 1.0) * exp(-abs(rimR - 0.72) * 15.0) * 0.20;
 
           col = mix(col, gwSky, portalMask);
 
@@ -594,7 +600,7 @@ export class BsodScreen {
     // 5e. Deep Esophageal Swallowing Ribs (only emerge deep inside the tunnel during SUCTION so mouth stays 100% single-row!)
     const fangGeo = buildParasyteToothGeometry();
     const tSeed = new Float32Array(THROAT_TOOTH_COUNT * 4);
-    const teethPerRing = 36;
+    const teethPerRing = 28;
     for (let i = 0; i < THROAT_TOOTH_COUNT; i++) {
       const ringIdx = Math.floor(i / teethPerRing); // 0..3 deep esophageal rings
       const slot = i % teethPerRing;
@@ -641,14 +647,19 @@ export class BsodScreen {
           // Hidden during INSPECT_PC (uSuction == 0) so the mouth itself ONLY has its clean single row of teeth!
           float insideVis = smoothstep(0.05, 0.22, uSuction);
           float ringZ = -14.0 - ringIdx * 8.5;
-          float clampWave = sin(-ringZ * 0.35 - uTime * 8.0) * 0.22;
-          float rad = max(1.35, 2.35 + ringIdx * 0.28 + clampWave + sin(uTime * 16.0 + phase) * 0.06);
+          float clampWave = sin(-ringZ * 0.35 - uTime * 7.0) * 0.16;
+          // Roots sit exactly on the flaring throat wall (radius 1.42 at z=0 -> 5.6 at z=-116)
+          // so the broad Parasyte blades grow out of the flesh instead of floating behind it.
+          float wallR = 1.42 + (-ringZ / 116.0) * 4.18;
+          float rad = max(1.35, wallR - 0.05 + clampWave + sin(uTime * 16.0 + phase) * 0.05);
 
           vec2 radialDir = vec2(cos(ang), sin(ang));
           vec2 tangentDir = vec2(-radialDir.y, radialDir.x);
 
-          float h = 1.55 * lenScale * insideVis;
-          float w = 1.45 * insideVis;
+          // Thick, uneven, blade-like fangs (寄生獣): wide root, heavy body, hooked crown.
+          float fat = 0.82 + lenScale * 0.42;
+          float h = 1.42 * lenScale * insideVis;
+          float w = 2.05 * fat * insideVis;
           vec3 inwardAxis = normalize(vec3(-radialDir, -0.58));
           vec3 sideAxis = vec3(tangentDir, 0.0);
           vec3 depthAxis = normalize(cross(inwardAxis, sideAxis));
@@ -1367,8 +1378,9 @@ export class BsodScreen {
 
           float isIncisor = 1.0 - step(0.42, morph);
           float grow = smoothstep(0.03, 0.22, clamp(uJawOpen * 1.35 + uMadness * 0.25, 0.0, 1.0));
-          float wScale = mix(0.68, 1.05, isIncisor) * faceScale * (0.55 + 0.45 * grow) * step(0.015, grow);
-          float hScale = mix(0.54 + morph * 0.36, 0.38 + morph * 0.16, isIncisor) * faceScale * grow;
+          // Broad Parasyte dental arch: heavy roots, long hooked blades, naturally uneven per tooth.
+          float wScale = mix(0.88, 1.32, isIncisor) * faceScale * (0.58 + 0.42 * grow) * step(0.015, grow);
+          float hScale = mix(0.88 + morph * 0.52, 0.66 + morph * 0.34, isIncisor) * faceScale * grow;
 
           // Held WIDE OPEN in a menacing predatory ring waiting to pull you down its throat (ZERO pakupaku closing!):
           float microTwitch = sin(uTime * 19.0 + phase * 6.283) * 0.010 * uMadness;
@@ -1980,7 +1992,8 @@ export class BsodScreen {
 
   private renderFaceChannelTexture(): void {
     const ctx = this.faceCanvas.getContext('2d')!;
-    ctx.setTransform(0.5, 0, 0, 0.5, 0, 0);
+    // 768px texture over the same 1024px authoring space (0.75) for crisper glyph edges.
+    ctx.setTransform(0.75, 0, 0, 0.75, 0, 0);
     const W = 1024;
     ctx.clearRect(0, 0, W, W);
     ctx.fillStyle = '#000000';
@@ -2164,10 +2177,12 @@ export class BsodScreen {
 
   private bakeStageTexture(stage: number, aftermath: boolean): THREE.CanvasTexture {
     const canvas = document.createElement('canvas');
-    canvas.width = 1024;
-    canvas.height = 537;
+    canvas.width = 1536;
+    canvas.height = 806;
     const ctx = canvas.getContext('2d')!;
-    ctx.setTransform(0.5, 0, 0, 0.5, 0, 0);
+    // Same 2048x1074 authoring space, but baked at 1536px wide so the BSOD text stays crisp
+    // when the monitor fills a large part of a 1080p/1440p frame.
+    ctx.setTransform(0.75, 0, 0, 0.75, 0, 0);
     const W = 2048;
     const H = 1074;
 

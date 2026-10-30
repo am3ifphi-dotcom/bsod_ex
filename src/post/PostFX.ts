@@ -28,6 +28,15 @@ export type PostFXOptions = {
   roll?: number;
   ghost?: number;
   bloom?: number;
+  /** 0..1 screen-space "damaged feed" patch: a feathered region that resolves at a much lower
+   *  internal resolution (mosaic + scanline + block noise). Driven by gaze so it wanders. */
+  patch?: number;
+  patchCenter?: THREE.Vector2;
+  patchSize?: THREE.Vector2;
+  /** Contrast-adaptive unsharp amount used to recover crispness after resolution scaling. */
+  sharpen?: number;
+  /** Soft fleshy blur/veil used exactly at the throat hand-off to hide the scene swap. */
+  veil?: number;
 };
 
 export class PostFX {
@@ -86,6 +95,12 @@ export class PostFX {
         uGhost: { value: 0 },
         tBloom: { value: null },
         uBloom: { value: 0.0 },
+        uTexel: { value: new THREE.Vector2(1 / Math.max(2, width), 1 / Math.max(2, height)) },
+        uSharpen: { value: 0.0 },
+        uVeil: { value: 0.0 },
+        uPatch: { value: 0.0 },
+        uPatchCenter: { value: new THREE.Vector2(0.76, 0.62) },
+        uPatchSize: { value: new THREE.Vector2(0.30, 0.34) },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -112,6 +127,12 @@ export class PostFX {
         uniform float uGhost;
         uniform sampler2D tBloom;
         uniform float uBloom;
+        uniform vec2 uTexel;
+        uniform float uSharpen;
+        uniform float uVeil;
+        uniform float uPatch;
+        uniform vec2 uPatchCenter;
+        uniform vec2 uPatchSize;
 
         float hash21(vec2 p) {
           p = fract(p * vec2(123.34, 456.21));
@@ -242,6 +263,21 @@ export class PostFX {
             col = fetch(uv);
           }
 
+          // ---------------------------------------------------------------- THROAT HAND-OFF VEIL
+          // A soft fleshy optical smear, only alive for ~0.4s across the throat -> sleeve swap.
+          // It blurs and darkens the periphery while the centre stays readable, so the two
+          // tunnel shaders can trade places without the eye catching the cut.
+          if (uVeil > 0.002) {
+            vec2 edge = centered * vec2(1.7, 1.0);
+            float rimAmt = smoothstep(0.10, 0.72, length(edge));
+            vec3 soft = fetch(vUv) * 0.34
+                      + fetch(vUv + vec2(0.006, 0.004)) * 0.20
+                      + fetch(vUv - vec2(0.006, 0.004)) * 0.20
+                      + fetch(vUv + vec2(-0.004, 0.006)) * 0.13
+                      + fetch(vUv - vec2(-0.004, 0.006)) * 0.13;
+            col = mix(col, soft * vec3(0.72, 0.62, 0.72), clamp(uVeil * (0.20 + 0.80 * rimAmt), 0.0, 0.9));
+          }
+
           // Ghost echo of the bend (double vision on strong spatial warps)
           if (uDistort > 0.18) {
             vec3 ghost = fetch(vUv - refractOffset * 1.35);
@@ -326,10 +362,57 @@ export class PostFX {
           vec3 hiTint = col * vec3(1.02, 1.05, 1.10);
           col = mix(shadowTint, hiTint, smoothstep(0.24, 0.76, luma));
 
-          // Subtle always-on optical phosphor weave & fine cinema sensor grain
-          float microScan = 0.988 + 0.012 * sin(vUv.y * 1080.0 * 3.14159);
-          float grain = (hash21(vUv * 540.0 + fract(uTime * 19.7)) - 0.5) * 0.017;
+          // Subtle always-on optical phosphor weave & fine cinema sensor grain.
+          // Kept deliberately light so the calm image stays clean instead of looking low-res.
+          float microScan = 0.994 + 0.006 * sin(vUv.y * 1080.0 * 3.14159);
+          float grain = (hash21(vUv * 640.0 + fract(uTime * 19.7)) - 0.5) * 0.009;
           col = col * microScan + grain;
+
+          // ---------------------------------------------------------------- DAMAGED-FEED PATCH
+          // A feathered window of the frame that is deliberately under-resolved: coarse mosaic,
+          // channel smear, scanlines and macroblock noise. It drifts with the gaze and is scaled
+          // back whenever the image must be readable, so it reads as a defective panel in the
+          // player's own visual field rather than a full-screen filter.
+          if (uPatch > 0.003) {
+            vec2 pd = abs(vUv - uPatchCenter) / max(uPatchSize, vec2(0.02));
+            float wobble = (hash21(vec2(floor(vUv.y * 34.0), floor(uTime * 3.0))) - 0.5) * 0.10;
+            float box = 1.0 - smoothstep(0.70, 1.0, max(pd.x + wobble, pd.y));
+            float mask = box * uPatch;
+            if (mask > 0.003) {
+              vec2 grid = vec2(148.0, 84.0);
+              vec2 block = floor(vUv * grid);
+              vec2 q = (block + 0.5) / grid;
+              vec3 lo = fetch(q) * 0.52
+                      + fetch(q + vec2(1.0 / grid.x, 0.0)) * 0.16
+                      + fetch(q + vec2(0.0, 1.0 / grid.y)) * 0.16
+                      + fetch(q + vec2(1.0 / grid.x, 1.0 / grid.y)) * 0.16;
+              // chroma bleed across block rows (video-compression looking, not a blur)
+              lo.r = mix(lo.r, fetch(q + vec2(2.0 / grid.x, 0.0)).r, 0.45);
+              lo.b = mix(lo.b, fetch(q - vec2(2.0 / grid.x, 0.0)).b, 0.45);
+              float scan = 0.82 + 0.18 * sin(q.y * 760.0);
+              float blockHash = hash21(block + floor(uTime * 14.0));
+              lo = lo * scan + (blockHash - 0.5) * (0.055 + 0.05 * uPatch);
+              float lum = dot(lo, vec3(0.299, 0.587, 0.114));
+              lo = mix(vec3(lum), lo, 0.62) * vec3(0.94, 1.01, 1.08);
+              col = mix(col, lo, clamp(mask * 0.92, 0.0, 1.0));
+              // faint luminous frame so the region reads as a panel / lens defect
+              float frame = smoothstep(0.80, 0.90, max(pd.x, pd.y)) * (1.0 - smoothstep(0.94, 1.0, max(pd.x, pd.y)));
+              col += vec3(0.10, 0.34, 0.58) * frame * uPatch * 0.30;
+            }
+          }
+
+          // ---------------------------------------------------------------- EDGE-ADAPTIVE SHARPEN
+          // Recovers the crispness lost when the internal buffer is upscaled to the display.
+          if (uSharpen > 0.002) {
+            vec3 n1 = fetch(vUv + vec2(uTexel.x, 0.0));
+            vec3 n2 = fetch(vUv - vec2(uTexel.x, 0.0));
+            vec3 n3 = fetch(vUv + vec2(0.0, uTexel.y));
+            vec3 n4 = fetch(vUv - vec2(0.0, uTexel.y));
+            vec3 blurN = (n1 + n2 + n3 + n4) * 0.25;
+            vec3 detail = col - blurN;
+            float edgeGuard = 1.0 - smoothstep(0.20, 0.85, length(detail));
+            col += detail * uSharpen * (0.55 + 0.45 * edgeGuard);
+          }
 
           // --- Bloom: 1/5-res anamorphic bright-pass glow so highlights & neon bloom cleanly
           if (uBloom > 0.001) {
@@ -469,6 +552,7 @@ export class PostFX {
     this.rtBlur.setSize(bw, bh);
     this.brightMat.uniforms.uTexelX.value = 1 / bw;
     this.blurMat.uniforms.uTexelY.value = 1 / bh;
+    this.mat.uniforms.uTexel.value.set(1 / Math.max(2, width), 1 / Math.max(2, height));
   }
 
   /**
@@ -529,6 +613,11 @@ export class PostFX {
     u.uSort.value = opts.sort ?? 0;
     u.uRoll.value = opts.roll ?? 0;
     u.uGhost.value = opts.ghost ?? 0;
+    u.uSharpen.value = opts.sharpen ?? 0;
+    u.uVeil.value = opts.veil ?? 0;
+    u.uPatch.value = opts.patch ?? 0;
+    if (opts.patchCenter) u.uPatchCenter.value.copy(opts.patchCenter);
+    if (opts.patchSize) u.uPatchSize.value.copy(opts.patchSize);
 
     renderer.setRenderTarget(this.rt);
     renderer.clear(true, true, true);

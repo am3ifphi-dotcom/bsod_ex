@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { toFastLambert } from './BedroomScene';
-import { getSharedNoiseTexture } from '../utils/ProceduralNoise';
+import { applyAssetAnisotropy, getSharedNoiseTexture } from '../utils/ProceduralNoise';
 
 const FLOATING_SHARD_COUNT = 120;
 const ABYSS_DEBRIS_COUNT = 96;
@@ -42,6 +42,8 @@ export class GlitchWorld {
   public readonly corePosition = new THREE.Vector3(0, 4.4, -56);
   public readonly spawnPosition = new THREE.Vector3(0, 0, 20);
   public readonly skyPortalPos = new THREE.Vector3(0, 46, 86);
+  /** Centre of the lenticular ':(' panel far beyond the sanctuary (view-gated reveal). */
+  public readonly sigilPosition = new THREE.Vector3(0, 34, -150);
   public readonly skyPortalQuat = new THREE.Quaternion();
 
   private skySleeveMesh!: THREE.Mesh;
@@ -59,9 +61,12 @@ export class GlitchWorld {
   private errorCascadeMat!: THREE.ShaderMaterial;
   private leviathanMat!: THREE.ShaderMaterial;
   private skyRiftMat!: THREE.ShaderMaterial;
+  /** Depth (world m) along the aperture axis where the BSOD throat hands off to this sleeve. */
+  public sleeveHandoffDepth = 30.82;
+  private sigilMat!: THREE.ShaderMaterial;
+  private apertureFoldMat!: THREE.ShaderMaterial;
   private skyTunnelMat!: THREE.ShaderMaterial;
   private skyExitStreamMat!: THREE.ShaderMaterial;
-  private skyFangMat!: THREE.ShaderMaterial;
   private causewayBusMat!: THREE.ShaderMaterial;
   private floatingShardMat!: THREE.ShaderMaterial;
   private landingShockMat!: THREE.ShaderMaterial;
@@ -220,6 +225,8 @@ export class GlitchWorld {
 
     concreteDiff.wrapS = concreteDiff.wrapT = THREE.RepeatWrapping;
     concreteDisp.wrapS = concreteDisp.wrapT = THREE.RepeatWrapping;
+    applyAssetAnisotropy(concreteDiff);
+    applyAssetAnisotropy(concreteDisp);
 
     this.spawnPosition.y = this.getTerrainHeight(this.spawnPosition.x, this.spawnPosition.z);
     this.corePosition.y = this.getTerrainHeight(0, -56);
@@ -255,8 +262,121 @@ export class GlitchWorld {
     // 5d. Threshold Host Effigy & Peripheral Stalking Glitch Apparitions
     this.buildHostEffigyAndPhantoms();
 
+    // 5e. Lenticular sky sigil: a colossal ':(' that only resolves when you look at it head-on.
+    this.buildViewGatedSigil();
+
     // 6. Act 4 True Voronoi Jigsaw Fracture & 245m Abyssal Freefall Shaft
     this.buildCollapseAndAbyss(concreteDiff, concreteDisp);
+  }
+
+  /**
+   * View-gated lenticular sigil.
+   * A huge plane high beyond the sanctuary is chopped into vertical slats. Each slat samples the
+   * giant ':(' with a per-slat lateral offset driven by the actual viewing parallax, so the glyph
+   * shatters into useless static whenever you look away and snaps into a perfect colossal ':('
+   * only when you stand on the causeway and look straight at it. Nothing else in the world reads
+   * differently from different angles, so this is the "the view itself changes what you see" beat.
+   */
+  private buildViewGatedSigil(): void {
+    const sigilPos = this.sigilPosition.clone();
+    const sigilGeo = new THREE.PlaneGeometry(96.0, 54.0, 1, 1);
+    const panelNormal = new THREE.Vector3(0, 0, 1);
+
+    this.sigilMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: { value: 0 },
+        uAnomaly: { value: 0 },
+        uNormalW: { value: panelNormal.clone() },
+        uCenterW: { value: sigilPos.clone() },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        varying vec3 vWorldPos;
+        void main() {
+          vUv = uv;
+          vec4 wp = modelMatrix * vec4(position, 1.0);
+          vWorldPos = wp.xyz;
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec2 vUv;
+        varying vec3 vWorldPos;
+        uniform float uTime;
+        uniform float uAnomaly;
+        uniform vec3 uNormalW;
+        uniform vec3 uCenterW;
+
+        float hash11(float p) {
+          p = fract(p * 0.1031);
+          p *= p + 33.33;
+          p *= p + p;
+          return fract(p);
+        }
+
+        float disc(vec2 p, vec2 c, float r) {
+          return smoothstep(r, r * 0.70, length(p - c));
+        }
+
+        void main() {
+          // Alignment is judged against the panel centre, so the whole glyph snaps at once.
+          vec3 dir = normalize(uCenterW - cameraPosition);
+          vec3 n = normalize(uNormalW);
+          float facing = dot(dir, n);
+          float align = smoothstep(0.930, 0.9986, facing);
+          vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), n));
+          float slide = dot(dir, right) * 3.0;
+          float dist = length(uCenterW - cameraPosition);
+
+          // ---- vertical lenticular slats -------------------------------------------------
+          float slats = 84.0;
+          float idx = floor(vUv.x * slats);
+          float h = hash11(idx * 1.37 + 4.1);
+          float slatMask = step(0.14, h);
+          float edge = smoothstep(0.0, 0.10, fract(vUv.x * slats)) * smoothstep(1.0, 0.90, fract(vUv.x * slats));
+          float shift = slide * 0.085 * (0.30 + h * 0.9)
+                      + (1.0 - align) * (h - 0.5) * 0.055
+                      + (1.0 - align) * (fract(vUv.x * 37.0) - 0.5) * 0.012;
+          // aspect-corrected glyph space (panel is 96 x 54)
+          vec2 p = vec2((vUv.x + shift) * 1.7778, vUv.y);
+
+          // ---- the glyph: ':' + a fat '(' ------------------------------------------------
+          float colon = disc(p, vec2(0.62, 0.685), 0.056) + disc(p, vec2(0.62, 0.315), 0.056);
+          vec2 q = p - vec2(1.06, 0.5);
+          q.x *= 1.06;
+          float radius = length(q);
+          float thick = mix(0.052, 0.082, smoothstep(0.42, 0.0, abs(q.y)));
+          float paren = smoothstep(thick, thick * 0.55, abs(radius - 0.395)) * step(0.0, q.x);
+          float glyph = clamp(colon + paren, 0.0, 1.0);
+          float halo = exp(-abs(radius - 0.395) * 9.0) * 0.26 * step(0.0, q.x)
+                     + exp(-length(p - vec2(0.62, 0.50)) * 11.0) * 0.20;
+
+          float scan = 0.76 + 0.24 * sin((p.y * 150.0) - uTime * 9.0);
+          float tear = step(0.988, hash11(floor(p.y * 44.0) + floor(uTime * 6.0))) * (1.0 - align);
+
+          vec3 glyphCol = mix(vec3(0.42, 0.86, 1.0), vec3(1.0, 0.24, 0.32), uAnomaly * 0.85);
+          vec3 staticCol = vec3(0.30, 0.52, 0.72) * (0.08 + 0.30 * hash11(idx + uTime * 3.0));
+          vec3 col = mix(staticCol, glyphCol * scan, glyph);
+          col += glyphCol * halo * (0.30 + 0.70 * align);
+          col += vec3(0.55, 0.90, 1.0) * tear * 0.22;
+
+          // The latent image is only legible face-on; oblique angles collapse into dim slat static.
+          float intensity = mix(0.10, 1.0, pow(align, 1.7)) * slatMask * edge
+                          * (0.22 + 0.78 * glyph) * smoothstep(230.0, 55.0, dist);
+          gl_FragColor = vec4(col * (0.30 + 0.85 * align), clamp(intensity, 0.0, 1.0) * 0.9);
+        }
+      `,
+    });
+
+    const sigilMesh = new THREE.Mesh(sigilGeo, this.sigilMat);
+    sigilMesh.position.copy(sigilPos);
+    sigilMesh.frustumCulled = false;
+    sigilMesh.renderOrder = 2;
+    this.group.add(sigilMesh);
   }
 
   private buildSkyAndLighting(): void {
@@ -786,6 +906,18 @@ export class GlitchWorld {
   }
 
   /**
+   * Aligns the aperture sleeve with the BSOD throat: the depth (world m) at which the throat hands
+   * off to this scene. The sleeve radius at that depth is matched to the throat radius (1.62m) so the
+   * hand-off has no radius pop, and the arrival camera starts at the same depth/speed.
+   */
+  public setSkySleeveHandoff(depth: number): void {
+    this.sleeveHandoffDepth = THREE.MathUtils.clamp(depth, 6, 50);
+    if (this.skyTunnelMat) {
+      this.skyTunnelMat.uniforms.uHandoffDepth.value = this.sleeveHandoffDepth;
+    }
+  }
+
+  /**
    * Builds a jaw-dropping 360° Brutalist Kernel Citadel Megacity (156 Skyscrapers & Sky-Aqueducts in 1 Draw Call!)
    * plus the Colossal Torn ':(' Sky-Rift Portal overhead at (0, 88, 58) from which the player plunges!
    */
@@ -1147,16 +1279,17 @@ export class GlitchWorld {
     this.group.add(finMesh);
     this.finMat = finMat;
 
-    // D) Colossal Circular Single-Row Parasyte Sky-Maw & Solid 58m Vortex Exit Sleeve at (0, 46, 86)
-    //    Aimed cleanly at (0, 22, -6) (-14.62 deg pitch) so you fly seamlessly out through the physical 3D tooth rim!
+    // D) Colossal circular sky aperture + 58m solid vortex exit sleeve at (0, 46, 86).
+    //    Aimed cleanly at (0, 22, -6) so you fly straight out of the aperture into the open sky.
+    //    NO teeth at the exit: the aperture is a smooth, wet organic lip. The old 48-fang ring
+    //    read as a hard "sudden" seam the moment you crossed it.
     const skyMonGroup = new THREE.Group();
     skyMonGroup.position.copy(this.skyPortalPos);
     skyMonGroup.lookAt(0, 22.0, -6.0);
     this.skyPortalQuat.copy(skyMonGroup.quaternion);
 
-    // 58m Solid Vortex Sleeve (radius 3.8m deep -> flared 6.4m Parasyte lip right at z=0, ZERO premature wall fade!)
     const sleeveLen = 58.0;
-    const sleeveGeo = new THREE.CylinderGeometry(5.6, 3.8, sleeveLen, 32, 28, true);
+    const sleeveGeo = new THREE.CylinderGeometry(5.6, 3.8, sleeveLen, 44, 44, true);
     sleeveGeo.rotateX(Math.PI * 0.5);
     sleeveGeo.translate(0, 0, -sleeveLen * 0.5);
 
@@ -1167,18 +1300,33 @@ export class GlitchWorld {
       uniforms: {
         uTime: { value: 0 },
         uNoiseTex: { value: getSharedNoiseTexture() },
+        uHandoffDepth: { value: this.sleeveHandoffDepth },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
         varying vec3 vLocalPos;
         varying float vDepth;
+        uniform float uHandoffDepth;
+
+        // The sleeve is not a plain cone: its radius at the handoff depth matches the BSOD throat
+        // exactly (1.62m), then flares organically out to the 6.05m aperture. This is what makes the
+        // scene swap read as one continuous throat instead of a sudden change of tunnel size.
+        float sleeveRadius(float d) {
+          float t = clamp(d / max(uHandoffDepth, 4.0), 0.0, 1.0);
+          float flare = smoothstep(0.02, 1.0, t);
+          float r = mix(6.05, 1.62, flare);
+          r += 0.05 * sin(d * 1.15) * (1.0 - flare * 0.4);
+          return max(1.55, r);
+        }
+
         void main() {
           vUv = uv;
-          float d = clamp(-position.z / 58.0, 0.0, 1.0);
-          vDepth = d;
-          // Bell-flare organic lip collar right over the final 3.5m (-3.5m .. 0.0m) where the 48 teeth root!
-          float lipFlare = 1.0 + 0.145 * exp(position.z * 0.65);
-          vec3 p = vec3(position.xy * lipFlare, position.z);
+          float d = clamp(-position.z, 0.0, 58.0);
+          vDepth = d / 58.0;
+          float len = length(position.xy);
+          vec2 dir = len > 1e-5 ? position.xy / len : vec2(1.0, 0.0);
+          float r = sleeveRadius(d);
+          vec3 p = vec3(dir * r, position.z);
           vLocalPos = p;
           gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
         }
@@ -1189,7 +1337,10 @@ export class GlitchWorld {
         varying float vDepth;
         uniform float uTime;
         uniform sampler2D uNoiseTex;
+        uniform float uHandoffDepth;
         void main() {
+          float d = -vLocalPos.z;
+          float hd = clamp(d / max(uHandoffDepth, 4.0), 0.0, 1.0);
           float safeX = (abs(vLocalPos.x) < 1e-5 && abs(vLocalPos.y) < 1e-5) ? 1e-5 : vLocalPos.x;
           float angle = atan(vLocalPos.y, safeX);
           float zScroll = vLocalPos.z * 0.62 + uTime * 48.0;
@@ -1202,17 +1353,27 @@ export class GlitchWorld {
           float helixB = pow(max(0.0, cos(angle * 10.0 - vLocalPos.z * 0.16 + uTime * 12.7)), 10.0);
           float shockRing = smoothstep(0.92, 1.0, fract(vLocalPos.z * 0.09 + uTime * 7.0));
 
-          // Matches BsodScreen's deep sleeveBase palette 1:1, darkening into a fleshy crimson-obsidian gum rim right at z=0!
-          vec3 col = mix(vec3(0.006, 0.12, 0.44), vec3(0.004, 0.065, 0.28), smoothstep(0.08, 0.65, vDepth));
-          col += vec3(0.28, 0.76, 1.0) * line * 0.46;
-          col += vec3(0.32, 0.84, 1.0) * (helixA * 0.55 + helixB * 0.45) * 0.88;
-          col += vec3(0.70, 0.94, 1.0) * shockRing * 0.72;
+          // Deep zone palette matches BsodScreen's sleeveBase 1:1 at the handoff seam.
+          vec3 col = mix(vec3(0.006, 0.115, 0.43), vec3(0.0055, 0.10, 0.385), smoothstep(0.28, 0.88, hd));
+          // The last metres are lit from the open sky beyond, so the exit never cuts to black.
+          vec3 mouthLight = vec3(0.055, 0.235, 0.52);
+          col = mix(mouthLight, col, smoothstep(0.0, 0.17, hd));
 
-          // Anatomical dark gum collar at the very mouth lip (z = -2.2m .. 0.0m) anchoring the 48 single-row teeth!
-          float gumLip = smoothstep(0.045, 0.0, vDepth);
-          float socketWave = 0.5 + 0.5 * cos(angle * 48.0);
-          vec3 lipGumCol = mix(vec3(0.16, 0.008, 0.038), vec3(0.015, 0.04, 0.14), socketWave * 0.6);
-          col = mix(col, lipGumCol + nSample.r * 0.02, gumLip * 0.88);
+          float patternFade = smoothstep(0.02, 0.10, hd);
+          col += vec3(0.28, 0.76, 1.0) * line * 0.42 * patternFade;
+          col += vec3(0.32, 0.84, 1.0) * (helixA * 0.55 + helixB * 0.45) * 0.85 * patternFade;
+          col += vec3(0.70, 0.94, 1.0) * shockRing * 0.66 * patternFade;
+
+          // Wet organic collar right at the aperture: muscle fibres and a glossy sheen, no sockets,
+          // no teeth — just a smooth living rim that feathered into the cyan corona outside.
+          float collar = smoothstep(0.085, 0.0, hd);
+          float fibers = 0.5 + 0.5 * cos(angle * 30.0 + sin(d * 0.9 - uTime * 1.6) * 1.4);
+          vec3 flesh = mix(vec3(0.026, 0.007, 0.019), vec3(0.082, 0.028, 0.052), fibers);
+          col = mix(col, flesh, collar * 0.58);
+          float wet = pow(max(0.0, sin(angle * 18.0 + d * 0.7 + uTime * 2.0)), 22.0) * collar;
+          col += vec3(0.55, 0.86, 1.0) * wet * 0.45;
+          col += vec3(0.30, 0.62, 1.0) * smoothstep(0.035, 0.0, hd) * 0.30;
+
           gl_FragColor = vec4(col, 1.0);
         }
       `,
@@ -1223,14 +1384,15 @@ export class GlitchWorld {
     this.skySleeveMesh = sleeveMesh;
 
     const backCap = new THREE.Mesh(
-      new THREE.CircleGeometry(4.0, 24),
+      new THREE.CircleGeometry(1.62, 24),
       new THREE.MeshBasicMaterial({ color: 0x00081c, side: THREE.DoubleSide })
     );
     backCap.position.z = -sleeveLen - 0.1;
     skyMonGroup.add(backCap);
     this.skySleeveBackCap = backCap;
 
-    // Soft Radial Corona + Single-Row Sky Maw Iris right around the 6.4m flared lip!
+    // Soft feathered organic aperture lip (no teeth, no hard shroud disc).
+    // Inner edge = the sleeve wall, outer edge dissolves into the horizon so the exit is seamless.
     const riftGeo = new THREE.PlaneGeometry(30.0, 30.0);
     this.skyRiftMat = new THREE.ShaderMaterial({
       transparent: true,
@@ -1250,16 +1412,24 @@ export class GlitchWorld {
         varying vec2 vUv;
         uniform float uTime;
         void main() {
-          vec2 d = (vUv - 0.5) * 2.0; // -1..+1 over 30m -> r=0.427 is 6.4m flared sleeve lip!
+          vec2 d = (vUv - 0.5) * 2.0; // 30m plane: r=0.403 is the 6.05m aperture
           float safeX = (abs(d.x) < 1e-5 && abs(d.y) < 1e-5) ? 1e-5 : d.x;
           float ang = atan(d.y, safeX);
           float r = length(d);
-          // Completely clear inside the 6.1m mouth opening (r < 0.405), dark solid lip shroud from 0.41..0.58, feathered corona outside!
-          float lipBand = smoothstep(0.395, 0.425, r) * (1.0 - smoothstep(0.54, 0.94, r));
-          if (lipBand < 0.008) discard;
-          float rimGlow = exp(-abs(r - 0.435) * 24.0);
-          vec3 col = mix(vec3(0.025, 0.012, 0.045), vec3(0.28, 0.72, 1.0), rimGlow * 0.85);
-          gl_FragColor = vec4(col, clamp(lipBand * 0.92, 0.0, 0.95));
+          float inner = 0.403;
+          float collar = smoothstep(inner - 0.010, inner + 0.030, r);
+          float outerFade = 1.0 - smoothstep(inner + 0.055, 0.92, r);
+          float alpha = collar * outerFade;
+          if (alpha < 0.004) discard;
+
+          float fibers = 0.5 + 0.5 * cos(ang * 42.0 + sin(r * 26.0 - uTime * 2.2) * 1.2);
+          float rimGlow = exp(-abs(r - inner - 0.010) * 32.0);
+          vec3 flesh = mix(vec3(0.018, 0.007, 0.026), vec3(0.085, 0.020, 0.055), fibers);
+          vec3 lip = mix(flesh, vec3(0.55, 0.86, 1.0), rimGlow * 0.92);
+          lip += vec3(0.24, 0.64, 1.0) * exp(-max(0.0, r - inner) * 11.0) * 0.32;
+          // outer edge dissolves into the sky/haze tone instead of ending on a hard silhouette
+          lip = mix(lip, vec3(0.018, 0.13, 0.34), smoothstep(inner + 0.08, 0.62, r) * 0.72);
+          gl_FragColor = vec4(lip, alpha * 0.9);
         }
       `,
     });
@@ -1267,78 +1437,56 @@ export class GlitchWorld {
     skyRift.frustumCulled = false;
     skyMonGroup.add(skyRift);
 
-    // 48 Single-Row 3D Sculpted Parasyte Sky-Maw Teeth rooted cleanly into the flared 6.2m lip (ZERO multi-tier floating rings!)
-    const skyFangCount = 48;
-    const skyFangGeo = new THREE.ConeGeometry(0.40, 2.15, 6, 2);
-    skyFangGeo.translate(0, 1.075, 0);
-    const sfSeed = new Float32Array(skyFangCount * 4);
-    for (let i = 0; i < skyFangCount; i++) {
-      sfSeed[i * 4 + 0] = (i / skyFangCount) * Math.PI * 2;
-      sfSeed[i * 4 + 1] = 0.0;
-      sfSeed[i * 4 + 2] = 0.74 + ((i * 0.618034) % 1) * 0.55;
-      sfSeed[i * 4 + 3] = (i * 2.39996) % (Math.PI * 2);
-    }
-    skyFangGeo.setAttribute('aSkyFang4', new THREE.InstancedBufferAttribute(sfSeed, 4));
-
-    this.skyFangMat = new THREE.ShaderMaterial({
+    // Three concentric fleshy folds give the aperture real sculpted volume, so crossing it reads as
+    // passing through a living rim rather than a flat card. No teeth anywhere on the exit.
+    const lipFoldMat = new THREE.ShaderMaterial({
+      transparent: false,
       side: THREE.DoubleSide,
-      uniforms: {
-        uTime: { value: 0 },
-      },
+      uniforms: { uTime: { value: 0 } },
       vertexShader: /* glsl */ `
-        attribute vec4 aSkyFang4;
-        uniform float uTime;
-        varying float vTip;
-        varying vec3 vNrm;
-        varying vec3 vViewPos;
+        varying vec2 vUv;
+        varying vec3 vWorldPos;
+        varying vec3 vNormalW;
         void main() {
-          float ang = aSkyFang4.x;
-          float lenSc = aSkyFang4.z;
-          float phase = aSkyFang4.w;
-
-          // Hinged wide open around the 6.25m flared lip so the Sky-Maw holds gaping open without pakupaku flapping!
-          float chomp = sin(uTime * 1.1 + phase * 0.25) * 0.02;
-          float rad = 6.22;
-          vec2 dir = vec2(cos(ang), sin(ang));
-          vec2 tang = vec2(-dir.y, dir.x);
-          vec3 fangAxis = normalize(vec3(-dir * (0.58 + chomp), 0.76));
-          vec3 sideAxis = vec3(tang, 0.0);
-          vec3 hookAxis = normalize(cross(sideAxis, fangAxis));
-
-          vec3 root = vec3(dir * rad, -0.22);
-          float w = 0.96;
-          vec3 lp = root + sideAxis * (position.x * w) + fangAxis * (position.y * lenSc) + hookAxis * (position.z * w * 0.68);
-          vec3 ln = normalize(sideAxis * normal.x + fangAxis * normal.y + hookAxis * normal.z);
-
-          vec4 mv = modelViewMatrix * vec4(lp, 1.0);
-          vViewPos = -mv.xyz;
-          vNrm = normalize(normalMatrix * ln);
-          vTip = clamp(position.y / 2.15, 0.0, 1.0);
-          gl_Position = projectionMatrix * mv;
+          vUv = uv;
+          vec4 wp = modelMatrix * vec4(position, 1.0);
+          vWorldPos = wp.xyz;
+          vNormalW = normalize(mat3(modelMatrix) * normal);
+          gl_Position = projectionMatrix * viewMatrix * wp;
         }
       `,
       fragmentShader: /* glsl */ `
-        varying float vTip;
-        varying vec3 vNrm;
-        varying vec3 vViewPos;
+        varying vec2 vUv;
+        varying vec3 vWorldPos;
+        varying vec3 vNormalW;
+        uniform float uTime;
         void main() {
-          vec3 N = normalize(vNrm);
-          vec3 V = normalize(vViewPos);
-          vec3 L = normalize(vec3(0.2, 0.6, 0.78));
-          vec3 H = normalize(L + V);
-          float diff = 0.28 + 0.72 * max(dot(N, L), 0.0);
-          float spec = pow(max(dot(N, H), 0.0), 48.0);
-          float rim = pow(1.0 - abs(dot(N, V)), 2.4);
-          vec3 col = mix(vec3(0.18, 0.015, 0.055), vec3(0.88, 0.86, 0.80), smoothstep(0.0, 0.32, vTip));
-          col = mix(col, vec3(0.96, 0.98, 1.0), smoothstep(0.35, 0.92, vTip));
-          col = col * diff + vec3(0.95, 0.99, 1.0) * spec * 1.2 + vec3(0.32, 0.82, 1.0) * rim * 0.55;
-          gl_FragColor = vec4(col, 1.0);
+          vec3 N = normalize(vNormalW);
+          vec3 V = normalize(cameraPosition - vWorldPos);
+          // annular muscle striations around the ring (u = around the torus)
+          float striate = 0.5 + 0.5 * cos(vUv.x * 210.0 + sin(vUv.y * 18.0 - uTime * 1.2) * 1.6);
+          float wetSpec = pow(max(dot(N, normalize(V + vec3(0.25, 0.55, 0.80))), 0.0), 42.0);
+          float fres = pow(1.0 - abs(dot(N, V)), 2.2);
+          vec3 flesh = mix(vec3(0.045, 0.008, 0.030), vec3(0.155, 0.035, 0.075), striate);
+          flesh += vec3(0.45, 0.80, 1.0) * fres * 0.55;
+          flesh += vec3(0.85, 0.95, 1.0) * wetSpec * 0.65;
+          flesh += vec3(0.30, 0.10, 0.16) * pow(striate, 4.0) * 0.35;
+          gl_FragColor = vec4(flesh, 1.0);
         }
       `,
     });
-    const skyFangs = new THREE.InstancedMesh(skyFangGeo, this.skyFangMat, skyFangCount);
-    skyFangs.frustumCulled = false;
-    skyMonGroup.add(skyFangs);
+    this.apertureFoldMat = lipFoldMat;
+    const foldSpecs: Array<[number, number, number]> = [
+      [6.05, 0.46, -0.10],
+      [7.05, 0.34, -0.34],
+      [8.30, 0.22, -0.62],
+    ];
+    for (const [radius, tube, z] of foldSpecs) {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, tube, 10, 96), lipFoldMat);
+      ring.position.z = z;
+      ring.frustumCulled = false;
+      skyMonGroup.add(ring);
+    }
 
     // 140 Continuous Outward-Streaming Hyperspace Speed-Lines & Mist Filaments (-48m inside sleeve -> +42m in open sky!)
     // Bridges the tunnel-to-sky transition so speed filaments fly right out into the 3D world around the player!
@@ -4238,7 +4386,11 @@ export class GlitchWorld {
     this.skyRiftMat.uniforms.uTime.value = elapsed;
     this.skyTunnelMat.uniforms.uTime.value = elapsed;
     this.skyExitStreamMat.uniforms.uTime.value = elapsed;
-    this.skyFangMat.uniforms.uTime.value = elapsed;
+    if (this.apertureFoldMat) this.apertureFoldMat.uniforms.uTime.value = elapsed;
+    if (this.sigilMat) {
+      this.sigilMat.uniforms.uTime.value = elapsed;
+      this.sigilMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+    }
     this.causewayBusMat.uniforms.uTime.value = elapsed;
     this.causewayBusMat.uniforms.uAnomaly.value = this.anomalyIntensity;
     if (this.landingShockTimer < 2.5) {

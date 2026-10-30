@@ -3,6 +3,25 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 
 let cachedNoiseTex: THREE.DataTexture | null = null;
 
+/**
+ * Anisotropic filtering level applied to every loaded albedo/detail map.
+ * At 1 (the old value) the floor and walls smear into mush at grazing angles, which reads as
+ * "low resolution" even at native render size. main.ts pushes the GPU's real maximum in at boot.
+ */
+let globalAnisotropy = 1;
+
+export function setAssetAnisotropy(value: number): void {
+  globalAnisotropy = Math.max(1, Math.min(16, Math.floor(value)));
+}
+
+export function getAssetAnisotropy(): number {
+  return globalAnisotropy;
+}
+
+export function applyAssetAnisotropy(tex: THREE.Texture | null | undefined): void {
+  if (tex) tex.anisotropy = globalAnisotropy;
+}
+
 function hash2(ix: number, iy: number, seed: number): number {
   let n = (ix * 374761393 + iy * 668265263 + seed * 1442695041) | 0;
   n = (n ^ (n >>> 13)) | 0;
@@ -236,8 +255,8 @@ export function toAtmosphericMaterial(
     if (hit) return hit;
   }
 
-  if (std.map) std.map.anisotropy = 1;
-  if (std.emissiveMap) std.emissiveMap.anisotropy = 1;
+  if (std.map) std.map.anisotropy = globalAnisotropy;
+  if (std.emissiveMap) std.emissiveMap.anisotropy = globalAnisotropy;
 
   const lam = new THREE.MeshLambertMaterial({
     name: std.name,

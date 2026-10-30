@@ -26,6 +26,21 @@ export class FirstPersonController {
   public eyeHeight = 1.61;
   public sensitivity = 1.0;
 
+  // --- Vertical locomotion (jumping / gravity / landing absorb) ---
+  public grounded = true;
+  public verticalVel = 0;
+  /** World distance covered by the last exposure to the BSOD throat (used to match the sky-sleeve handoff). */
+  public suctionHandoffDepth = 30.82;
+  /** Down-axis speed (m/s) at the instant the throat hands off to the GlitchWorld sleeve. */
+  public suctionExitSpeed = 9.8;
+  public onJump?: () => void;
+  public onLand?: (impactSpeed: number) => void;
+
+  private landDip = 0;
+  private landDipVel = 0;
+  private jumpLock = 0;
+  private jumpLatched = false;
+
   private readonly keys = new Set<string>();
   private walkPhase = 0;
   private lastStepHalfCycle = 0;
@@ -59,6 +74,15 @@ export class FirstPersonController {
     this.keys.clear();
     this.velocity.set(0, 0, 0);
     this.lastStepHalfCycle = Math.floor(this.walkPhase / Math.PI);
+  }
+
+  /** Ground the player instantly (used after cutscenes / respawns). */
+  public snapToGround(groundY: number): void {
+    this.position.y = groundY;
+    this.verticalVel = 0;
+    this.grounded = true;
+    this.landDip = 0;
+    this.landDipVel = 0;
   }
 
   public onKeyDown(code: string): void {
@@ -104,6 +128,10 @@ export class FirstPersonController {
     this.roll = 0;
     this.walkPhase = 0;
     this.lastStepHalfCycle = 0;
+    this.grounded = true;
+    this.verticalVel = 0;
+    this.landDip = 0;
+    this.landDipVel = 0;
 
     if (monitorWorldPos) {
       this.dummyCam.position.set(this.position.x, this.position.y + this.eyeHeight, this.position.z);
@@ -127,9 +155,12 @@ export class FirstPersonController {
     moveSpeed: number,
     groundYFn: (x: number, z: number) => number,
     collisionFn: (pos: THREE.Vector3) => void,
-    inputEnabled: boolean
+    inputEnabled: boolean,
+    jumpSpeed = 4.45
   ): void {
     this.breathTime += dt;
+    this.jumpLock = Math.max(0, this.jumpLock - dt);
+    if (!this.keys.has('Space')) this.jumpLatched = false;
 
     let moveForward = 0;
     let moveRight = 0;
@@ -162,10 +193,49 @@ export class FirstPersonController {
     const actualMoveSpeed = Math.hypot(this.position.x - prevX, this.position.z - prevZ) / Math.max(dt, 1e-4);
 
     const targetGroundY = groundYFn(this.position.x, this.position.z);
-    this.position.y = THREE.MathUtils.lerp(this.position.y, targetGroundY, Math.min(1, dt * 18));
+
+    // --- Vertical physics: airborne gravity with a coyote-friendly ground follow.
+    const wantsJump = inputEnabled && this.keys.has('Space');
+    if (this.grounded) {
+      // Walking off a drop taller than a step starts a real fall instead of gluing to the floor.
+      if (targetGroundY < this.position.y - 0.34) {
+        this.grounded = false;
+        this.verticalVel = Math.min(0, this.verticalVel);
+      } else {
+        const follow = Math.min(1, dt * 20);
+        this.position.y += (targetGroundY - this.position.y) * follow;
+        if (Math.abs(targetGroundY - this.position.y) < 0.015) this.position.y = targetGroundY;
+      }
+      if (wantsJump && !this.jumpLatched && this.grounded && this.jumpLock <= 0) {
+        this.verticalVel = jumpSpeed;
+        this.grounded = false;
+        this.jumpLock = 0.12;
+        this.jumpLatched = true;
+        this.landDipVel -= 0.9;
+        this.onJump?.();
+      }
+    }
+
+    if (!this.grounded) {
+      this.verticalVel -= 21.5 * dt;
+      this.position.y += this.verticalVel * dt;
+      if (this.position.y <= targetGroundY) {
+        const impact = Math.max(0, -this.verticalVel);
+        this.position.y = targetGroundY;
+        this.verticalVel = 0;
+        this.grounded = true;
+        // Knee-absorb: the camera dips with the landing and springs back, scaled by impact speed.
+        this.landDipVel -= Math.min(2.6, impact * 0.30);
+        if (impact > 1.2) this.onLand?.(impact);
+      }
+    }
+
+    // Critically-damped landing absorb (camera-only, never moves the capsule).
+    this.landDipVel += (0 - this.landDip) * 210 * dt - this.landDipVel * 21 * dt;
+    this.landDip = THREE.MathUtils.clamp(this.landDip + this.landDipVel * dt, -0.18, 0.05);
 
     const speed = Math.hypot(this.velocity.x, this.velocity.z);
-    if (inputEnabled && wishLen > 1e-3 && actualMoveSpeed > 0.35 && speed > 0.45) {
+    if (inputEnabled && this.grounded && wishLen > 1e-3 && actualMoveSpeed > 0.35 && speed > 0.45) {
       this.walkPhase += dt * (4.6 + actualMoveSpeed * 1.35);
       const halfCycle = Math.floor(this.walkPhase / Math.PI);
       if (halfCycle !== this.lastStepHalfCycle) {
@@ -180,11 +250,12 @@ export class FirstPersonController {
   }
 
   public applyFreeRoamCamera(moveFactor: number): void {
+    const groundedFactor = this.grounded ? 1 : 0.18;
     const bobY =
-      Math.sin(this.walkPhase * 2.0) * 0.022 * moveFactor +
+      Math.sin(this.walkPhase * 2.0) * 0.022 * moveFactor * groundedFactor +
       Math.sin(this.breathTime * 1.5) * 0.003;
-    const bobSway = Math.cos(this.walkPhase) * 0.012 * moveFactor;
-    const subtleRoll = Math.cos(this.walkPhase) * 0.006 * moveFactor;
+    const bobSway = Math.cos(this.walkPhase) * 0.012 * moveFactor * groundedFactor;
+    const subtleRoll = Math.cos(this.walkPhase) * 0.006 * moveFactor * groundedFactor;
 
     this.euler.set(this.pitch, this.yaw, subtleRoll, 'YXZ');
     this.camera.quaternion.setFromEuler(this.euler);
@@ -192,7 +263,7 @@ export class FirstPersonController {
     this.rightVec.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
     this.camera.position.set(
       this.position.x + this.rightVec.x * bobSway,
-      this.position.y + this.eyeHeight + bobY,
+      this.position.y + this.eyeHeight + bobY + this.landDip,
       this.position.z + this.rightVec.z * bobSway
     );
   }
@@ -319,9 +390,14 @@ export class FirstPersonController {
     } else {
       const u = THREE.MathUtils.clamp((t - 2.25) / Math.max(0.5, duration - 2.25), 0, 1);
       const accel = Math.pow(u, 1.55);
-      // Reach exact localZ = -88.56 (27.44 local units from z=-116 cap, matching GlitchWorld's -27.44m sleeve start 1:1!)
+      // Travels to exactly localZ = -88.56 inside the BSOD throat. The GlitchWorld exit sleeve is shaped
+      // so its radius at this same depth matches the throat 1:1, and the arrival phase starts with this
+      // exact depth & speed, which removes the old radius/speed pop at the handoff.
       const endWorldDist = -88.56 * Math.max(0.1, monitorScaleZ);
       distOut = THREE.MathUtils.lerp(0.38, endWorldDist, accel);
+      const phaseDur = Math.max(0.5, duration - 2.25);
+      this.suctionHandoffDepth = Math.abs(endWorldDist);
+      this.suctionExitSpeed = Math.abs(endWorldDist - 0.38) * 1.55 * Math.pow(u, 0.55) / phaseDur;
       const damp = 1.0 - THREE.MathUtils.smoothstep(u, 0.58, 1.0);
       const spiralEnv = Math.sin(u * Math.PI) * 0.095 * damp;
       sideOffset = Math.sin(u * 12.0) * spiralEnv;
@@ -488,13 +564,11 @@ export class FirstPersonController {
   }
 
   /**
-   * 100% Seamless Forward-Flying Tunnel-to-3D-World Arrival Sequence (6.20s):
-   * 1) 0.00..1.15s: Inside the Sky-Monitor's 56m 3D Data-Vortex Exit Sleeve (localZ: -31.5m -> 0.0m),
-   *    flying straight forward toward the open 28m shattered BSOD glass aperture with the live 3D
-   *    GlitchWorld Cathedral & Celestial Sky-Eye directly ahead through the mouth!
-   * 2) 1.15..4.55s: Burst straight out through the shattered Sky-Monitor glass & crystalline shards onto a
-   *    C1-continuous cubic Hermite flight spline sweeping gracefully under the colossal Sky-Aqueduct onto the Overlook!
-   * 3) 4.55..6.20s: Physical landing absorb on the Overlook octagonal medallion & rise to standing!
+   * Forward-Flying Tunnel-to-3D-World Arrival:
+   * 1) Inside the sky aperture's throat sleeve, continuing the very same forward motion, depth and
+   *    speed as the BSOD throat handed off (C1-continuous position & velocity, matched wall radius).
+   * 2) Burst out of the smooth organic aperture onto a C1/C2 Hermite flight spline under the Sky-Aqueduct.
+   * 3) Physical landing absorb on the Overlook medallion and rise to standing.
    */
   public updateGlitchArrivalCutscene(
     dt: number,
@@ -502,12 +576,20 @@ export class FirstPersonController {
     spawnPos: THREE.Vector3,
     _corePos: THREE.Vector3,
     skyPortalPos?: THREE.Vector3,
-    skyPortalQuat?: THREE.Quaternion
+    skyPortalQuat?: THREE.Quaternion,
+    handoff?: { depth: number; speed: number }
   ): { finished: boolean; touchedDown: boolean; airSpeedFactor: number; crossedAperture: boolean } {
-    const tunnelDur = 1.12;
+    const startDepth = THREE.MathUtils.clamp(handoff?.depth ?? 27.44, 5, 50);
+    const entrySpeed = THREE.MathUtils.clamp(handoff?.speed ?? 24.5, 2.5, 34);
+    const exitSpeed = 24.5; // m/s, shared with the Hermite tangent below
+    // Quadratic depth profile with matched entry/exit velocity: s(0)=0, s'(0)=entrySpeed,
+    // s(T)=startDepth, s'(T)=exitSpeed. T is then fixed by 2D/(v0+v1).
+    const tunnelDur = (2 * startDepth) / (entrySpeed + exitSpeed);
+    const c1 = entrySpeed;
+    const c2 = (startDepth - entrySpeed * tunnelDur) / (tunnelDur * tunnelDur);
     const glideDur = 3.18;
-    const diveEnd = tunnelDur + glideDur; // 4.30s
-    const totalDur = 5.95;
+    const diveEnd = tunnelDur + glideDur;
+    const totalDur = diveEnd + 1.65;
 
     const p0x = skyPortalPos ? skyPortalPos.x : 0;
     const p0y = skyPortalPos ? skyPortalPos.y : 46;
@@ -522,12 +604,12 @@ export class FirstPersonController {
     const fwdY = this.scratchDir.y;
     const fwdZ = this.scratchDir.z;
     const tunnelPitch = Math.asin(THREE.MathUtils.clamp(fwdY, -0.99, 0.99));
-    const exitSpeed = 24.5; // m/s -> -27.44m sleeve start & 77.9m Hermite tangent matching the 76.7m sky chord!
 
     if (t < tunnelDur) {
-      // Phase 1: Inside the Solid Circular Sky-Maw Sleeve (-27.44m -> 0.0m at 24.5 m/s)
-      const s = THREE.MathUtils.clamp(t / tunnelDur, 0, 1);
-      const localZ = -exitSpeed * tunnelDur * (1.0 - s);
+      // Phase 1: inside the flaring sleeve, accelerating smoothly from the throat's exit speed.
+      const sDist = THREE.MathUtils.clamp(c1 * t + c2 * t * t, 0, startDepth);
+      const localZ = -startDepth + sDist;
+      const s = THREE.MathUtils.clamp(sDist / startDepth, 0, 1);
 
       const camX = p0x + fwdX * localZ;
       const camY = p0y + fwdY * localZ;
@@ -547,7 +629,7 @@ export class FirstPersonController {
     }
 
     if (t < diveEnd) {
-      // Phase 2: Velocity-Aligned C1/C2-Smooth Cubic Hermite Flight out through the 48 Sky-Maw Teeth onto Overlook!
+      // Phase 2: velocity-aligned C1/C2 Hermite flight out of the aperture and down onto the Overlook.
       const u = THREE.MathUtils.clamp((t - tunnelDur) / glideDur, 0, 1);
       const u2 = u * u;
       const u3 = u2 * u;
@@ -622,6 +704,10 @@ export class FirstPersonController {
       this.roll = 0;
       this.walkPhase = 0;
       this.lastStepHalfCycle = 0;
+      this.landDip = 0;
+      this.landDipVel = 0;
+      this.grounded = true;
+      this.verticalVel = 0;
       this.camera.fov = 66;
       this.camera.updateProjectionMatrix();
       this.applyFreeRoamCamera(0);
@@ -706,6 +792,10 @@ export class FirstPersonController {
       this.yaw = targetYaw;
       this.pitch = -0.1;
       this.roll = 0;
+      this.grounded = true;
+      this.verticalVel = 0;
+      this.landDip = 0;
+      this.landDipVel = 0;
       this.camera.fov = 64;
       this.camera.updateProjectionMatrix();
       this.applyFreeRoamCamera(0);

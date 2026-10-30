@@ -6,6 +6,7 @@ import { GlitchWorld } from './world/GlitchWorld';
 import { FirstPersonController } from './player/FirstPersonController';
 import { ConsoleUI } from './ui/ConsoleUI';
 import { PostFX } from './post/PostFX';
+import { setAssetAnisotropy } from './utils/ProceduralNoise';
 
 type GlitchKind = 'bend' | 'tear' | 'mash' | 'sort' | 'roll' | 'ghost';
 
@@ -120,6 +121,8 @@ class BsodExperienceApp {
   private chairEscapeCooldown = 0;
   private readonly _camFwd = new THREE.Vector3();
   private readonly _skyEyeDir = new THREE.Vector3(0, 0.25, -0.968).normalize();
+  private readonly _sigilDir = new THREE.Vector3();
+  private sigilRevealed = false;
 
   // Hardware audio-locked timeline start timestamps (prevents ANY audio/visual desync on frame stalls!)
   private suctionStartClock = 0;
@@ -163,6 +166,15 @@ class BsodExperienceApp {
   private scaleCheckAccum = 0;
   private isLowTierGpu = false;
   private autoBloomEnabled = true;
+  private postFXSharpen = 0.16;
+
+  // Gaze-driven optical artifacts (view-dependent look):
+  // a wandering under-resolved patch, and gaze streaks that read differently as you turn.
+  private readonly patchCenter = new THREE.Vector2(0.78, 0.60);
+  private readonly patchSize = new THREE.Vector2(0.27, 0.31);
+  private patchStrength = 0;
+  private patchPhase = 0;
+  private handoffVeil = 0;
 
   constructor() {
     this.renderer = new THREE.WebGLRenderer({
@@ -171,7 +183,9 @@ class BsodExperienceApp {
       stencil: true,
       depth: true,
     });
-    this.renderer.setPixelRatio(1);
+    // Render the final composite at true device resolution so the calm image is razor sharp on
+    // high-DPI displays instead of being upscaled from CSS pixels.
+    this.renderer.setPixelRatio(this.displayPixelRatio());
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.autoClear = false;
     this.canvasWrap.appendChild(this.renderer.domElement);
@@ -186,6 +200,14 @@ class BsodExperienceApp {
       }
     } catch {
       // Ignore if debug extension is restricted
+    }
+
+    // Grazing-angle texture clarity: this is the single biggest "sharpness" win for the bedroom
+    // floor / walls and the glitch-world concrete.
+    try {
+      setAssetAnisotropy(Math.min(8, this.renderer.capabilities.getMaxAnisotropy()));
+    } catch {
+      setAssetAnisotropy(4);
     }
 
     this.camera = new THREE.PerspectiveCamera(64, window.innerWidth / window.innerHeight, 0.05, 1600);
@@ -244,6 +266,11 @@ class BsodExperienceApp {
 
     await Promise.all([audioPromise, bedroomPromise, glitchPromise]);
 
+    // Match the sky aperture's exit sleeve to the BSOD throat hand-off depth EXACTLY.
+    // The sleeve's radius at this depth is shaped to the throat radius (1.62m) and the arrival
+    // camera starts here with the throat's exit speed, so the two scenes join without a pop.
+    this.glitchWorld.setSkySleeveHandoff(Math.abs(88.56 * this.bedroom.bsodScreen.root.scale.z));
+
     // True 1-frame offscreen GPU warmup for BOTH isolated realms + all deferred cutscene meshes/textures!
     // Uploads every VAO, texture, and exact light-count shader program so transitions have 0.00ms hitch!
     this.loadingStatus.textContent = 'GPUシェーダーとテクスチャを事前転送中... 99%';
@@ -296,6 +323,41 @@ class BsodExperienceApp {
         this.audio.playFootstep(surf);
       } else if (this.phase === 'ROAM_GLITCH') {
         this.audio.playFootstep('glitch');
+      }
+    };
+
+    this.player.onJump = () => {
+      if (this.phase === 'ROAM_BEDROOM' || this.phase === 'AFTERMATH_ROAM') {
+        const surf = this.bedroom.getFloorSurface(this.player.position.x, this.player.position.z);
+        this.audio.playFootstep(surf);
+        this.audio.playOneShot('step1', {
+          volume: 0.12,
+          rate: 1.22,
+          lowpassHz: 1400,
+          duration: 0.16,
+        });
+      } else if (this.phase === 'ROAM_GLITCH') {
+        this.audio.playFootstep('glitch');
+        this.audio.playOneShot('dissonance', { volume: 0.10, rate: 1.4, duration: 0.5, releaseSec: 0.25 });
+      }
+    };
+
+    this.player.onLand = (impact: number) => {
+      const strength = THREE.MathUtils.clamp((impact - 1.2) / 5.0, 0, 1);
+      if (strength <= 0.01) return;
+      this.audio.playOneShot('land_impact', {
+        volume: 0.10 + strength * 0.18,
+        rate: 1.1 + strength * 0.25,
+        duration: 0.5,
+        releaseSec: 0.18,
+        reverb: 0.16,
+      });
+      if (this.phase === 'ROAM_GLITCH') {
+        this.audio.playFootstep('glitch');
+        this.horrorPulse = Math.max(this.horrorPulse, 0.10 + strength * 0.16);
+      } else if (this.phase === 'ROAM_BEDROOM' || this.phase === 'AFTERMATH_ROAM') {
+        const surf = this.bedroom.getFloorSurface(this.player.position.x, this.player.position.z);
+        this.audio.playFootstep(surf);
       }
     };
 
@@ -452,6 +514,7 @@ class BsodExperienceApp {
         return;
       }
 
+      if (e.code === 'Space') e.preventDefault();
       this.player.onKeyDown(e.code);
     });
 
@@ -585,24 +648,30 @@ class BsodExperienceApp {
     );
   }
 
+  private displayPixelRatio(): number {
+    return Math.min(Math.max(window.devicePixelRatio || 1, 1), 2);
+  }
+
+  /** Render scale is expressed as a fraction of *device* pixels, so DPR is folded in here. */
   private computeAutoBaseScale(): number {
-    const area = Math.max(1, window.innerWidth * window.innerHeight);
-    const maxPixels = this.isLowTierGpu ? 880_000 : 1_440_000;
-    return THREE.MathUtils.clamp(Math.sqrt(maxPixels / area), 0.55, 1.0);
+    const dpr = this.displayPixelRatio();
+    const area = Math.max(1, window.innerWidth * window.innerHeight * dpr * dpr);
+    const maxPixels = this.isLowTierGpu ? 1_250_000 : 2_950_000;
+    return THREE.MathUtils.clamp(Math.sqrt(maxPixels / area), 0.62, 1.0);
   }
 
   private applyQualityMode(mode: 'auto' | 'low' | 'medium' | 'high'): void {
     this.qualityMode = mode;
     if (mode === 'low') {
-      this.renderScale = 0.65;
+      this.renderScale = Math.min(0.80, this.computeAutoBaseScale() * 0.85);
       this.autoBloomEnabled = false;
       this.postFX.setQuality(0, false);
     } else if (mode === 'medium') {
-      this.renderScale = 0.90;
+      this.renderScale = Math.min(0.95, this.computeAutoBaseScale() * 1.10);
       this.autoBloomEnabled = true;
       this.postFX.setQuality(0, true);
     } else if (mode === 'high') {
-      this.renderScale = Math.min(window.devicePixelRatio || 1, 1.25);
+      this.renderScale = Math.min(1.0, this.computeAutoBaseScale() * 1.45);
       this.autoBloomEnabled = true;
       this.postFX.setQuality(this.isLowTierGpu ? 0 : 2, true);
     } else {
@@ -617,12 +686,16 @@ class BsodExperienceApp {
   private applyViewportResolution(): void {
     const w = Math.max(1, window.innerWidth);
     const h = Math.max(1, window.innerHeight);
+    const dpr = this.displayPixelRatio();
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    this.renderer.setPixelRatio(dpr);
     this.renderer.setSize(w, h);
-    const rw = Math.max(2, Math.round(w * this.renderScale));
-    const rh = Math.max(2, Math.round(h * this.renderScale));
+    const rw = Math.max(2, Math.round(w * dpr * this.renderScale));
+    const rh = Math.max(2, Math.round(h * dpr * this.renderScale));
     this.postFX.setSize(rw, rh);
+    // Sharpen harder the more the internal buffer is stretched onto the display.
+    this.postFXSharpen = THREE.MathUtils.clamp((1.0 - this.renderScale) * 1.5 + 0.16, 0.16, 0.85);
   }
 
   private requestLockSafe(): void {
@@ -875,6 +948,7 @@ class BsodExperienceApp {
   }
 
   private startFreshExperience(): void {
+    this.sigilRevealed = false;
     this.audio.stopAllLoops(0.25);
     this.audio.stopOneShots(undefined, 0.2);
     this.consoleUI.reset();
@@ -1254,7 +1328,8 @@ class BsodExperienceApp {
       this.glitchWorld.spawnPosition,
       this.glitchWorld.corePosition,
       this.glitchWorld.skyPortalPos,
-      this.glitchWorld.skyPortalQuat
+      this.glitchWorld.skyPortalQuat,
+      { depth: this.glitchWorld.sleeveHandoffDepth, speed: this.player.suctionExitSpeed }
     );
   }
 
@@ -1405,6 +1480,51 @@ class BsodExperienceApp {
     }
   }
 
+  /**
+   * View-dependent optical artifacts.
+   * The under-resolved "damaged feed" patch is anchored to the player's own visual field: it
+   * slides around as the gaze turns, swells with the world's anomaly pulses, and is dialled back
+   * during inspection so the BSOD stays legible. The throat veil is only used for the ~0.5s
+   * scene hand-off, where it hides the swap between the two tunnel shaders.
+   */
+  private updateOpticalArtifacts(dt: number, _bloomOn: boolean): void {
+    const roam = this.phase === 'ROAM_BEDROOM' || this.phase === 'AFTERMATH_ROAM';
+    const inspect = this.phase === 'INSPECT_PC' || this.phase === 'EXIT_INSPECT';
+    const glitchRoam = this.phase === 'ROAM_GLITCH';
+    let target = 0;
+    if (roam) target = 0.52;
+    else if (inspect) target = 0.22;
+    else if (glitchRoam) target = 0.62;
+
+    this.camera.getWorldDirection(this.scratchCamDir);
+    const pitch = Math.asin(THREE.MathUtils.clamp(this.scratchCamDir.y, -1, 1));
+
+    // Drift: the patch crawls across the frame with the head turn and a slow idle wander.
+    this.patchPhase += dt * (0.16 + (glitchRoam ? 0.10 : 0));
+    const targetX = 0.70 + Math.sin(this.patchPhase * 0.9 + this.player.yaw * 0.55) * 0.20;
+    const targetY = 0.56 + Math.cos(this.patchPhase * 0.7 + pitch * 1.1) * 0.17;
+    this.patchCenter.x = THREE.MathUtils.lerp(this.patchCenter.x, targetX, Math.min(1, dt * 1.6));
+    this.patchCenter.y = THREE.MathUtils.lerp(this.patchCenter.y, targetY, Math.min(1, dt * 1.6));
+
+    const breathe = 0.86 + 0.14 * Math.sin(this.elapsed * 1.3);
+    this.patchSize.set(0.18 * breathe, 0.21 * breathe);
+    if (glitchRoam) {
+      target *= 0.75 + this.glitchWorld.anomalyIntensity * 0.55;
+    } else if (inspect) {
+      target *= 1.0 - this.madness * 0.5;
+    }
+    this.patchStrength = THREE.MathUtils.lerp(this.patchStrength, target, Math.min(1, dt * 3.2));
+
+    // Hand-off veil (logical V, never a blinding flash).
+    let veil = 0;
+    if (this.phase === 'SUCTION_CUTSCENE') {
+      veil = THREE.MathUtils.smoothstep(this.suctionTimer, this.suctionDuration - 0.52, this.suctionDuration);
+    } else if (this.phase === 'GLITCH_ARRIVAL_CUTSCENE') {
+      veil = 1.0 - THREE.MathUtils.smoothstep(this.glitchArrivalTimer, 0.0, 0.55);
+    }
+    this.handoffVeil = THREE.MathUtils.lerp(this.handoffVeil, veil, Math.min(1, dt * 9));
+  }
+
   private animate = (now: number): void => {
     requestAnimationFrame(this.animate);
 
@@ -1419,8 +1539,8 @@ class BsodExperienceApp {
       if (this.scaleCheckAccum > 0.40) {
         this.scaleCheckAccum = 0;
         const maxAuto = this.computeAutoBaseScale();
-        if (this.emaFrameMs > 18.8 && this.renderScale > 0.56) {
-          this.renderScale = Math.max(0.55, +(this.renderScale - 0.10).toFixed(2));
+        if (this.emaFrameMs > 18.8 && this.renderScale > 0.64) {
+          this.renderScale = Math.max(0.62, +(this.renderScale - 0.09).toFixed(2));
           this.applyViewportResolution();
         } else if (this.emaFrameMs < 12.2 && this.renderScale < maxAuto - 0.04) {
           this.renderScale = Math.min(maxAuto, +(this.renderScale + 0.08).toFixed(2));
@@ -1506,7 +1626,7 @@ class BsodExperienceApp {
       bloomAmt = 0.78 + tunnelRush * 0.28;
     } else if (this.phase === 'GLITCH_ARRIVAL_CUTSCENE') {
       // Crystal-clear C0-continuous match to SUCTION_CUTSCENE (t=7.20s -> arrival t=0.00s), ZERO hitch at exit!
-      const diveFrac = THREE.MathUtils.clamp(1.0 - this.glitchArrivalTimer / 4.30, 0, 1);
+      const diveFrac = THREE.MathUtils.clamp(1.0 - this.glitchArrivalTimer / 4.98, 0, 1);
       distortAmt = Math.max(distortAmt, diveFrac * 0.14);
       chromaAmt = Math.max(chromaAmt, diveFrac * 0.38);
       vigAmt = 0.28 + diveFrac * 0.16;
@@ -1532,6 +1652,8 @@ class BsodExperienceApp {
       bloomAmt = 0.82 + fallFactor * 0.34;
     }
 
+    this.updateOpticalArtifacts(dt, bloomAmt > 0);
+
     this.postFX.render(this.renderer, this.getActiveScene(), this.camera, this.elapsed, {
       distort: distortAmt,
       waveProgress: waveProg,
@@ -1546,6 +1668,11 @@ class BsodExperienceApp {
       roll: rollAmt,
       ghost: ghostAmt,
       bloom: bloomAmt,
+      patch: this.patchStrength,
+      patchCenter: this.patchCenter,
+      patchSize: this.patchSize,
+      sharpen: this.postFXSharpen,
+      veil: this.handoffVeil,
     });
   };
 
@@ -1893,17 +2020,18 @@ class BsodExperienceApp {
           this.glitchWorld.spawnPosition,
           this.glitchWorld.corePosition,
           this.glitchWorld.skyPortalPos,
-          this.glitchWorld.skyPortalQuat
+          this.glitchWorld.skyPortalQuat,
+          { depth: this.glitchWorld.sleeveHandoffDepth, speed: this.player.suctionExitSpeed }
         );
 
         this.glitchWorld.update(dt, this.elapsed, this.camera.position, null);
 
-        // Exact moment (t = 1.12s) you fly cleanly between the 48 Sky-Maw teeth into open 3D space (ZERO warp/flash hitch!)
+        // Moment the camera clears the smooth organic aperture into open 3D space (no teeth, no hitches).
         if (crossedAperture && !this.glitchArrivalRollCuePlayed) {
           this.glitchArrivalRollCuePlayed = true;
           this.audio.playOneShot('swoosh_thunder', { volume: 0.76, rate: 0.94, reverb: 0.55 });
           this.audio.playOneShot('transition_solemn', { volume: 0.58, reverb: 0.55 });
-          this.showSubtitle('天空の顎を抜け落ちた——眼下のデータ海の果てに、蒼白い光の柱が立つ聖堂が聳えている。', 4600);
+          this.showSubtitle('空の裂け目を抜け落ちた——眼下のデータ海の果てに、蒼白い光の柱が立つ聖堂が聳えている。', 4600);
         }
 
         if (touchedDown && !this.glitchArrivalLanded) {
@@ -1925,7 +2053,7 @@ class BsodExperienceApp {
           this.opticStrain = 0;
           this.periodicWarpCooldown = 6.5;
           this.crosshairEl.classList.remove('hidden');
-          this.worldHintEl.textContent = '[WASD] 探索  |  [C] コンソールを開く';
+          this.worldHintEl.textContent = '[WASD] 移動  [SPACE] ジャンプ  |  [C] コンソールを開く';
           this.worldHintEl.classList.remove('hidden');
           this.showSubtitle('正面の大橋の先に光の柱が見える——消化が100%に達する前に中央聖堂へ向かえ。', 5200);
         }
@@ -1956,6 +2084,18 @@ class BsodExperienceApp {
         const sheltered = this.glitchWorld.isPlayerSheltered(this.player.position);
         this.camera.getWorldDirection(this._camFwd);
         const eyeAlign = this._camFwd.dot(this._skyEyeDir);
+
+        // Lenticular sky sigil: only legible when the gaze lines up with the far panel.
+        this._sigilDir.copy(this.glitchWorld.sigilPosition).sub(this.camera.position).normalize();
+        const sigilAlign = this._camFwd.dot(this._sigilDir);
+        if (!this.sigilRevealed && sigilAlign > 0.994 && canMove) {
+          this.sigilRevealed = true;
+          this.triggerGlitch('ghost', 0.42, 1.2);
+          this.triggerSpatialWave(0.5, 0.8, true);
+          this.audio.playOneShot('reality_rift', { volume: 0.42, rate: 0.92, reverb: 0.62 });
+          this.audio.playOneShot('dissonance', { volume: 0.30, rate: 0.88, duration: 3.0, releaseSec: 0.9, reverb: 0.5 });
+          this.showSubtitle('視界の中心で、空の裂け目の無数のスリットが一枚の「:(」に噛み合った。目を逸らせば、また砕けて消える。', 5600);
+        }
         if (canMove && anomaly > 0.30 && !sheltered && eyeAlign > 0.68) {
           this.opticStrain = Math.min(1.0, this.opticStrain + dt * (0.55 + anomaly * 0.65));
           this.horrorPulse = Math.max(this.horrorPulse, 0.28 + this.opticStrain * 0.55);

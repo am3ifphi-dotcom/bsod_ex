@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { BsodScreen } from './BsodScreen';
 import {
+  applyAssetAnisotropy,
   getSharedNoiseTexture,
   mergeStaticSubmeshes,
   toAtmosphericMaterial,
@@ -93,6 +94,8 @@ export class BedroomScene {
 
     clockTexWebp.colorSpace = THREE.SRGBColorSpace;
     lampTexWebp.colorSpace = THREE.SRGBColorSpace;
+    applyAssetAnisotropy(clockTexWebp);
+    applyAssetAnisotropy(lampTexWebp);
 
     // 1. Convert Bedroom materials to specular/rim AtmosphericMaterial & inject fast texture-backed infection shader
     const roomRoot = bedroomGltf.scene;
@@ -136,6 +139,8 @@ export class BedroomScene {
               alphaTest: std.alphaTest ?? 0,
               side: /Curtain|Window/i.test(mName) ? THREE.DoubleSide : THREE.FrontSide,
             });
+            applyAssetAnisotropy(lam.map);
+            applyAssetAnisotropy(lam.emissiveMap);
             this.injectRoomInfectionShader(lam);
             cached = lam;
           } else {
@@ -355,11 +360,13 @@ export class BedroomScene {
     shaft.rotation.set(0, -Math.PI * 0.5, -0.34);
     this.group.add(shaft);
 
-    // Subtle 2:47 AM rain-streaked window glass catching city neon & cold monitor reflections (1 ultra-light quad)
+    // 2:47 AM rain on the window: real wet glass rather than a flat additive streak.
+    // Three physically-motivated layers — condensation beads, running drops with trails, and a
+    // thin sheet of cold water — each with its own refraction/darkening and specular highlight.
     this.rainGlassMat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
-      blending: THREE.AdditiveBlending,
+      blending: THREE.NormalBlending,
       uniforms: {
         uTime: this.infectUniforms.uTime,
         uInfect: this.infectUniforms.uInfect,
@@ -377,21 +384,152 @@ export class BedroomScene {
         uniform float uTime;
         uniform float uInfect;
         uniform sampler2D uNoiseTex;
+
+        float hash21(vec2 p) {
+          p = fract(p * vec2(123.34, 456.21));
+          p += dot(p, p + 45.32);
+          return fract(p.x * p.y);
+        }
+
+        // One column of running drops. uv is pane space; uv.y = 1 is the top.
+        // Returns: x = head, y = trail. Both 0..1.
+        vec2 runColumn(vec2 uv, float cols, float speed, float seed) {
+          float cx = uv.x * cols;
+          float colId = floor(cx);
+          float rnd = hash21(vec2(colId, seed));
+          float sp = speed * (0.55 + rnd * 1.05);
+          // drop head falls from the top; second, slower drop staggered in the same lane
+          float headY = 1.0 - fract(rnd * 7.31 + uTime * sp);
+          float headY2 = 1.0 - fract(rnd * 3.17 + 0.42 + uTime * sp * 0.63);
+          float lane = fract(cx) - 0.5;
+          float wob = sin((1.0 - uv.y) * 26.0 + rnd * 31.0 + uTime * sp * 6.0) * 0.035;
+          float dx = lane - wob * 0.11;
+          float rad = 0.055 + rnd * 0.05;
+          float head = smoothstep(rad, rad * 0.35, length(vec2(dx * 1.15, uv.y - headY)));
+          float head2 = smoothstep(rad * 0.8, rad * 0.3, length(vec2(dx * 1.15, uv.y - headY2))) * 0.7;
+          head = max(head, head2);
+          float dy = uv.y - headY;
+          float len = 0.06 + sp * 0.85;
+          float trail = step(0.0, dy) * step(dy, len)
+                      * smoothstep(len, 0.0, dy)
+                      * smoothstep(0.016, 0.004, abs(dx + wob * 0.05))
+                      * smoothstep(0.0, 0.05, dy);
+          float trail2 = step(0.0, uv.y - headY2) * step(uv.y - headY2, len * 0.7)
+                       * smoothstep(len * 0.7, 0.0, uv.y - headY2)
+                       * smoothstep(0.013, 0.003, abs(dx - wob * 0.05)) * 0.55;
+          return vec2(head, clamp(trail + trail2, 0.0, 1.0));
+        }
+
         void main() {
-          vec4 n1 = texture2D(uNoiseTex, vec2(vUv.x * 5.5, vUv.y * 1.4 + uTime * 0.055));
-          vec4 n2 = texture2D(uNoiseTex, vec2(vUv.x * 11.0 + 0.37, vUv.y * 2.2 + uTime * 0.095));
-          float streak = pow(n1.b, 4.0) * 0.55 + pow(n2.b, 5.0) * 0.65;
-          float edgeVig = smoothstep(0.0, 0.12, vUv.x) * smoothstep(1.0, 0.88, vUv.x)
-                        * smoothstep(0.0, 0.12, vUv.y) * smoothstep(1.0, 0.88, vUv.y);
-          vec3 tint = mix(vec3(0.32, 0.55, 0.95), vec3(0.08, 0.68, 1.0), uInfect);
-          gl_FragColor = vec4(tint, streak * edgeVig * 0.16);
+          vec4 n1 = texture2D(uNoiseTex, vec2(vUv.x * 1.7 + 0.21, vUv.y * 1.1 + uTime * 0.004));
+          vec4 n2 = texture2D(uNoiseTex, vec2(vUv.x * 4.3 - 0.11, vUv.y * 2.7 - uTime * 0.009));
+
+          // ---- condensation beads: small static lenses, denser toward the cold glass edges
+          vec2 g = vUv * vec2(46.0, 38.0);
+          vec2 gid = floor(g);
+          vec2 gf = fract(g) - 0.5;
+          float gh = hash21(gid);
+          vec2 goff = (vec2(hash21(gid + 3.17), hash21(gid + 8.41)) - 0.5) * 0.46;
+          float grad = 0.10 + gh * 0.16;
+          float beadMask = step(0.34, gh);
+          float beadD = length(gf - goff);
+          float bead = smoothstep(grad, grad * 0.42, beadD) * beadMask;
+          float beadSpec = smoothstep(grad * 0.85, grad * 0.12, length(gf - goff - vec2(-0.16, 0.18) * grad)) * beadMask;
+
+          // ---- running drops: two lanes at different depths
+          vec2 runA = runColumn(vUv, 9.0, 0.075, 2.7);
+          vec2 runB = runColumn(vUv * vec2(1.33, 1.0) + vec2(0.13, 0.0), 13.0, 0.115, 9.3);
+
+          // ---- water sheet / mist: gives the whole pane a cold, slightly uneven wetness
+          float sheet = smoothstep(0.40, 0.78, n1.b * 0.7 + n2.g * 0.45);
+
+          float head = max(runA.x, runB.x * 0.85);
+          float trail = max(runA.y, runB.y * 0.8);
+          float wet = clamp(head * 1.0 + trail * 0.62 + bead * 0.72 + sheet * 0.10, 0.0, 1.0);
+          float spec = clamp(head * 0.95 + beadSpec * 1.15 + trail * 0.22 + sheet * 0.06, 0.0, 1.2);
+
+          // City neon refracted through the beads (cold blue -> magenta / sodium mix).
+          vec3 neonA = vec3(0.12, 0.34, 0.72);
+          vec3 neonB = vec3(0.62, 0.26, 0.52);
+          vec3 neon = mix(neonA, neonB, clamp(n1.r * 1.4 + n2.b * 0.5, 0.0, 1.0));
+          neon = mix(neon, vec3(0.06, 0.72, 1.0), 0.25);
+          // Infection pushes the whole sheet toward BSOD cyan.
+          neon = mix(neon, vec3(0.10, 0.62, 1.0), uInfect * 0.75);
+
+          vec3 col = neon * (0.22 + 0.55 * spec);
+          col += vec3(0.80, 0.93, 1.0) * pow(spec, 1.35) * 0.85;
+          col = mix(col, vec3(0.012, 0.026, 0.055), (1.0 - spec) * 0.55);
+          // faint rim of the sheet catching the monitor's blue
+          float edgeVig = smoothstep(0.0, 0.10, vUv.x) * smoothstep(1.0, 0.90, vUv.x)
+                        * smoothstep(0.0, 0.10, vUv.y) * smoothstep(1.0, 0.90, vUv.y);
+          col += vec3(0.10, 0.28, 0.55) * edgeVig * 0.08;
+          float alpha = clamp(wet, 0.0, 1.0) * 0.92 * edgeVig;
+
+          gl_FragColor = vec4(col, alpha);
         }
       `,
     });
     const rainPane = new THREE.Mesh(new THREE.PlaneGeometry(2.15, 1.75), this.rainGlassMat);
     rainPane.rotation.y = -Math.PI * 0.5;
     rainPane.position.set(2.68, 1.62, -0.55);
+    rainPane.renderOrder = 3;
     this.group.add(rainPane);
+
+    // Rain beyond the glass: three parallax depths of falling streaks, so the city outside the
+    // window lives in weather instead of being a flat clean backdrop.
+    const curtainMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: this.infectUniforms.uTime,
+        uInfect: this.infectUniforms.uInfect,
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec2 vUv;
+        uniform float uTime;
+        uniform float uInfect;
+        float hash21(vec2 p) {
+          p = fract(p * vec2(127.1, 311.7));
+          p += dot(p, p + 34.23);
+          return fract(p.x * p.y);
+        }
+        float layer(vec2 uv, float cols, float speed, float seed) {
+          float cx = uv.x * cols;
+          float colId = floor(cx);
+          float rnd = hash21(vec2(colId, seed));
+          float y = fract(uv.y * 0.55 - uTime * speed * (0.65 + rnd * 0.9) + rnd * 11.0);
+          float d = abs(fract(cx) - 0.5);
+          float width = 0.05 + rnd * 0.06;
+          float body = smoothstep(width, width * 0.2, d);
+          float fade = smoothstep(0.0, 0.12, y) * smoothstep(1.0, 0.72, y);
+          return body * fade * (0.28 + 0.72 * rnd);
+        }
+        void main() {
+          float a = layer(vUv, 26.0, 0.55, 3.1);
+          float b = layer(vUv * vec2(1.6, 1.0), 17.0, 0.40, 7.7);
+          float c = layer(vUv * vec2(2.4, 1.0), 11.0, 0.28, 12.9);
+          vec3 col = vec3(0.55, 0.76, 1.0) * a
+                   + vec3(0.40, 0.60, 0.94) * b * 0.85
+                   + vec3(0.26, 0.42, 0.80) * c * 0.6;
+          col = mix(col, vec3(0.20, 0.72, 1.0), uInfect * 0.6);
+          float vertFade = smoothstep(0.0, 0.16, vUv.y) * smoothstep(1.0, 0.7, vUv.y);
+          gl_FragColor = vec4(col, 0.34 * vertFade);
+        }
+      `,
+    });
+    const rainCurtain = new THREE.Mesh(new THREE.PlaneGeometry(8.0, 5.4), curtainMat);
+    rainCurtain.rotation.y = -Math.PI * 0.5;
+    rainCurtain.position.set(4.05, 2.05, -0.55);
+    rainCurtain.renderOrder = 2;
+    this.group.add(rainCurtain);
 
     // Dead pendant fixture under ceiling rose
     const cordMat = new THREE.MeshLambertMaterial({ color: 0x15181f });
