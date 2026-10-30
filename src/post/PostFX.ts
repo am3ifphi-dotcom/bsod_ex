@@ -28,6 +28,14 @@ export type PostFXOptions = {
   roll?: number;
   ghost?: number;
   bloom?: number;
+  /**
+   * Localized low-resolution filter: a soft elliptical region of the frame that renders as if
+   * through a broken, low-fidelity feed (coarse pixel grid + signal degradation).
+   */
+  lowRes?: number;
+  lowResCenter?: THREE.Vector2;
+  lowResRadius?: number;
+  lowResBlock?: number;
 };
 
 export class PostFX {
@@ -86,6 +94,12 @@ export class PostFX {
         uGhost: { value: 0 },
         tBloom: { value: null },
         uBloom: { value: 0.0 },
+        uLowRes: { value: 0 },
+        uLowResCenter: { value: new THREE.Vector2(0.5, 0.5) },
+        uLowResRadius: { value: 0.28 },
+        uLowResBlock: { value: 5.0 },
+        uResolution: { value: new THREE.Vector2(1, 1) },
+        uSharpen: { value: 0.30 },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -112,6 +126,12 @@ export class PostFX {
         uniform float uGhost;
         uniform sampler2D tBloom;
         uniform float uBloom;
+        uniform float uLowRes;
+        uniform vec2 uLowResCenter;
+        uniform float uLowResRadius;
+        uniform float uLowResBlock;
+        uniform vec2 uResolution;
+        uniform float uSharpen;
 
         float hash21(vec2 p) {
           p = fract(p * vec2(123.34, 456.21));
@@ -229,6 +249,27 @@ export class PostFX {
             }
           }
 
+          // ---------------------------------------------------------------- LOCAL LOW-RESOLUTION FILTER
+          // A soft elliptical region of the frame is re-sampled through a coarse pixel grid, so
+          // "part of your view" is visibly lower fidelity than the rest of the image.
+          float lowResMask = 0.0;
+          if (uLowRes > 0.002) {
+            float aspect = uResolution.x / max(uResolution.y, 1.0);
+            vec2 d = (uv - uLowResCenter) * vec2(aspect, 1.0);
+            float rr = length(d);
+            float region = 1.0 - smoothstep(uLowResRadius * 0.42, uLowResRadius, rr);
+            lowResMask = clamp(region * uLowRes, 0.0, 1.0);
+            if (lowResMask > 0.003) {
+              vec2 block = vec2(max(uLowResBlock, 1.0)) / max(uResolution, vec2(1.0));
+              vec2 snapped = (floor(uv / block) + 0.5) * block;
+              uv = mix(uv, snapped, lowResMask);
+              // Broken-feed jitter inside the degraded zone.
+              float jitter = (hash21(vec2(floor(uv.y * 160.0), floor(uTime * 11.0))) - 0.5)
+                           * 0.0055 * lowResMask;
+              uv.x += jitter;
+            }
+          }
+
           // ---------------------------------------------------------------- BASE SAMPLE + PERIPHERAL LENS FRINGE
           vec3 col;
           float baseLensChr = smoothstep(0.10, 0.56, r2) * 0.0022;
@@ -240,6 +281,16 @@ export class PostFX {
             col.b = fetch(uv - dispVec).b;
           } else {
             col = fetch(uv);
+          }
+
+          // ---------------------------------------------------------------- MICRO-SHARPEN
+          // Recovers the micro-contrast that the resolution upscale washes out. Four taps,
+          // unsharp mask — the single cheapest way to stop the image looking soft and mushy.
+          if (uSharpen > 0.001) {
+            vec2 px = 1.0 / max(uResolution, vec2(1.0));
+            vec3 blur = (fetch(uv + vec2(px.x, 0.0)) + fetch(uv - vec2(px.x, 0.0))
+                       + fetch(uv + vec2(0.0, px.y)) + fetch(uv - vec2(0.0, px.y))) * 0.25;
+            col = max(vec3(0.0), col + (col - blur) * uSharpen);
           }
 
           // Ghost echo of the bend (double vision on strong spatial warps)
@@ -330,6 +381,16 @@ export class PostFX {
           float microScan = 0.988 + 0.012 * sin(vUv.y * 1080.0 * 3.14159);
           float grain = (hash21(vUv * 540.0 + fract(uTime * 19.7)) - 0.5) * 0.017;
           col = col * microScan + grain;
+
+          // --- Degraded low-resolution zone: partial desaturation + faint interlace so the
+          //     resolution drop reads as an intentional broken feed instead of an artifact.
+          if (lowResMask > 0.01) {
+            float g = dot(col, vec3(0.299, 0.587, 0.114));
+            col = mix(col, vec3(g) * vec3(0.90, 0.97, 1.10), lowResMask * 0.38);
+            float inter = 0.945 + 0.055 * sin(vUv.y * 460.0 * 3.14159);
+            col *= mix(1.0, inter, lowResMask);
+            col *= mix(1.0, 0.90, lowResMask * 0.55);
+          }
 
           // --- Bloom: 1/5-res anamorphic bright-pass glow so highlights & neon bloom cleanly
           if (uBloom > 0.001) {
@@ -469,6 +530,7 @@ export class PostFX {
     this.rtBlur.setSize(bw, bh);
     this.brightMat.uniforms.uTexelX.value = 1 / bw;
     this.blurMat.uniforms.uTexelY.value = 1 / bh;
+    this.mat.uniforms.uResolution.value.set(width, height);
   }
 
   /**
@@ -529,6 +591,10 @@ export class PostFX {
     u.uSort.value = opts.sort ?? 0;
     u.uRoll.value = opts.roll ?? 0;
     u.uGhost.value = opts.ghost ?? 0;
+    u.uLowRes.value = Math.max(0, opts.lowRes ?? 0);
+    if (opts.lowResCenter) u.uLowResCenter.value.copy(opts.lowResCenter);
+    u.uLowResRadius.value = opts.lowResRadius ?? 0.28;
+    u.uLowResBlock.value = opts.lowResBlock ?? 5.0;
 
     renderer.setRenderTarget(this.rt);
     renderer.clear(true, true, true);

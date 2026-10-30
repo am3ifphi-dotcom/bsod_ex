@@ -119,7 +119,13 @@ class BsodExperienceApp {
   private gazeWarnCooldown = 0;
   private chairEscapeCooldown = 0;
   private readonly _camFwd = new THREE.Vector3();
+  private readonly _camRight = new THREE.Vector3();
+  private readonly _camUp = new THREE.Vector3();
+  private readonly _lowResDir = new THREE.Vector3();
   private readonly _skyEyeDir = new THREE.Vector3(0, 0.25, -0.968).normalize();
+
+  // Localized low-resolution filter zone (screen space, driven from the 3D world).
+  private readonly _lowResCenter = new THREE.Vector2(0.5, 0.5);
 
   // Hardware audio-locked timeline start timestamps (prevents ANY audio/visual desync on frame stalls!)
   private suctionStartClock = 0;
@@ -163,6 +169,8 @@ class BsodExperienceApp {
   private scaleCheckAccum = 0;
   private isLowTierGpu = false;
   private autoBloomEnabled = true;
+  /** Last phase the render resolution was resolved for (the bedroom asks for extra samples). */
+  private resolutionPhase: GamePhase | null = null;
 
   constructor() {
     this.renderer = new THREE.WebGLRenderer({
@@ -296,6 +304,48 @@ class BsodExperienceApp {
         this.audio.playFootstep(surf);
       } else if (this.phase === 'ROAM_GLITCH') {
         this.audio.playFootstep('glitch');
+      }
+    };
+
+    // Jump / landing: a short exhale of air on takeoff and a dull, weighty thump on landing.
+    this.player.onJump = () => {
+      if (this.phase === 'ROAM_BEDROOM' || this.phase === 'AFTERMATH_ROAM') {
+        this.audio.playOneShot('step2', { volume: 0.16, rate: 1.22, duration: 0.5, fadeInSec: 0.01 });
+        this.audio.playOneShot('fall_wind', {
+          volume: 0.10,
+          rate: 1.5,
+          duration: 0.35,
+          fadeInSec: 0.01,
+          releaseSec: 0.3,
+        });
+      } else if (this.phase === 'ROAM_GLITCH') {
+        this.audio.playOneShot('static_elec', { volume: 0.10, rate: 1.4, duration: 0.35 });
+      }
+    };
+
+    this.player.onLand = (impact: number) => {
+      if (this.phase === 'ROAM_BEDROOM' || this.phase === 'AFTERMATH_ROAM') {
+        this.audio.playOneShot('step1', {
+          volume: 0.12 + impact * 0.24,
+          rate: 0.86,
+          duration: 0.6,
+          fadeInSec: 0.01,
+          releaseSec: 0.25,
+        });
+        this.audio.playOneShot('fall_wind', {
+          volume: 0.10 + impact * 0.16,
+          rate: 0.8,
+          duration: 0.4,
+          fadeInSec: 0.01,
+          releaseSec: 0.3,
+        });
+      } else if (this.phase === 'ROAM_GLITCH') {
+        this.audio.playOneShot('sub_boom', {
+          volume: 0.14 + impact * 0.30,
+          rate: 1.5,
+          duration: 0.7,
+          releaseSec: 0.35,
+        });
       }
     };
 
@@ -452,6 +502,11 @@ class BsodExperienceApp {
         return;
       }
 
+      // Space jumps — swallow the browser's default page scroll.
+      if (e.code === 'Space') {
+        e.preventDefault();
+      }
+
       this.player.onKeyDown(e.code);
     });
 
@@ -587,8 +642,20 @@ class BsodExperienceApp {
 
   private computeAutoBaseScale(): number {
     const area = Math.max(1, window.innerWidth * window.innerHeight);
-    const maxPixels = this.isLowTierGpu ? 880_000 : 1_440_000;
+    // The old 1.44M cap forced a 1080p window down to 83% and made every surface look mushy.
+    // The render target is now allowed to reach the window's native pixel count.
+    const maxPixels = this.isLowTierGpu ? 1_150_000 : 2_600_000;
     return THREE.MathUtils.clamp(Math.sqrt(maxPixels / area), 0.55, 1.0);
+  }
+
+  /** True while the player is inside the bedroom — the very first image of the game. */
+  private isBedroomPhase(): boolean {
+    return (
+      this.phase === 'ROAM_BEDROOM' ||
+      this.phase === 'INSPECT_PC' ||
+      this.phase === 'EXIT_INSPECT' ||
+      this.phase === 'AFTERMATH_ROAM'
+    );
   }
 
   private applyQualityMode(mode: 'auto' | 'low' | 'medium' | 'high'): void {
@@ -620,8 +687,12 @@ class BsodExperienceApp {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
-    const rw = Math.max(2, Math.round(w * this.renderScale));
-    const rh = Math.max(2, Math.round(h * this.renderScale));
+    // The bedroom is the very first image the player ever sees and it used to be the softest
+    // one in the game, so it gets extra samples on top of the global scale (supersampling).
+    const boost = this.isBedroomPhase() && !this.isLowTierGpu ? 1.22 : 1.0;
+    const scale = Math.min(1.4, this.renderScale * boost);
+    const rw = Math.max(2, Math.round(w * scale));
+    const rh = Math.max(2, Math.round(h * scale));
     this.postFX.setSize(rw, rh);
   }
 
@@ -1434,6 +1505,13 @@ class BsodExperienceApp {
       this.stepSimulation(dt);
     }
 
+    // The bedroom asks the renderer for extra samples, so re-resolve the target whenever the
+    // phase changes. (Cheap: it only touches the render-target size.)
+    if (this.resolutionPhase !== this.phase) {
+      this.resolutionPhase = this.phase;
+      this.applyViewportResolution();
+    }
+
     // Evaluate smooth bell-curve Optical Reality-Warp Wave (0.000 when inactive -> crystal-clear image!)
     // ---------------------------------------------------------------- STAGED GLITCH EVENTS
     // Each signature has its own envelope shape: tears/mash snap and decay, bends swell and release.
@@ -1532,6 +1610,29 @@ class BsodExperienceApp {
       bloomAmt = 0.82 + fallFactor * 0.34;
     }
 
+    // ---------------------------------------------------------------- LOCAL LOW-RESOLUTION FILTER
+    // Only inside the 3D world: a soft patch of the frame is fed through a broken, low-fidelity
+    // pipeline. It is anchored to the Sky-Eye, so the degraded area moves as you look around.
+    let lowResAmt = 0;
+    let lowResRadius = 0.26;
+    let lowResBlock = 5;
+    if (
+      this.phase === 'ROAM_GLITCH' ||
+      this.phase === 'GLITCH_ARRIVAL_CUTSCENE' ||
+      this.phase === 'COLLAPSE_CUTSCENE'
+    ) {
+      const anomaly = this.glitchWorld.anomalyIntensity;
+      lowResAmt =
+        this.phase === 'COLLAPSE_CUTSCENE'
+          ? 0.62
+          : this.phase === 'GLITCH_ARRIVAL_CUTSCENE'
+            ? 0.38 + anomaly * 0.32
+            : 0.46 + anomaly * 0.44;
+      lowResRadius = 0.255 + anomaly * 0.14;
+      lowResBlock = 4.0 + anomaly * 5.5;
+      this.updateLowResZone();
+    }
+
     this.postFX.render(this.renderer, this.getActiveScene(), this.camera, this.elapsed, {
       distort: distortAmt,
       waveProgress: waveProg,
@@ -1546,8 +1647,62 @@ class BsodExperienceApp {
       roll: rollAmt,
       ghost: ghostAmt,
       bloom: bloomAmt,
+      lowRes: lowResAmt,
+      lowResCenter: this._lowResCenter,
+      lowResRadius: lowResRadius,
+      lowResBlock: lowResBlock,
     });
   };
+
+  /**
+   * Projects the colossal Sky-Eye into screen space so the degraded, low-resolution filter zone
+   * stays anchored to a real world feature. Turning your head slides the bad-signal patch across
+   * your view instead of leaving it glued to the middle of the screen. When the Eye is behind
+   * you the zone falls back to the central Cathedral, so the patch is always tied to the world.
+   */
+  private updateLowResZone(): void {
+    this.camera.getWorldDirection(this._camFwd);
+    this._camRight.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
+    this._camUp.set(0, 1, 0).applyQuaternion(this.camera.quaternion);
+
+    const eyeZ = this._skyEyeDir.dot(this._camFwd);
+    let dx: number;
+    let dy: number;
+    let dz: number;
+    if (eyeZ > 0.08) {
+      dx = this._skyEyeDir.x;
+      dy = this._skyEyeDir.y;
+      dz = this._skyEyeDir.z;
+    } else {
+      this._lowResDir.copy(this.glitchWorld.corePosition).sub(this.camera.position);
+      const l = Math.max(1e-4, this._lowResDir.length());
+      dx = this._lowResDir.x / l;
+      dy = this._lowResDir.y / l;
+      dz = this._lowResDir.z / l;
+    }
+
+    const z = dx * this._camFwd.x + dy * this._camFwd.y + dz * this._camFwd.z;
+    const x = dx * this._camRight.x + dy * this._camRight.y + dz * this._camRight.z;
+    const y = dx * this._camUp.x + dy * this._camUp.y + dz * this._camUp.z;
+    const tanHalf = Math.tan(THREE.MathUtils.degToRad(this.camera.fov) * 0.5);
+
+    let cu: number;
+    let cv: number;
+    if (z > 0.08) {
+      cu = 0.5 + (x / (z * tanHalf * this.camera.aspect)) * 0.5;
+      cv = 0.5 + (y / (z * tanHalf)) * 0.5;
+    } else {
+      // Behind the camera: slide the zone off the nearest screen edge in that direction.
+      const l = Math.max(1e-4, Math.hypot(x, y));
+      cu = 0.5 + (x / l) * 1.28;
+      cv = 0.5 + (y / l) * 1.28;
+    }
+
+    this._lowResCenter.set(
+      THREE.MathUtils.clamp(cu, -0.38, 1.38),
+      THREE.MathUtils.clamp(cv, 0.05, 0.95)
+    );
+  }
 
   private stepSimulation(dt: number): void {
     this.clickPulse = Math.max(0, this.clickPulse - dt * 3.8);
@@ -1898,12 +2053,12 @@ class BsodExperienceApp {
 
         this.glitchWorld.update(dt, this.elapsed, this.camera.position, null);
 
-        // Exact moment (t = 1.12s) you fly cleanly between the 48 Sky-Maw teeth into open 3D space (ZERO warp/flash hitch!)
+        // Exact moment (t = 1.12s) you fly cleanly out of the seamless flesh aperture into open 3D space (ZERO warp/flash hitch!)
         if (crossedAperture && !this.glitchArrivalRollCuePlayed) {
           this.glitchArrivalRollCuePlayed = true;
           this.audio.playOneShot('swoosh_thunder', { volume: 0.76, rate: 0.94, reverb: 0.55 });
           this.audio.playOneShot('transition_solemn', { volume: 0.58, reverb: 0.55 });
-          this.showSubtitle('天空の顎を抜け落ちた——眼下のデータ海の果てに、蒼白い光の柱が立つ聖堂が聳えている。', 4600);
+          this.showSubtitle('喉を抜け落ちた——眼下のデータ海の果てに、蒼白い光の柱が立つ聖堂が聳えている。', 4600);
         }
 
         if (touchedDown && !this.glitchArrivalLanded) {
@@ -1925,7 +2080,7 @@ class BsodExperienceApp {
           this.opticStrain = 0;
           this.periodicWarpCooldown = 6.5;
           this.crosshairEl.classList.remove('hidden');
-          this.worldHintEl.textContent = '[WASD] 探索  |  [C] コンソールを開く';
+          this.worldHintEl.textContent = '[WASD] 探索  |  [Space] ジャンプ  |  [C] コンソールを開く';
           this.worldHintEl.classList.remove('hidden');
           this.showSubtitle('正面の大橋の先に光の柱が見える——消化が100%に達する前に中央聖堂へ向かえ。', 5200);
         }
