@@ -99,7 +99,7 @@ for (let i = 0; i < 300; i++) {
 }
 const bsodAny = bedroom.bsodScreen as any;
 if (
-  bsodAny.rimTeethMesh.count !== 52 ||
+  bsodAny.rimTeethMesh.count !== 38 ||
   bsodAny.jawFlapsMesh.count !== 4 ||
   Boolean(bsodAny.tongueMesh) ||
   bsodAny.sinewMesh.count !== 32 ||

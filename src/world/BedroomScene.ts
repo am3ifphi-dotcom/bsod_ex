@@ -355,11 +355,19 @@ export class BedroomScene {
     shaft.rotation.set(0, -Math.PI * 0.5, -0.34);
     this.group.add(shaft);
 
-    // Subtle 2:47 AM rain-streaked window glass catching city neon & cold monitor reflections (1 ultra-light quad)
+    // =====================================================================================
+    // 2:47 AM RAIN ON THE WINDOW GLASS
+    // Real rain physics instead of a scrolling smear: static beads that refract the city,
+    // rivulets that run down under gravity and leave a thinning trail behind them, and a
+    // condensation haze that gathers toward the frame. Every droplet bends the city lights by
+    // its own surface slope AND by your viewing angle, so the glass genuinely changes as you
+    // move your head.
+    // =====================================================================================
     this.rainGlassMat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
       uniforms: {
         uTime: this.infectUniforms.uTime,
         uInfect: this.infectUniforms.uInfect,
@@ -367,24 +375,129 @@ export class BedroomScene {
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
+        varying vec3 vWorldPos;
+        varying vec3 vWorldNormal;
         void main() {
           vUv = uv;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          vec4 wp = modelMatrix * vec4(position, 1.0);
+          vWorldPos = wp.xyz;
+          vWorldNormal = normalize(mat3(modelMatrix) * normal);
+          gl_Position = projectionMatrix * viewMatrix * wp;
         }
       `,
       fragmentShader: /* glsl */ `
         varying vec2 vUv;
+        varying vec3 vWorldPos;
+        varying vec3 vWorldNormal;
         uniform float uTime;
         uniform float uInfect;
         uniform sampler2D uNoiseTex;
+
+        float h21(vec2 p) {
+          vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+          p3 += dot(p3, p3.yzx + 33.33);
+          return fract((p3.x + p3.y) * p3.z);
+        }
+
+        // --- One static bead of water per grid cell --------------------------------------
+        // x = coverage, yz = surface slope (the lens normal of the droplet)
+        vec3 beadLayer(vec2 uv, float cellsX, float cellsY, float density, float seed) {
+          vec2 g = vec2(uv.x * cellsX, uv.y * cellsY);
+          vec2 id = floor(g);
+          vec2 f = fract(g) - 0.5;
+          float rnd = h21(id + seed);
+          if (rnd > density) return vec3(0.0);
+          vec2 jitter = vec2(h21(id + seed + 3.17), h21(id + seed + 7.31)) - 0.5;
+          float rad = 0.14 + h21(id + seed + 11.73) * 0.22;
+          vec2 d = (f - jitter * 0.72) / rad;
+          float r2 = dot(d, d);
+          if (r2 > 1.0) return vec3(0.0);
+          float cov = 1.0 - smoothstep(0.48, 1.0, r2);
+          // Spherical-cap slope: the lens bulges toward the centre of the bead.
+          vec2 slope = -d * sqrt(max(0.0, 1.0 - r2)) * 1.45;
+          return vec3(cov, slope);
+        }
+
+        // --- A rivulet running down the pane ---------------------------------------------
+        // A bulbous head accelerates downward and drags a thinning wet channel behind it.
+        vec3 rivuletLayer(vec2 uv, float cols, float speedScale, float seed) {
+          float cid = floor(uv.x * cols);
+          float cf = fract(uv.x * cols) - 0.5;
+          float rnd = h21(vec2(cid, seed));
+          if (rnd < 0.42) return vec3(0.0);
+          float speed = (0.09 + rnd * 0.24) * speedScale;
+          float offset = h21(vec2(cid, seed + 5.0));
+          float y = 1.16 - fract(uTime * speed + offset) * 1.34;
+          float wob = sin(y * 11.0 + rnd * 6.283 + uTime * 0.8) * 0.055;
+          float x = cf - wob;
+          float headR = 0.085 + rnd * 0.11;
+          float dHead = length(vec2(x * 1.55, (uv.y - y) * 0.5));
+          float head = smoothstep(headR, headR * 0.30, dHead);
+          // The trail is widest right above the head and thins out as it dries.
+          float age = clamp((y - uv.y) / 1.34, 0.0, 1.0);
+          float trailW = headR * (0.55 - 0.38 * age);
+          float trail = smoothstep(trailW, 0.0, abs(x * 1.55))
+                      * step(uv.y, y) * step(-0.18, uv.y)
+                      * (1.0 - age * 0.75);
+          float cov = clamp(head + trail * 0.5, 0.0, 1.0);
+          vec2 slope = vec2(-x * 1.7 * head, (uv.y - y) * 0.35 * head);
+          return vec3(cov, slope);
+        }
+
+        // --- The city beyond the glass ---------------------------------------------------
+        vec3 cityLight(vec2 p) {
+          vec3 c = vec3(0.012, 0.028, 0.075);
+          c += vec3(0.16, 0.36, 0.95) * exp(-abs(p.y - 0.74) * 4.2) * 0.85;
+          c += vec3(0.80, 0.22, 0.55) * exp(-abs(p.y - 0.58) * 8.5) * 0.45;
+          c += vec3(0.95, 0.72, 0.32) * exp(-abs(p.y - 0.44) * 13.0) * 0.30;
+          // Blurred window rows of the buildings across the street.
+          float row = step(0.62, h21(floor(vec2(p.x * 26.0, p.y * 34.0))));
+          c += vec3(0.55, 0.72, 1.0) * row * 0.10 * smoothstep(0.30, 0.72, p.y);
+          return c;
+        }
+
         void main() {
-          vec4 n1 = texture2D(uNoiseTex, vec2(vUv.x * 5.5, vUv.y * 1.4 + uTime * 0.055));
-          vec4 n2 = texture2D(uNoiseTex, vec2(vUv.x * 11.0 + 0.37, vUv.y * 2.2 + uTime * 0.095));
-          float streak = pow(n1.b, 4.0) * 0.55 + pow(n2.b, 5.0) * 0.65;
-          float edgeVig = smoothstep(0.0, 0.12, vUv.x) * smoothstep(1.0, 0.88, vUv.x)
-                        * smoothstep(0.0, 0.12, vUv.y) * smoothstep(1.0, 0.88, vUv.y);
-          vec3 tint = mix(vec3(0.32, 0.55, 0.95), vec3(0.08, 0.68, 1.0), uInfect);
-          gl_FragColor = vec4(tint, streak * edgeVig * 0.16);
+          vec3 paneN = normalize(vWorldNormal);
+          vec3 up = vec3(0.0, 1.0, 0.0);
+          vec3 right = normalize(cross(up, paneN));
+          vec3 V = normalize(cameraPosition - vWorldPos);
+
+          vec3 b1 = beadLayer(vUv, 30.0, 23.0, 0.40, 0.0);
+          vec3 b2 = beadLayer(vUv, 56.0, 42.0, 0.30, 17.0);
+          vec3 r1 = rivuletLayer(vUv, 13.0, 1.0, 3.0);
+          vec3 r2 = rivuletLayer(vUv, 24.0, 1.65, 29.0);
+
+          float cover = clamp(b1.x + b2.x * 0.85 + r1.x + r2.x * 0.75, 0.0, 1.0);
+          vec2 slope = b1.yz * b1.x + b2.yz * b2.x * 0.85 + r1.yz * r1.x + r2.yz * r2.x * 0.75;
+
+          // --- VIEW-DEPENDENT REFRACTION ----------------------------------------------------
+          // The droplets act as tiny lenses. Their bend depends on the surface slope AND on
+          // where you are standing, so the city behind the glass genuinely shifts as you move.
+          vec2 viewT = vec2(dot(V, right), dot(V, up));
+          vec2 refr = slope * (0.42 + 0.85 * viewT.x) * 0.16;
+          vec2 cityUv = clamp(vUv + refr + vec2(0.0, viewT.y * 0.05), vec2(-0.2), vec2(1.2));
+          vec3 city = cityLight(cityUv);
+
+          // Wet surface normal for a sharp specular glint from the cold window light.
+          vec3 wetN = normalize(paneN + right * slope.x * 0.85 + up * slope.y * 0.85);
+          vec3 L = normalize(vec3(0.55, 0.72, -0.42));
+          float spec = pow(max(dot(reflect(-L, wetN), V), 0.0), 56.0);
+          float fres = pow(1.0 - abs(dot(wetN, V)), 3.2);
+
+          // --- CONDENSATION ------------------------------------------------------------------
+          vec4 mist = texture2D(uNoiseTex, vec2(vUv.x * 7.0, vUv.y * 5.0));
+          float haze = (1.0 - cover) * (0.30 + mist.r * 0.42)
+                     * smoothstep(0.0, 0.34, vUv.x) * (1.0 - smoothstep(0.66, 1.0, vUv.x))
+                     * smoothstep(0.0, 0.22, vUv.y) * (1.0 - smoothstep(0.78, 1.0, vUv.y));
+
+          vec3 tint = mix(vec3(0.52, 0.70, 1.0), vec3(0.20, 0.86, 1.0), uInfect);
+          vec3 col = city * (0.55 + 0.9 * cover) * mix(vec3(1.0), tint, 0.55);
+          col += tint * spec * 1.7;
+          col += tint * fres * 0.16;
+          col += vec3(0.30, 0.44, 0.72) * haze * 0.32;
+
+          float alpha = clamp(cover * 0.62 + spec * 0.9 + haze * 0.55 + fres * 0.10, 0.0, 1.0);
+          gl_FragColor = vec4(col, alpha);
         }
       `,
     });
@@ -392,6 +505,8 @@ export class BedroomScene {
     rainPane.rotation.y = -Math.PI * 0.5;
     rainPane.position.set(2.68, 1.62, -0.55);
     this.group.add(rainPane);
+
+    this.buildRainCurtain();
 
     // Dead pendant fixture under ceiling rose
     const cordMat = new THREE.MeshLambertMaterial({ color: 0x15181f });
@@ -558,8 +673,91 @@ export class BedroomScene {
     }
   }
 
-  private buildNightExterior(): void {
-    const skyMat = new THREE.ShaderMaterial({
+  /**
+   * GPU-animated rain curtain falling between the window and the city blocks.
+   * Every streak has its own fall speed, length, slant and depth, and the whole sheet is
+   * lit by the cold neon behind it, so the window reads as genuinely wet instead of painted.
+   */
+  private buildRainCurtain(): void {
+    const RAIN_COUNT = 620;
+    // A crossed pair of quads so a streak never disappears when viewed edge-on.
+    const blade = new THREE.PlaneGeometry(0.010, 0.34);
+    blade.translate(0, 0.17, 0);
+    const blade2 = blade.clone();
+    blade2.rotateY(Math.PI * 0.5);
+    const merged = mergeGeometries([blade, blade2], false);
+    blade.dispose();
+    blade2.dispose();
+    if (!merged) return;
+
+    const seeds = new Float32Array(RAIN_COUNT * 4);
+    for (let i = 0; i < RAIN_COUNT; i++) {
+      seeds[i * 4 + 0] = Math.random() * 9.0; // vertical phase offset
+      seeds[i * 4 + 1] = 7.0 + Math.random() * 8.0; // fall speed
+      seeds[i * 4 + 2] = 0.55 + Math.random() * 1.15; // length scale
+      seeds[i * 4 + 3] = 0.35 + Math.random() * 0.85; // brightness
+    }
+    merged.setAttribute('aRain4', new THREE.InstancedBufferAttribute(seeds, 4));
+
+    const rainMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      uniforms: {
+        uTime: this.infectUniforms.uTime,
+        uInfect: this.infectUniforms.uInfect,
+      },
+      vertexShader: /* glsl */ `
+        attribute vec4 aRain4;
+        uniform float uTime;
+        varying float vFade;
+        varying float vBright;
+        void main() {
+          float fall = aRain4.y;
+          // The streak head wraps down a 9.6m column so the curtain never runs out.
+          float y = 8.2 - mod(aRain4.x + uTime * fall, 9.6);
+          float len = aRain4.z;
+          vec3 local = vec3(position.x, position.y * len + y - 0.17 * len, position.z);
+          // Wind shear: the top of each streak leans further than its tail.
+          local.x += position.y * len * 0.17;
+          vec4 world = instanceMatrix * vec4(local, 1.0);
+          vec4 mv = modelViewMatrix * world;
+          // Fade in at the top of the fall and out at the bottom.
+          vFade = (1.0 - smoothstep(6.9, 8.2, y)) * smoothstep(-1.4, -0.1, y);
+          vBright = aRain4.w;
+          gl_Position = projectionMatrix * mv;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying float vFade;
+        varying float vBright;
+        uniform float uInfect;
+        void main() {
+          vec3 cold = vec3(0.42, 0.62, 1.0);
+          vec3 neon = vec3(0.95, 0.45, 0.72);
+          vec3 col = mix(cold, neon, uInfect * 0.55) * (0.35 + 0.65 * vBright);
+          gl_FragColor = vec4(col, vFade * (0.12 + 0.26 * vBright));
+        }
+      `,
+    });
+
+    const rain = new THREE.InstancedMesh(merged, rainMat, RAIN_COUNT);
+    const d = new THREE.Object3D();
+    for (let i = 0; i < RAIN_COUNT; i++) {
+      const x = 2.92 + Math.random() * 0.92;
+      const z = -4.6 + Math.random() * 8.4;
+      d.position.set(x, 0, z);
+      d.rotation.set(0, 0, 0);
+      d.updateMatrix();
+      rain.setMatrixAt(i, d.matrix);
+    }
+    rain.instanceMatrix.needsUpdate = true;
+    rain.frustumCulled = false;
+    this.group.add(rain);
+  }
+
+  private buildNightExterior(): void {    const skyMat = new THREE.ShaderMaterial({
       depthWrite: false,
       fog: false,
       uniforms: { uInfect: this.infectUniforms.uInfect, uTime: this.infectUniforms.uTime },
@@ -1000,7 +1198,7 @@ export class BedroomScene {
     if (mat.userData.bsodInfected) return;
     mat.userData.bsodInfected = true;
 
-    mat.customProgramCacheKey = () => 'bsod_lambert_infect_v4';
+    mat.customProgramCacheKey = () => 'bsod_lambert_infect_v5';
     mat.onBeforeCompile = (shader) => {
       shader.uniforms.uInfect = this.infectUniforms.uInfect;
       shader.uniforms.uPull = this.infectUniforms.uPull;
@@ -1016,6 +1214,7 @@ export class BedroomScene {
           varying vec3 vBsodWorldPos;
           varying float vBsodWallAmt;
           varying float vBsodMonGlint;
+          varying vec3 vBsodWorldNormal;
           uniform float uInfect;
           uniform float uPull;
           uniform float uTime;
@@ -1047,6 +1246,7 @@ export class BedroomScene {
           #endif
           vec3 wnrmV = normalize(mat3(modelMatrix) * bsodN);
           vBsodWallAmt = 1.0 - smoothstep(0.32, 0.72, abs(wnrmV.y));
+          vBsodWorldNormal = wnrmV;
 
           // Compute monitor specular glint IN VERTEX SHADER (eliminates 4 normalize + pow per pixel!)
           vec3 toCamV = normalize(cameraPosition - bsodWp.xyz);
@@ -1068,6 +1268,7 @@ export class BedroomScene {
           varying vec3 vBsodWorldPos;
           varying float vBsodWallAmt;
           varying float vBsodMonGlint;
+          varying vec3 vBsodWorldNormal;
           uniform float uInfect;
           uniform float uPull;
           uniform float uTime;
@@ -1094,6 +1295,31 @@ export class BedroomScene {
             gl_FragColor.rgb *= 1.0 - (nCoarse.g - 0.5) * 0.07 + (nCoarse.r - 0.5) * 0.11 + stripe * 0.055;
             gl_FragColor.rgb *= 1.0 - (floorAO * 0.40 + ceilAO * 0.32);
             gl_FragColor.rgb += vec3(0.05, 0.26, 0.62) * vBsodMonGlint;
+
+            // --- VIEW-DEPENDENT SURFACE RELIEF ---------------------------------------------
+            // A shallow plaster/wood grain is reconstructed from the noise field and lit with a
+            // view-dependent specular, so the walls, floor and ceiling genuinely look different
+            // depending on where you stand and which way you are looking.
+            {
+              vec3 Nw = normalize(vBsodWorldNormal);
+              vec3 Vw = normalize(cameraPosition - wp);
+              vec2 ruv = vec2(wp.x * 0.92 + wp.z * 0.92, wp.y * 1.35) * 1.15;
+              float e = 0.010;
+              float hx = texture2D(uNoiseTex, ruv + vec2(e, 0.0)).g - texture2D(uNoiseTex, ruv - vec2(e, 0.0)).g;
+              float hy = texture2D(uNoiseTex, ruv + vec2(0.0, e)).g - texture2D(uNoiseTex, ruv - vec2(0.0, e)).g;
+              vec3 T = normalize(abs(Nw.y) > 0.85 ? vec3(1.0, 0.0, 0.0) : cross(vec3(0.0, 1.0, 0.0), Nw));
+              vec3 B = cross(Nw, T);
+              vec3 Np = normalize(Nw - T * hx * 9.0 - B * hy * 9.0);
+              vec3 L = normalize(vec3(0.32, 0.80, -0.50));
+              vec3 H = normalize(L + Vw);
+              float reliefDiff = clamp(dot(Np, L), 0.0, 1.0);
+              float reliefSpec = pow(max(dot(Np, H), 0.0), 30.0);
+              gl_FragColor.rgb *= 0.88 + 0.26 * reliefDiff;
+              gl_FragColor.rgb += vec3(0.46, 0.62, 0.92) * reliefSpec * 0.26;
+              // Grazing-angle sheen: the wall "catches" the light as you move past it.
+              float graze = pow(1.0 - abs(dot(Nw, Vw)), 3.6);
+              gl_FragColor.rgb += vec3(0.20, 0.34, 0.60) * graze * 0.16;
+            }
 
             if (uInfect > 0.002) {
               vec4 nFine = texture2D(uNoiseTex, vec2(uAxis * 1.45, wp.y * 1.45 + wp.z * 0.35));
