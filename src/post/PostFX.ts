@@ -28,6 +28,16 @@ export type PostFXOptions = {
   roll?: number;
   ghost?: number;
   bloom?: number;
+  /** Contrast-adaptive sharpening, 0..1 (restores crispness when the frame is upscaled). */
+  sharpness?: number;
+  /** Low-resolution "peripheral lens" filter, 0..1 — only the outer field of view degrades. */
+  peripheral?: number;
+  /** Cheap FXAA-lite edge blend, 0..1. */
+  aa?: number;
+  /** Screen-space (0..1 UV) position of the watching sky-eye, used for the view-dependent glare. */
+  eyeScreen?: [number, number];
+  /** Strength of the sky-eye glare, 0..1. */
+  eyeGlare?: number;
 };
 
 export class PostFX {
@@ -86,6 +96,12 @@ export class PostFX {
         uGhost: { value: 0 },
         tBloom: { value: null },
         uBloom: { value: 0.0 },
+        uSharpness: { value: 0.0 },
+        uPeripheral: { value: 0.0 },
+        uAA: { value: 0.0 },
+        uTexel: { value: new THREE.Vector2(1 / 1024, 1 / 1024) },
+        uEyeScreen: { value: new THREE.Vector2(0.5, 0.5) },
+        uEyeGlare: { value: 0.0 },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -112,6 +128,12 @@ export class PostFX {
         uniform float uGhost;
         uniform sampler2D tBloom;
         uniform float uBloom;
+        uniform float uSharpness;
+        uniform float uPeripheral;
+        uniform float uAA;
+        uniform vec2 uTexel;
+        uniform vec2 uEyeScreen;
+        uniform float uEyeGlare;
 
         float hash21(vec2 p) {
           p = fract(p * vec2(123.34, 456.21));
@@ -303,6 +325,51 @@ export class PostFX {
             col += vec3(0.45, 0.85, 1.0) * ray * 0.26 * rimMask;
           }
 
+
+          // ---------------------------------------------------------------- RESOLUTION RESTORE
+          // One 4-tap neighbourhood drives both a luma-gated edge blend (FXAA-lite) and a
+          // contrast-adaptive unsharp, because the frame is usually rebuilt at a moving render scale.
+          if (uSharpness > 0.004 || uAA > 0.004) {
+            vec3 nC = fetch(uv + vec2(0.0, uTexel.y));
+            vec3 sC = fetch(uv - vec2(0.0, uTexel.y));
+            vec3 eC = fetch(uv + vec2(uTexel.x, 0.0));
+            vec3 wC = fetch(uv - vec2(uTexel.x, 0.0));
+            float lc = dot(col, vec3(0.2126, 0.7152, 0.0722));
+            float ln = dot(nC, vec3(0.2126, 0.7152, 0.0722));
+            float ls = dot(sC, vec3(0.2126, 0.7152, 0.0722));
+            float le = dot(eC, vec3(0.2126, 0.7152, 0.0722));
+            float lw = dot(wC, vec3(0.2126, 0.7152, 0.0722));
+            float edge = max(max(ln, ls), max(le, lw)) - min(min(ln, ls), min(le, lw));
+            vec3 avg4 = (nC + sC + eC + wC) * 0.25;
+            float aaW = smoothstep(0.055, 0.21, edge) * clamp(uAA, 0.0, 1.0);
+            vec3 sharpened = col + (col - avg4) * (0.92 * clamp(uSharpness, 0.0, 1.0));
+            vec3 lo = min(min(nC, sC), min(eC, wC));
+            vec3 hi = max(max(nC, sC), max(eC, wC));
+            sharpened = clamp(sharpened, min(lo, col) - 0.015, max(hi, col) + 0.015);
+            col = mix(sharpened, mix(col, avg4, 0.62), aaW);
+            col = max(col, vec3(0.0));
+          }
+
+          // ---------------------------------------------------------------- PERIPHERAL RESOLUTION LENS
+          // A soft "wrong optics" band that only bites in the outer field of view: macro-blocked
+          // sampling, a faint scan weave and cold fringing. Feathers out completely toward the centre
+          // so the player reads it as their own peripheral vision failing, not as post-processing.
+          float periphMask = smoothstep(0.052, 0.265, r2) * uPeripheral;
+          if (periphMask > 0.004) {
+            float outer = smoothstep(0.10, 0.47, r2);
+            vec2 cell = vec2(mix(0.0032, 0.0082, outer), mix(0.0032, 0.0062, outer));
+            vec2 qUv = (floor(uv / cell) + 0.5) * cell;
+            vec3 lowRes = fetch(qUv);
+            lowRes = mix(lowRes, fetch(qUv + cell * 0.55), 0.35);
+            // Cold split inside the coarsened patch + slow rolling scan bars
+            lowRes.r = mix(lowRes.r, fetch(qUv + vec2(cell.x * 0.55, 0.0)).r, 0.30 * periphMask);
+            lowRes.b = mix(lowRes.b, fetch(qUv - vec2(cell.x * 0.55, 0.0)).b, 0.30 * periphMask);
+            float scanWeave = 0.90 + 0.10 * sin(qUv.y / max(cell.y, 1e-5) * 1.7 + uTime * 2.1);
+            lowRes *= scanWeave;
+            lowRes = mix(lowRes, lowRes * vec3(0.88, 0.96, 1.10), outer * 0.45);
+            col = mix(col, lowRes, periphMask * 0.92);
+          }
+
           // ---------------------------------------------------------------- ALWAYS-ON SUBTLE PLAYER OPTICAL FILTER
           // Lifted highlights, crisp S-curve micro-contrast, nocturnal indigo toe, & fine optical weave
           col = acesFilmic(col * 1.28);
@@ -335,6 +402,22 @@ export class PostFX {
           if (uBloom > 0.001) {
             vec3 glow = texture2D(tBloom, vUv).rgb;
             col += glow * uBloom;
+          }
+
+
+          // ---------------------------------------------------------------- VIEW-DEPENDENT SKY-EYE GLARE
+          // The colossal watcher sits at a fixed world direction, so its veil, halo and anamorphic
+          // streak slide across the frame exactly as the player turns their head toward it.
+          if (uEyeGlare > 0.002) {
+            vec2 gd = vUv - uEyeScreen;
+            gd.x *= 1.7778;
+            float gDist = length(gd);
+            float halo = exp(-gDist * 3.4);
+            float core = exp(-gDist * 15.0);
+            float anamorphic = exp(-abs(gd.y) * 30.0) * exp(-abs(gd.x) * 1.25);
+            vec2 gdir = gd / max(gDist, 1e-4);
+            float spokes = pow(max(0.0, cos(atan(gdir.y, gdir.x) * 6.0 + uTime * 0.22)), 12.0) * exp(-gDist * 2.6);
+            col += vec3(0.34, 0.72, 1.0) * (halo * 0.13 + core * 0.22 + anamorphic * 0.060 + spokes * 0.080) * uEyeGlare;
           }
 
           float vig = smoothstep(0.96, 0.18, r2 * (1.05 + uVignette));
@@ -469,6 +552,7 @@ export class PostFX {
     this.rtBlur.setSize(bw, bh);
     this.brightMat.uniforms.uTexelX.value = 1 / bw;
     this.blurMat.uniforms.uTexelY.value = 1 / bh;
+    this.mat.uniforms.uTexel.value.set(1 / Math.max(2, width), 1 / Math.max(2, height));
   }
 
   /**
@@ -529,6 +613,11 @@ export class PostFX {
     u.uSort.value = opts.sort ?? 0;
     u.uRoll.value = opts.roll ?? 0;
     u.uGhost.value = opts.ghost ?? 0;
+    u.uSharpness.value = opts.sharpness ?? 0;
+    u.uPeripheral.value = opts.peripheral ?? 0;
+    u.uAA.value = opts.aa ?? 0;
+    u.uEyeGlare.value = opts.eyeGlare ?? 0;
+    if (opts.eyeScreen) u.uEyeScreen.value.set(opts.eyeScreen[0], opts.eyeScreen[1]);
 
     renderer.setRenderTarget(this.rt);
     renderer.clear(true, true, true);

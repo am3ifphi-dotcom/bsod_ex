@@ -211,19 +211,19 @@ screen.root.traverse((o: any) => {
 });
 console.log('All BsodScreen stages (0..6) & GLSL uniform types verified OK!');
 
-// Verify throatTeeth (144 deep esophageal fangs) + gaping open 3D Parasyte rig (52 rimTeeth + 4 jawFlaps + 32 sinews + 11 eyes, NO tongueMesh, NO cyclic pakupaku closing) + zero-recompile setInsideTunnelMode!
-if (!anyS.throatTeeth || anyS.throatTeeth.count !== 144) {
-  throw new Error(`Expected 144 3D throatTeeth instances, got ${anyS.throatTeeth?.count}`);
+// Verify throatTeeth (96 thick esophageal fangs) + gaping open 3D Parasyte rig (40 chunky rimTeeth + 4 jawFlaps + 32 sinews + 11 eyes, NO tongueMesh, NO cyclic pakupaku closing) + zero-recompile setInsideTunnelMode!
+if (!anyS.throatTeeth || anyS.throatTeeth.count !== 96) {
+  throw new Error(`Expected 96 3D throatTeeth instances, got ${anyS.throatTeeth?.count}`);
 }
 if (
-  anyS.rimTeethMesh?.count !== 52 ||
+  anyS.rimTeethMesh?.count !== 40 ||
   anyS.jawFlapsMesh?.count !== 4 ||
   Boolean(anyS.tongueMesh) ||
   anyS.sinewMesh?.count !== 32 ||
   anyS.parasyteEyesMesh?.count !== 11
 ) {
   throw new Error(
-    `Expected 52 rimTeeth / 4 jawFlaps / NO tongueMesh / 32 sinews / 11 parasyteEyes, got ${anyS.rimTeethMesh?.count}/${anyS.jawFlapsMesh?.count}/${Boolean(anyS.tongueMesh)}/${anyS.sinewMesh?.count}/${anyS.parasyteEyesMesh?.count}`
+    `Expected 40 rimTeeth / 4 jawFlaps / NO tongueMesh / 32 sinews / 11 parasyteEyes, got ${anyS.rimTeethMesh?.count}/${anyS.jawFlapsMesh?.count}/${Boolean(anyS.tongueMesh)}/${anyS.sinewMesh?.count}/${anyS.parasyteEyesMesh?.count}`
   );
 }
 if (/snapDown|chewActive/.test(anyS.screenMat.fragmentShader)) {
@@ -238,7 +238,7 @@ for (let i = 0; i < versionsBefore.length; i++) {
     throw new Error(`Throat material[${i}] triggered shader recompile or lost stencilWriteMask=0!`);
   }
 }
-console.log('throatTeeth (144 deep fangs), gaping open 3D parasyteGroup (52 teeth + 4 jawFlaps + 32 sinews + 11 eyes, zero pakupaku) & zero-recompile stencil toggle verified OK!');
+console.log('throatTeeth (96 thick fangs), gaping open 3D parasyteGroup (40 chunky teeth + 4 jawFlaps + 32 sinews + 11 eyes, zero pakupaku) & zero-recompile stencil toggle verified OK!');
 
 // Does the body canvas carry the expected cerulean fill?
 const ctx2 = body.getContext('2d');

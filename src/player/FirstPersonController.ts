@@ -26,6 +26,17 @@ export class FirstPersonController {
   public eyeHeight = 1.61;
   public sensitivity = 1.0;
 
+  // --- Vertical locomotion (jump / gravity) ---------------------------------
+  public verticalVel = 0;
+  public grounded = true;
+  public jumpQueued = false;
+  private landDip = 0;
+  private landDipVel = 0;
+  private airTime = 0;
+  public onLand?: (impact: number) => void;
+  private readonly gravity = 17.5;
+  private readonly jumpSpeed = 5.35;
+
   private readonly keys = new Set<string>();
   private walkPhase = 0;
   private lastStepHalfCycle = 0;
@@ -58,11 +69,23 @@ export class FirstPersonController {
   public clearKeys(): void {
     this.keys.clear();
     this.velocity.set(0, 0, 0);
+    this.jumpQueued = false;
     this.lastStepHalfCycle = Math.floor(this.walkPhase / Math.PI);
+  }
+
+  /** Snap the player back onto the ground (used by scene hand-offs). */
+  public settleOnGround(groundY: number): void {
+    this.position.y = groundY;
+    this.verticalVel = 0;
+    this.grounded = true;
+    this.jumpQueued = false;
+    this.landDip = 0;
+    this.landDipVel = 0;
   }
 
   public onKeyDown(code: string): void {
     this.keys.add(code);
+    if (code === 'Space') this.jumpQueued = true;
   }
 
   public onKeyUp(code: string): void {
@@ -101,6 +124,11 @@ export class FirstPersonController {
   public resetToBedroomSpawn(monitorWorldPos?: THREE.Vector3): void {
     this.position.set(0.35, 0.017, 0.62);
     this.velocity.set(0, 0, 0);
+    this.verticalVel = 0;
+    this.grounded = true;
+    this.jumpQueued = false;
+    this.landDip = 0;
+    this.landDipVel = 0;
     this.roll = 0;
     this.walkPhase = 0;
     this.lastStepHalfCycle = 0;
@@ -161,8 +189,46 @@ export class FirstPersonController {
     collisionFn(this.position);
     const actualMoveSpeed = Math.hypot(this.position.x - prevX, this.position.z - prevZ) / Math.max(dt, 1e-4);
 
-    const targetGroundY = groundYFn(this.position.x, this.position.z);
-    this.position.y = THREE.MathUtils.lerp(this.position.y, targetGroundY, Math.min(1, dt * 18));
+    // ---------------------------------------------------------------- VERTICAL LOCOMOTION
+    const groundY = groundYFn(this.position.x, this.position.z);
+    if (inputEnabled && this.jumpQueued && this.grounded) {
+      this.verticalVel = this.jumpSpeed;
+      this.grounded = false;
+      this.airTime = 0;
+      this.jumpQueued = false;
+    }
+
+    if (!this.grounded) {
+      this.airTime += dt;
+      this.verticalVel -= this.gravity * dt;
+      this.position.y += this.verticalVel * dt;
+      if (this.position.y <= groundY) {
+        const impact = THREE.MathUtils.clamp(-this.verticalVel / 7.4, 0, 1.35);
+        this.position.y = groundY;
+        this.verticalVel = 0;
+        this.grounded = true;
+        this.landDip = 0.058 * Math.min(1.3, impact);
+        this.landDipVel = 0;
+        this.onLand?.(impact);
+      }
+    } else {
+      // Walking off a ledge drops the body into a real fall instead of gliding down the slope.
+      if (this.position.y - groundY > 0.32) {
+        this.grounded = false;
+        this.verticalVel = 0;
+        this.airTime = 0;
+      } else {
+        this.position.y = THREE.MathUtils.lerp(this.position.y, groundY, Math.min(1, dt * 18));
+      }
+    }
+
+    // Landing compression spring: a short, damped dip on touchdown sells the weight.
+    this.landDipVel += (-this.landDip * 128.0 - this.landDipVel * 15.0) * dt;
+    this.landDip += this.landDipVel * dt;
+    if (Math.abs(this.landDip) < 1e-4 && Math.abs(this.landDipVel) < 1e-3) {
+      this.landDip = 0;
+      this.landDipVel = 0;
+    }
 
     const speed = Math.hypot(this.velocity.x, this.velocity.z);
     if (inputEnabled && wishLen > 1e-3 && actualMoveSpeed > 0.35 && speed > 0.45) {
@@ -180,19 +246,22 @@ export class FirstPersonController {
   }
 
   public applyFreeRoamCamera(moveFactor: number): void {
+    const airFactor = this.grounded ? 0 : THREE.MathUtils.clamp(1.0 - this.airTime * 0.8, 0.24, 1.0);
     const bobY =
-      Math.sin(this.walkPhase * 2.0) * 0.022 * moveFactor +
+      Math.sin(this.walkPhase * 2.0) * 0.022 * moveFactor * airFactor +
       Math.sin(this.breathTime * 1.5) * 0.003;
-    const bobSway = Math.cos(this.walkPhase) * 0.012 * moveFactor;
-    const subtleRoll = Math.cos(this.walkPhase) * 0.006 * moveFactor;
+    const bobSway = Math.cos(this.walkPhase) * 0.012 * moveFactor * airFactor;
+    const subtleRoll = Math.cos(this.walkPhase) * 0.006 * moveFactor * airFactor;
+    // A touch of forward lean and stabilising counter-roll while airborne.
+    const fallLean = this.grounded ? 0 : THREE.MathUtils.clamp(-this.verticalVel * 0.0075, -0.03, 0.05);
 
-    this.euler.set(this.pitch, this.yaw, subtleRoll, 'YXZ');
+    this.euler.set(this.pitch + fallLean, this.yaw, subtleRoll, 'YXZ');
     this.camera.quaternion.setFromEuler(this.euler);
 
     this.rightVec.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
     this.camera.position.set(
       this.position.x + this.rightVec.x * bobSway,
-      this.position.y + this.eyeHeight + bobY,
+      this.position.y + this.eyeHeight + bobY - this.landDip,
       this.position.z + this.rightVec.z * bobSway
     );
   }

@@ -14,8 +14,8 @@ export interface BsodScreenState {
 const THROAT_RING_COUNT = 40;
 const THROAT_SHARD_COUNT = 128;
 const THROAT_LINE_COUNT = 180;
-const THROAT_TOOTH_COUNT = 144;
-const RIM_TOOTH_COUNT = 52;
+const THROAT_TOOTH_COUNT = 96;
+const RIM_TOOTH_COUNT = 40;
 const JAW_FLAP_COUNT = 4;
 const SINEW_COUNT = 32;
 const PARASYTE_EYE_COUNT = 11;
@@ -70,11 +70,13 @@ function buildParasyteToothGeometry(): THREE.BufferGeometry {
   const segs = 8;
   const profile: Array<[number, number, number, number]> = [
     // [y (0..1), rx (mesial-distal width), rz (labial-lingual thickness), hookZ (slight anatomical curve)]
-    [0.0, 0.062, 0.050, 0.0],
-    [0.22, 0.056, 0.042, 0.005],
-    [0.54, 0.054, 0.030, 0.016],
-    [0.82, 0.028, 0.014, 0.034],
-    [1.0, 0.004, 0.003, 0.048],
+    // Parasyte teeth are not needles: a wide gingival root necks into a thick, glassy triangular
+    // crown that only sharpens in the final 15%. This keeps a heavy, bone-dense silhouette.
+    [0.0, 0.104, 0.080, 0.0],
+    [0.24, 0.098, 0.066, 0.006],
+    [0.56, 0.082, 0.046, 0.018],
+    [0.84, 0.044, 0.024, 0.036],
+    [1.0, 0.009, 0.006, 0.050],
   ];
   const positions: number[] = [];
   const uvs: number[] = [];
@@ -183,8 +185,8 @@ export class BsodScreen {
 
     // 2. Separate Face Channel Map (R = ':' eyes, G = '(' mouth stroke)
     this.faceCanvas = document.createElement('canvas');
-    this.faceCanvas.width = 512;
-    this.faceCanvas.height = 512;
+    this.faceCanvas.width = 768;
+    this.faceCanvas.height = 768;
     this.renderFaceChannelTexture();
     this.faceTex = new THREE.CanvasTexture(this.faceCanvas);
     this.faceTex.minFilter = THREE.LinearFilter;
@@ -349,11 +351,12 @@ export class BsodScreen {
           float eyeDist = length(eyeRel);
           float eyeCorona = exp(-eyeDist * 3.2) * 0.65 + exp(-abs(eyeDist - 0.21) * 19.0) * 0.95;
           gwSky += vec3(0.58, 0.90, 1.0) * eyeCorona * (0.45 + 0.55 * uSuction);
-          // Tooth-serrated silhouette around the distant exit rim matching GlitchWorld's 48 Sky-Maw teeth!
+          // Distant exit rim is now a smooth, toothless organic aperture that dissolves into the sky
+          // exactly like GlitchWorld's lip collar (no serration, no hard silhouette).
           float rimR = length(radialP);
-          float fangSil = abs(fract((angle * 0.1591549 + 0.5) * 48.0) - 0.5) * 2.0;
-          float toothShadow = smoothstep(0.82 + fangSil * 0.14, 0.98, rimR);
-          gwSky = mix(gwSky, vec3(0.02, 0.04, 0.12), toothShadow * 0.85);
+          float rimSoften = smoothstep(0.62, 1.05, rimR);
+          gwSky = mix(gwSky, vec3(0.10, 0.34, 0.60), rimSoften * 0.42);
+          gwSky += vec3(0.60, 0.90, 1.0) * exp(-abs(rimR - 0.92) * 26.0) * 0.30;
 
           col = mix(col, gwSky, portalMask);
 
@@ -594,7 +597,7 @@ export class BsodScreen {
     // 5e. Deep Esophageal Swallowing Ribs (only emerge deep inside the tunnel during SUCTION so mouth stays 100% single-row!)
     const fangGeo = buildParasyteToothGeometry();
     const tSeed = new Float32Array(THROAT_TOOTH_COUNT * 4);
-    const teethPerRing = 36;
+    const teethPerRing = 32;
     for (let i = 0; i < THROAT_TOOTH_COUNT; i++) {
       const ringIdx = Math.floor(i / teethPerRing); // 0..3 deep esophageal rings
       const slot = i % teethPerRing;
@@ -647,8 +650,9 @@ export class BsodScreen {
           vec2 radialDir = vec2(cos(ang), sin(ang));
           vec2 tangentDir = vec2(-radialDir.y, radialDir.x);
 
-          float h = 1.55 * lenScale * insideVis;
-          float w = 1.45 * insideVis;
+          // Thick esophageal fangs: fewer per ring, far heavier bodies (Parasyte-style).
+          float h = 2.05 * lenScale * insideVis;
+          float w = 1.95 * insideVis;
           vec3 inwardAxis = normalize(vec3(-radialDir, -0.58));
           vec3 sideAxis = vec3(tangentDir, 0.0);
           vec3 depthAxis = normalize(cross(inwardAxis, sideAxis));
@@ -1206,7 +1210,7 @@ export class BsodScreen {
 
               // Wet dark-crimson anatomical Parasyte gum collar around mDist ~ 0.98..1.24 where the single 3D tooth row roots!
               float gumBand = smoothstep(1.26, 1.01, mDist) * smoothstep(0.94, 1.01, mDist) * tearOpen;
-              float gumSocket = 0.5 + 0.5 * cos(ang01 * 52.0 * 6.2831853);
+              float gumSocket = 0.5 + 0.5 * cos(ang01 * 40.0 * 6.2831853);
               vec3 gumCol = mix(vec3(0.20, 0.008, 0.032), vec3(0.05, 0.004, 0.018), gumSocket * 0.72);
               col = mix(col, gumCol, clamp(gumBand * 0.95, 0.0, 0.96));
               col = mix(col, vec3(0.012, 0.002, 0.008), clamp(mInner * 0.92 * tearOpen, 0.0, 1.0));
@@ -1367,8 +1371,14 @@ export class BsodScreen {
 
           float isIncisor = 1.0 - step(0.42, morph);
           float grow = smoothstep(0.03, 0.22, clamp(uJawOpen * 1.35 + uMadness * 0.25, 0.0, 1.0));
-          float wScale = mix(0.68, 1.05, isIncisor) * faceScale * (0.55 + 0.45 * grow) * step(0.015, grow);
-          float hScale = mix(0.54 + morph * 0.36, 0.38 + morph * 0.16, isIncisor) * faceScale * grow;
+          // Count was cut from 52 to 40 and every crown gained real mesial-distal bulk, so the mouth
+          // now reads as a few dozen bone-dense Parasyte blades instead of a comb of thin spines.
+          float wScale = mix(0.72, 1.02, isIncisor) * faceScale * (0.55 + 0.45 * grow) * step(0.015, grow);
+          float hScale = mix(0.74 + morph * 0.50, 0.50 + morph * 0.24, isIncisor) * faceScale * grow;
+          // A handful of oversized marquee fangs among the rank and file.
+          float bigFang = smoothstep(0.78, 1.0, morph) * 0.35;
+          hScale *= 1.0 + bigFang;
+          wScale *= 1.0 + bigFang * 0.45;
 
           // Held WIDE OPEN in a menacing predatory ring waiting to pull you down its throat (ZERO pakupaku closing!):
           float microTwitch = sin(uTime * 19.0 + phase * 6.283) * 0.010 * uMadness;
@@ -1980,7 +1990,9 @@ export class BsodScreen {
 
   private renderFaceChannelTexture(): void {
     const ctx = this.faceCanvas.getContext('2d')!;
-    ctx.setTransform(0.5, 0, 0, 0.5, 0, 0);
+    // 768px face channel drawn from a 1024-unit design space: crisper glyph coverage for the
+    // clickable ':(', which is what the player stares at from 0.66m during inspection.
+    ctx.setTransform(0.75, 0, 0, 0.75, 0, 0);
     const W = 1024;
     ctx.clearRect(0, 0, W, W);
     ctx.fillStyle = '#000000';
@@ -2164,10 +2176,12 @@ export class BsodScreen {
 
   private bakeStageTexture(stage: number, aftermath: boolean): THREE.CanvasTexture {
     const canvas = document.createElement('canvas');
-    canvas.width = 1024;
-    canvas.height = 537;
+    // 1280x672 native with a 0.625 transform keeps the authored 2048x1074 layout intact while
+    // gaining 1.56x the texels, so the BSOD body text stays legible during the close-up.
+    canvas.width = 1280;
+    canvas.height = 672;
     const ctx = canvas.getContext('2d')!;
-    ctx.setTransform(0.5, 0, 0, 0.5, 0, 0);
+    ctx.setTransform(0.625, 0, 0, 0.625, 0, 0);
     const W = 2048;
     const H = 1074;
 
