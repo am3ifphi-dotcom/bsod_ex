@@ -263,7 +263,8 @@ export class PostFX {
             vec3 soft = nb * 0.25;
             // Only push local contrast where the neighbourhood is not already clipping.
             vec3 detail = col - soft;
-            float protect = smoothstep(0.0, 0.08, col.r + col.g + col.b) * smoothstep(3.0, 2.2, col.r + col.g + col.b);
+            float lumaSum = col.r + col.g + col.b;
+            float protect = smoothstep(0.0, 0.08, lumaSum) * (1.0 - smoothstep(2.2, 3.0, lumaSum));
             col = clamp(col + detail * (0.55 + 0.85 * uSharpen) * protect, 0.0, 2.4);
           }
 
