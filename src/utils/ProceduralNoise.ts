@@ -236,8 +236,10 @@ export function toAtmosphericMaterial(
     if (hit) return hit;
   }
 
-  if (std.map) std.map.anisotropy = 1;
-  if (std.emissiveMap) std.emissiveMap.anisotropy = 1;
+  // Anisotropic filtering: the bedroom floor and walls are viewed at very grazing angles, and
+  // with anisotropy 1 they smeared into mush. 8x keeps them readable at a negligible cost.
+  if (std.map) std.map.anisotropy = 8;
+  if (std.emissiveMap) std.emissiveMap.anisotropy = 8;
 
   const lam = new THREE.MeshLambertMaterial({
     name: std.name,

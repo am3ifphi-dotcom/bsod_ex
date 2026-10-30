@@ -105,6 +105,123 @@ function buildParasyteToothGeometry(): THREE.BufferGeometry {
   return geo;
 }
 
+/**
+ * Heavy Parasyte ESOPHAGEAL GRINDER fang.
+ *
+ * The slim monitor-mouth teeth above read as a delicate dental arch, which is exactly wrong
+ * for the throat that actually swallows the player: a Parasyte maw is a blunt, interlocking
+ * meat grinder of broad hooked blades. This geometry is deliberately stubby and wide:
+ *
+ *   - a flared, fleshy ROOT collar (rx 0.168) so the fang visibly melts out of the throat wall
+ *     instead of hovering next to it,
+ *   - a broad, slab-like BODY that keeps most of its mass down to 70% of the crown,
+ *   - a short, backward-hooked CHISEL tip that sweeps along the swallowing direction.
+ *
+ * The profile is authored in the same 1-unit-tall space the shader scales, so the throat can
+ * size each fang to the local wall radius and keep the row perfectly packed.
+ */
+function buildParasyteThroatFangGeometry(): THREE.BufferGeometry {
+  const rings = 8;
+  const segs = 12;
+  const profile: Array<[number, number, number, number]> = [
+    // [y (0..1), rx (half-width), rz (half-thickness), hookZ (backward sweep)]
+    [0.00, 0.168, 0.132, 0.000],
+    [0.12, 0.172, 0.134, 0.008],
+    [0.28, 0.164, 0.122, 0.026],
+    [0.46, 0.146, 0.104, 0.052],
+    [0.63, 0.118, 0.080, 0.082],
+    [0.78, 0.084, 0.053, 0.112],
+    [0.91, 0.046, 0.026, 0.136],
+    [1.00, 0.009, 0.007, 0.152],
+  ];
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+  for (let r = 0; r < rings; r++) {
+    const [ty, rx, rz, hz] = profile[r];
+    // Slightly squared-off cross-section (super-ellipse-ish) so the blades read as flat
+    // meat-grinder plates rather than round spikes.
+    for (let s = 0; s <= segs; s++) {
+      const a = (s / segs) * Math.PI * 2;
+      const ca = Math.cos(a);
+      const sa = Math.sin(a);
+      const shapedX = Math.sign(ca) * Math.pow(Math.abs(ca), 0.72);
+      const shapedZ = Math.sign(sa) * Math.pow(Math.abs(sa), 0.86);
+      positions.push(shapedX * rx, ty * 0.30, shapedZ * rz + hz);
+      uvs.push(s / segs, ty);
+    }
+  }
+  const stride = segs + 1;
+  for (let r = 0; r < rings - 1; r++) {
+    for (let s = 0; s < segs; s++) {
+      const a = r * stride + s;
+      const b = a + 1;
+      const c = a + stride;
+      const d = c + 1;
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
+ * Builds the continuous fleshy GUM RIDGES that the deep-throat fangs erupt from.
+ *
+ * One ridge per fang row: a swollen welt of tissue that runs all the way around the gullet
+ * wall. The cross-section is a flattened ellipse (wide along the tunnel, shallow inward) and
+ * the inward bulge is modulated by a 36-lobe function so every tooth position gets its own
+ * mound of flesh - exactly like the gum ridge in a real maw.
+ *
+ * All four ridges are baked into a single geometry (one draw call). Each vertex carries
+ * `aRidge = (theta, crossPhase, ringIndex)`; the vertex shader places it on the wall.
+ */
+function buildParasyteGumRidgeGeometry(): THREE.BufferGeometry {
+  const ANGS = 144; // 4 angular samples per tooth slot (36 teeth/ring)
+  const CROSS = 12; // samples around the welt cross-section
+  const RING_COUNT = 4;
+  const positions: number[] = [];
+  const ridgeAttr: number[] = [];
+  const normals: number[] = [];
+  const indices: number[] = [];
+
+  for (let ring = 0; ring < RING_COUNT; ring++) {
+    const base = ring * (ANGS + 1) * CROSS;
+    for (let a = 0; a <= ANGS; a++) {
+      const theta = (a / ANGS) * Math.PI * 2;
+      for (let c = 0; c < CROSS; c++) {
+        const crossPhase = (c / CROSS) * Math.PI * 2;
+        // Placeholder position: the real placement happens in the vertex shader, but Three.js
+        // needs a non-degenerate attribute for the frustum/vertex-count bookkeeping.
+        positions.push(Math.cos(theta), Math.sin(theta), 0);
+        ridgeAttr.push(theta, crossPhase, ring);
+        normals.push(0, 0, 1);
+      }
+    }
+    for (let a = 0; a < ANGS; a++) {
+      for (let c = 0; c < CROSS; c++) {
+        const cNext = (c + 1) % CROSS;
+        const v00 = base + a * CROSS + c;
+        const v01 = base + a * CROSS + cNext;
+        const v10 = base + (a + 1) * CROSS + c;
+        const v11 = base + (a + 1) * CROSS + cNext;
+        indices.push(v00, v10, v01, v01, v10, v11);
+      }
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  geo.setAttribute('aRidge', new THREE.Float32BufferAttribute(ridgeAttr, 3));
+  geo.setIndex(indices);
+  return geo;
+}
+
 export class BsodScreen {
   public readonly root = new THREE.Group();
   public readonly hitboxMesh: THREE.Mesh;
@@ -136,6 +253,8 @@ export class BsodScreen {
   private readonly throatLineMat: THREE.ShaderMaterial;
   private readonly throatTeeth: THREE.InstancedMesh;
   private readonly throatToothMat: THREE.ShaderMaterial;
+  private readonly throatRidge: THREE.Mesh;
+  private readonly throatRidgeMat: THREE.ShaderMaterial;
   private readonly throatMaterials: THREE.Material[] = [];
 
   // True 3D Parasyte-style Biomechanical Jaw Rig (protruding +Z out of the LCD glass!)
@@ -315,14 +434,23 @@ export class BsodScreen {
           vec3 sleeveMid = vec3(0.006, 0.12, 0.44);
 
           float ribFold = pow(0.5 + 0.5 * sin(vTubePos.z * 1.45 - uTime * 5.5 + nSample.r * 2.4), 3.0);
-          float horrorZone = smoothstep(0.54, 0.04, depthFactor);
-          float sleeveZone = smoothstep(0.38, 0.72, depthFactor);
+          float horrorZone = smoothstep(0.62, 0.02, depthFactor);
+          float sleeveZone = smoothstep(0.30, 0.80, depthFactor);
 
           // Near half: wet crimson Parasyte esophagus -> Deep half: morphs smoothly into GlitchWorld's cerulean vortex sleeve!
           vec3 sleeveBase = mix(sleeveDeep, sleeveMid, smoothstep(0.55, 0.92, depthFactor));
-          vec3 col = mix(darkGullet, sleeveBase, sleeveZone);
-          col += vec3(0.42, 0.015, 0.06) * ribFold * horrorZone;
-          col += vec3(0.76, 0.05, 0.14) * pow(nSample.a, 2.8) * horrorZone * 0.92;
+          // === SEAMLESS FLESH -> SLEEVE CROSS-FADE ===
+          // The crimson gullet does not simply switch to blue: the flesh bleeds into the sleeve
+          // and the veins keep their shape while losing their red. That continuous ramp is
+          // what makes the deep tunnel read as one continuous passage rather than two zones
+          // spliced together.
+          vec3 fleshBase = vec3(0.085, 0.006, 0.028);
+          vec3 col = mix(fleshBase, sleeveBase, sleeveZone);
+          // Veins desaturate towards violet as the sleeve takes over.
+          col += mix(vec3(0.42, 0.015, 0.06), vec3(0.20, 0.06, 0.30), sleeveZone) * ribFold * horrorZone;
+          col += mix(vec3(0.76, 0.05, 0.14), vec3(0.36, 0.10, 0.52), sleeveZone) * pow(nSample.a, 2.8) * horrorZone * 0.92;
+          // A faint warm bloom lingering in the transition band hides the last of the ramp.
+          col += vec3(0.16, 0.03, 0.14) * (1.0 - abs(sleeveZone - 0.5) * 2.0) * 0.55;
 
           // Glaring watching slit-eyes embedded in the fleshy gullet walls (near half)
           vec2 eyeGrid = fract(vec2(angle * 2.546 + 0.25, -vTubePos.z * 0.14) + vec2(0.0, sin(angle * 3.0) * 0.2));
@@ -349,11 +477,14 @@ export class BsodScreen {
           float eyeDist = length(eyeRel);
           float eyeCorona = exp(-eyeDist * 3.2) * 0.65 + exp(-abs(eyeDist - 0.21) * 19.0) * 0.95;
           gwSky += vec3(0.58, 0.90, 1.0) * eyeCorona * (0.45 + 0.55 * uSuction);
-          // Tooth-serrated silhouette around the distant exit rim matching GlitchWorld's 48 Sky-Maw teeth!
+          // The GlitchWorld exit carries NO teeth, so the far-end vista must not draw a serrated
+          // silhouette either - both ends now show the same clean, softly-lit aperture.
+          // A feathered rim glow instead of a hard ring keeps the junction reading as continuous.
           float rimR = length(radialP);
-          float fangSil = abs(fract((angle * 0.1591549 + 0.5) * 48.0) - 0.5) * 2.0;
-          float toothShadow = smoothstep(0.82 + fangSil * 0.14, 0.98, rimR);
-          gwSky = mix(gwSky, vec3(0.02, 0.04, 0.12), toothShadow * 0.85);
+          float rimHalo = exp(-abs(rimR - 0.86) * 7.0);
+          gwSky += vec3(0.34, 0.72, 1.0) * rimHalo * 0.42;
+          float rimShade = smoothstep(0.99, 0.80, rimR);
+          gwSky *= 0.72 + 0.28 * rimShade;
 
           col = mix(col, gwSky, portalMask);
 
@@ -592,7 +723,10 @@ export class BsodScreen {
     this.throatMaterials.push(this.throatLineMat);
 
     // 5e. Deep Esophageal Swallowing Ribs (only emerge deep inside the tunnel during SUCTION so mouth stays 100% single-row!)
-    const fangGeo = buildParasyteToothGeometry();
+    //     Uses the HEAVY Parasyte grinder-fang geometry (broad, hooked, fleshy-rooted) instead of the
+    //     slim monitor-mouth tooth, and roots every fang INSIDE the tunnel wall so the row reads as
+    //     a continuous grinder rather than a ring of spikes floating off the surface.
+    const fangGeo = buildParasyteThroatFangGeometry();
     const tSeed = new Float32Array(THROAT_TOOTH_COUNT * 4);
     const teethPerRing = 36;
     for (let i = 0; i < THROAT_TOOTH_COUNT; i++) {
@@ -632,6 +766,7 @@ export class BsodScreen {
         varying vec3 vNrm;
         varying vec3 vViewPos;
         varying float vRing;
+        varying float vRoot;
         void main() {
           float ringIdx = aTooth4.x;
           float ang = aTooth4.y;
@@ -641,23 +776,62 @@ export class BsodScreen {
           // Hidden during INSPECT_PC (uSuction == 0) so the mouth itself ONLY has its clean single row of teeth!
           float insideVis = smoothstep(0.05, 0.22, uSuction);
           float ringZ = -14.0 - ringIdx * 8.5;
-          float clampWave = sin(-ringZ * 0.35 - uTime * 8.0) * 0.22;
-          float rad = max(1.35, 2.35 + ringIdx * 0.28 + clampWave + sin(uTime * 16.0 + phase) * 0.06);
+
+          // === GLUE THE FANG ROW TO THE TUNNEL WALL ===
+          // The throat tube is a CylinderGeometry(1.42, 5.6, 116) laid along -Z, so the wall radius
+          // at a given depth is linear: r(z) = mix(1.42, 5.6, (-z - 0.02) / 116.0).
+          // Deriving it here (instead of using a hardcoded radius) is what removes the visible seam
+          // where the tooth row used to sit ~0.4m OUTSIDE the gullet wall and read as a detached
+          // ring of spikes rather than teeth growing out of the flesh.
+          float wallT = clamp((-ringZ - 0.02) / 116.0, 0.0, 1.0);
+          float wallR = mix(1.42, 5.6, wallT);
+
+          // Replicate the tube's own deformation so the fangs ride the wall exactly:
+          //  - peristaltic radial contraction
+          //  - the lateral drift/twist of the gullet
+          float straighten = 1.0 - smoothstep(0.50, 0.92, uSuction);
+          float peristalsis = 1.0 - 0.14 * sin(-ringZ * 0.48 - uTime * 7.5) * smoothstep(-36.0, -1.0, ringZ);
+          float twist = ringZ * 0.042 * (0.4 + uMadness) + uTime * 1.35;
+          vec2 wallDrift = vec2(
+            sin(twist) * 0.28 * smoothstep(-1.0, -25.0, ringZ) * straighten,
+            cos(twist * 0.9) * 0.22 * smoothstep(-1.0, -25.0, ringZ) * straighten
+          );
 
           vec2 radialDir = vec2(cos(ang), sin(ang));
           vec2 tangentDir = vec2(-radialDir.y, radialDir.x);
 
-          float h = 1.55 * lenScale * insideVis;
-          float w = 1.45 * insideVis;
+          // Proportional sizing. The ring holds 36 fangs, so the arc spacing at the wall is
+          // 2*PI*wallR/36. The girth is scaled to fill ~86% of that slot, so the row reads as a
+          // PACKED meat-grinder instead of a sparse row of needles, and the length scales with
+          // the local wall radius. The result is a ~2:1 length:width blade - blunt and meaty,
+          // which is what a Parasyte maw actually looks like.
+          float spacing = 6.2831853 * wallR / 36.0;
+          float w = spacing * 0.86 / 0.344 * insideVis;
+          float h = wallR * lenScale * insideVis;
+
+          // The gum ridge's crown at a tooth socket sits socketDepth inside the wall. The fang
+          // root is placed just BELOW that crown so the socket's flesh wraps the base of the
+          // blade and the fang erupts from it - no hard intersection line is ever visible.
+          // (socketDepth matches the ridge shader exactly: w * (0.16 + 0.26) plus the 0.12
+          //  centre bias, so the two layers line up to the millimetre.)
+          float socketDepth = w * (0.16 + 0.26) + w * 0.12;
+          float rad = wallR * peristalsis - socketDepth * 0.62;
+
           vec3 inwardAxis = normalize(vec3(-radialDir, -0.58));
           vec3 sideAxis = vec3(tangentDir, 0.0);
           vec3 depthAxis = normalize(cross(inwardAxis, sideAxis));
 
-          vec3 rootPos = vec3(radialDir * rad, ringZ);
+          // === GUM COLLAR FLARE (the seamless junction) ===
+          // The root of each fang swells slightly wider as it meets the flesh, so the blade
+          // thickens where it erupts instead of ending in a razor-thin intersection line.
+          float rootFlare = (1.0 - smoothstep(0.0, 0.22, uv.y)) * 0.09 * w;
+
+          vec3 rootPos = vec3(radialDir * rad + wallDrift, ringZ);
           vec3 worldLocal = rootPos
                           + sideAxis * (position.x * w)
                           + inwardAxis * (position.y * h)
-                          + depthAxis * (position.z * w);
+                          + depthAxis * (position.z * w)
+                          + vec3(radialDir, 0.0) * rootFlare;
           vec3 localNorm = normalize(
             sideAxis * normal.x + inwardAxis * normal.y + depthAxis * normal.z
           );
@@ -666,6 +840,7 @@ export class BsodScreen {
           vViewPos = -mv.xyz;
           vNrm = normalize(normalMatrix * localNorm);
           vTip = uv.y;
+          vRoot = length(position.xy);
           vRing = ringIdx;
           gl_Position = projectionMatrix * mv;
         }
@@ -675,23 +850,34 @@ export class BsodScreen {
         varying vec3 vNrm;
         varying vec3 vViewPos;
         varying float vRing;
+        varying float vRoot;
         void main() {
           vec3 N = normalize(vNrm);
           vec3 V = normalize(vViewPos);
           vec3 L1 = normalize(vec3(0.25, 0.55, 0.80));
           vec3 H1 = normalize(L1 + V);
           float diff = 0.28 + 0.72 * max(dot(N, L1), 0.0);
-          float spec = pow(max(dot(N, H1), 0.0), 48.0);
-          float rim = pow(1.0 - abs(dot(N, V)), 2.5);
+          float spec = pow(max(dot(N, H1), 0.0), 38.0);
+          float rim = pow(1.0 - abs(dot(N, V)), 2.2);
 
-          vec3 gumRoot = vec3(0.16, 0.012, 0.045);
-          vec3 boneMid = vec3(0.86, 0.83, 0.76);
-          vec3 razorTip = vec3(0.97, 0.96, 0.93);
-          vec3 col = mix(gumRoot, boneMid, smoothstep(0.0, 0.34, vTip));
-          col = mix(col, razorTip, smoothstep(0.34, 0.92, vTip));
-          col *= diff * (1.0 - vRing * 0.12);
-          col += vec3(0.95, 0.98, 1.0) * spec * 1.15;
-          col += vec3(0.22, 0.72, 1.0) * rim * 0.48;
+          // Fleshy Parasyte gum collar -> thick dentine body -> hooked bone crown.
+          vec3 gumRoot = vec3(0.19, 0.014, 0.048);
+          vec3 gumMid  = vec3(0.42, 0.045, 0.085);
+          vec3 boneMid = vec3(0.80, 0.76, 0.68);
+          vec3 razorTip = vec3(0.96, 0.95, 0.92);
+          vec3 col = mix(gumRoot, gumMid, smoothstep(0.0, 0.22, vTip));
+          col = mix(col, boneMid, smoothstep(0.18, 0.52, vTip));
+          col = mix(col, razorTip, smoothstep(0.55, 0.95, vTip));
+
+          // Mottled enamel mottling + wet slime sheen so the blunt blades read as organic tissue.
+          float mottle = sin(vRoot * 62.0 + vTip * 9.0) * 0.5 + 0.5;
+          col *= 0.90 + 0.16 * mottle;
+          float wet = pow(max(dot(N, V), 0.0), 2.0);
+
+          col *= diff * (1.0 - vRing * 0.10);
+          col += vec3(0.95, 0.98, 1.0) * spec * 1.05;
+          col += vec3(0.22, 0.72, 1.0) * rim * 0.42;
+          col += vec3(0.85, 0.20, 0.26) * wet * 0.10 * (1.0 - smoothstep(0.1, 0.45, vTip));
           gl_FragColor = vec4(col, 1.0);
         }
       `,
@@ -701,6 +887,145 @@ export class BsodScreen {
     this.throatTeeth.frustumCulled = false;
     this.throatGroup.add(this.throatTeeth);
     this.throatMaterials.push(this.throatToothMat);
+
+    // 5f. Fleshy GUM RIDGES - a continuous swollen welt of tissue running around the gullet at
+    //     every fang row. The ridge's inward bulge is modulated by a 36-lobe function so each
+    //     tooth position gets its own mound of flesh, and the ridge's back is buried INSIDE the
+    //     wall. This is what turns "a cone intersecting a cylinder" into "a tooth erupting from
+    //     living flesh": the junction becomes a soft organic swell with no hard edge anywhere.
+    const ridgeGeo = buildParasyteGumRidgeGeometry();
+
+    this.throatRidgeMat = new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
+      depthWrite: true,
+      depthFunc: THREE.LessEqualDepth,
+      stencilWrite: true,
+      stencilWriteMask: 0,
+      stencilRef: 1,
+      stencilFunc: THREE.EqualStencilFunc,
+      uniforms: {
+        uTime: { value: 0 },
+        uMadness: { value: 0 },
+        uSuction: { value: 0 },
+      },
+      vertexShader: /* glsl */ `
+        attribute vec3 aRidge;
+        uniform float uTime;
+        uniform float uMadness;
+        uniform float uSuction;
+        varying vec3 vNrm;
+        varying vec3 vViewPos;
+        varying float vT;
+        varying float vLump;
+        varying float vRing;
+        void main() {
+          float theta = aRidge.x;
+          float crossPhase = aRidge.y;
+          float ringIdx = aRidge.z;
+
+          float insideVis = smoothstep(0.05, 0.22, uSuction);
+          float ringZ = -14.0 - ringIdx * 8.5;
+
+          // Same wall derivation + deformation as the fangs, so the ridge rides the gullet exactly.
+          float wallT = clamp((-ringZ - 0.02) / 116.0, 0.0, 1.0);
+          float wallR = mix(1.42, 5.6, wallT);
+          float straighten = 1.0 - smoothstep(0.50, 0.92, uSuction);
+          float peristalsis = 1.0 - 0.14 * sin(-ringZ * 0.48 - uTime * 7.5) * smoothstep(-36.0, -1.0, ringZ);
+          float twist = ringZ * 0.042 * (0.4 + uMadness) + uTime * 1.35;
+          vec2 wallDrift = vec2(
+            sin(twist) * 0.28 * smoothstep(-1.0, -25.0, ringZ) * straighten,
+            cos(twist * 0.9) * 0.22 * smoothstep(-1.0, -25.0, ringZ) * straighten
+          );
+
+          vec2 radialDir = vec2(cos(theta), sin(theta));
+
+          // One mound of flesh per tooth slot (36 per ring, staggered exactly like the fangs,
+          // so every fang erupts from the crown of its own socket).
+          float stagger = mod(ringIdx, 2.0) * 0.5;
+          float slotAngle = (theta / 6.2831853) * 36.0 - stagger;
+          float slotDist = abs(fract(slotAngle + 0.5) - 0.5) * 2.0; // 0 at a slot centre, 1 between
+          // Soft mound: full height at the slot centre, gone by the halfway point.
+          float mound = 1.0 - smoothstep(0.0, 0.92, slotDist);
+          // Low-frequency organic wobble so the ridge is never a machined torus.
+          float wob = 0.5 + 0.5 * sin(theta * 5.0 + ringIdx * 1.7 + uTime * 0.35);
+
+          float spacing = 6.2831853 * wallR / 36.0;
+          float w = spacing * 0.86 / 0.344 * insideVis;
+
+          // Cross-section of the welt: an ellipse in the (radius, z) plane centred ON the wall
+          // surface, so its outer half is buried in the gullet and only the inward bulge shows.
+          //   depth    = how far it swells into the gullet (deepest at a tooth socket)
+          //   halfSpan = how far the ribbon stretches along the tunnel
+          float depth = w * (0.16 + 0.26 * mound);
+          float halfSpan = w * (0.85 + 0.08 * wob);
+
+          // The cross-section angle: 0 = crown (deepest inward), PI = buried in the wall.
+          float cs = cos(crossPhase);
+          float sn = sin(crossPhase);
+          // The ellipse centre is pushed slightly INSIDE the wall so its equator never lies
+          // exactly on the wall surface - that guarantees no coincident-surface z-fighting
+          // along the ridge, while the outer half still buries itself in the flesh.
+          float radialOff = -depth * cs - depth * 0.12;
+          float zOff = halfSpan * sn;                    // along the tunnel axis
+
+          float rad = wallR * peristalsis + radialOff;
+          vec3 worldLocal = vec3(radialDir * rad + wallDrift, ringZ + zOff);
+
+          // Analytic normal of the elliptical cross-section, pointing out of the welt body.
+          vec3 inwardAxis = normalize(vec3(-radialDir, -0.58));
+          vec3 localNorm = normalize(
+            vec3(radialDir, 0.0) * (-cs)
+            + vec3(0.0, 0.0, 1.0) * (sn * depth / max(halfSpan, 1e-4))
+          );
+          // Blend in the mound gradient so each tooth socket bulges out of the ridge.
+          localNorm = normalize(localNorm + inwardAxis * mound * 0.45);
+
+          vec4 mv = modelViewMatrix * vec4(worldLocal, 1.0);
+          vViewPos = -mv.xyz;
+          vNrm = normalize(normalMatrix * localNorm);
+          vT = 0.5 + 0.5 * cs;   // 0 at the buried back, 1 at the mound crown
+          vLump = mound;
+          vRing = ringIdx;
+          gl_Position = projectionMatrix * mv;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec3 vNrm;
+        varying vec3 vViewPos;
+        varying float vT;
+        varying float vLump;
+        varying float vRing;
+        void main() {
+          vec3 N = normalize(vNrm);
+          vec3 V = normalize(vViewPos);
+          vec3 L1 = normalize(vec3(0.20, 0.48, 0.85));
+          float diff = 0.22 + 0.78 * max(dot(N, L1), 0.0);
+          float spec = pow(max(dot(N, normalize(L1 + V)), 0.0), 20.0);
+          float rim = pow(1.0 - abs(dot(N, V)), 2.2);
+
+          // Wet crimson flesh: dark where it sinks into the gullet, warming to gum-pink on the
+          // crown of each tooth socket.
+          vec3 deep = vec3(0.085, 0.007, 0.026);
+          vec3 flesh = vec3(0.38, 0.030, 0.068);
+          vec3 crown = vec3(0.58, 0.082, 0.125);
+          vec3 col = mix(deep, flesh, smoothstep(0.0, 0.50, vT));
+          col = mix(col, crown, smoothstep(0.55, 1.0, vT) * (0.45 + 0.55 * vLump));
+
+          // Capillary mottling + a wet sheen so the flesh reads as alive, not plastic.
+          float mottle = sin(vT * 24.0 + vRing * 2.1) * 0.5 + 0.5;
+          col *= 0.88 + 0.20 * mottle;
+          col *= diff;
+          col += vec3(1.0, 0.90, 0.86) * spec * 0.30;
+          col += vec3(0.24, 0.72, 1.0) * rim * 0.26;
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `,
+    });
+    this.throatRidge = new THREE.Mesh(ridgeGeo, this.throatRidgeMat);
+    this.throatRidge.renderOrder = 4;
+    this.throatRidge.frustumCulled = false;
+    this.throatGroup.add(this.throatRidge);
+    this.throatMaterials.push(this.throatRidgeMat);
 
     // 6. Subdivided 44x26 BSOD LCD Surface Shader (100% NaN-safe, Multi-Stage Metamorphosis!)
     const screenGeo = new THREE.PlaneGeometry(BsodScreen.LOCAL_W, BsodScreen.LOCAL_H, 44, 26);
@@ -2608,6 +2933,10 @@ export class BsodScreen {
       this.throatToothMat.uniforms.uJawOpen.value = state.jawOpen;
       this.throatToothMat.uniforms.uSuction.value = state.suctionProgress;
       this.throatToothMat.uniforms.uClickPulse.value = clickPulse;
+
+      this.throatRidgeMat.uniforms.uTime.value = elapsed;
+      this.throatRidgeMat.uniforms.uMadness.value = state.madness;
+      this.throatRidgeMat.uniforms.uSuction.value = state.suctionProgress;
 
       if (this.glassShards.visible) {
         const gu = this.glassShardMat.uniforms;

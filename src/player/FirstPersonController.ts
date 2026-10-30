@@ -28,6 +28,13 @@ export class FirstPersonController {
 
   private readonly keys = new Set<string>();
   private walkPhase = 0;
+  // --- Jump state -------------------------------------------------------------
+  private verticalVelocity = 0;
+  private grounded = true;
+  private jumpQueued = false;
+  private lastGroundY = 0;
+  private readonly jumpHeight = 1.05;
+  private readonly gravity = 18.5;
   private lastStepHalfCycle = 0;
   private breathTime = 0;
 
@@ -59,14 +66,27 @@ export class FirstPersonController {
     this.keys.clear();
     this.velocity.set(0, 0, 0);
     this.lastStepHalfCycle = Math.floor(this.walkPhase / Math.PI);
+    this.verticalVelocity = 0;
+    this.jumpQueued = false;
+    this.grounded = true;
+    this.lastGroundY = this.position.y;
   }
 
   public onKeyDown(code: string): void {
     this.keys.add(code);
+    // Edge-triggered jump: Space queues a single jump, it does not bunny-hop while held.
+    if (code === 'Space') {
+      this.jumpQueued = true;
+    }
   }
 
   public onKeyUp(code: string): void {
     this.keys.delete(code);
+  }
+
+  /** True while the player is in the air (not standing on the ground). */
+  public get isAirborne(): boolean {
+    return !this.grounded;
   }
 
   public applyLookDelta(dx: number, dy: number, inspectMode: boolean): void {
@@ -162,7 +182,43 @@ export class FirstPersonController {
     const actualMoveSpeed = Math.hypot(this.position.x - prevX, this.position.z - prevZ) / Math.max(dt, 1e-4);
 
     const targetGroundY = groundYFn(this.position.x, this.position.z);
-    this.position.y = THREE.MathUtils.lerp(this.position.y, targetGroundY, Math.min(1, dt * 18));
+
+    // ---------------------------------------------------------------- JUMP / GRAVITY
+    // The ground contact used to be a plain exponential snap-to-floor, which cannot express
+    // "leaving the ground". It is replaced by a proper ballistic integrator: gravity pulls the
+    // player down, a queued jump launches them, and landing re-clamps to the floor surface.
+    if (inputEnabled && this.jumpQueued && this.grounded) {
+      // Impulse chosen so a full-hold jump reaches roughly `jumpHeight` metres.
+      this.verticalVelocity = Math.sqrt(2 * this.gravity * this.jumpHeight);
+      this.grounded = false;
+    }
+    this.jumpQueued = false;
+
+    if (!this.grounded) {
+      this.verticalVelocity -= this.gravity * dt;
+      this.position.y += this.verticalVelocity * dt;
+      if (this.position.y <= targetGroundY) {
+        this.position.y = targetGroundY;
+        this.verticalVelocity = 0;
+        this.grounded = true;
+      }
+    } else {
+      // Grounded: follow the ground surface, but stay glued to it so slopes do not launch the player.
+      this.position.y = THREE.MathUtils.lerp(this.position.y, targetGroundY, Math.min(1, dt * 18));
+      // If the floor rises above the player (walking up a step) we must not be stuck below it.
+      if (targetGroundY > this.position.y + 0.02) {
+        this.position.y = targetGroundY;
+      }
+      // Walking off a ledge: the ground drops away sharply between this frame and the last one.
+      // The player then leaves the ground and falls under gravity instead of silently snapping
+      // down to the new surface. Comparing against the PREVIOUS ground height (rather than an
+      // absolute threshold) means gently sloping terrain never triggers a false fall.
+      if (this.lastGroundY - targetGroundY > 0.40) {
+        this.grounded = false;
+        this.verticalVelocity = 0;
+      }
+    }
+    this.lastGroundY = targetGroundY;
 
     const speed = Math.hypot(this.velocity.x, this.velocity.z);
     if (inputEnabled && wishLen > 1e-3 && actualMoveSpeed > 0.35 && speed > 0.45) {

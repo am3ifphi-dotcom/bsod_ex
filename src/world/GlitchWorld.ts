@@ -61,7 +61,6 @@ export class GlitchWorld {
   private skyRiftMat!: THREE.ShaderMaterial;
   private skyTunnelMat!: THREE.ShaderMaterial;
   private skyExitStreamMat!: THREE.ShaderMaterial;
-  private skyFangMat!: THREE.ShaderMaterial;
   private causewayBusMat!: THREE.ShaderMaterial;
   private floatingShardMat!: THREE.ShaderMaterial;
   private landingShockMat!: THREE.ShaderMaterial;
@@ -572,6 +571,32 @@ export class GlitchWorld {
         uniform vec3 uFogColor;
         uniform float uFogDensity;
 
+        // ---------------------------------------------------------------- PARALLAX RELIEF MAPPING
+        // The old build flattened the basalt relief into a screen-space derivative trick, so the
+        // ground looked like the SAME decal no matter where you stood. This marches the view ray
+        // through the displacement height field, so the surface genuinely gains depth: walk past a
+        // ridge and it slides across the texture exactly as real relief would.
+        // Returns the UV offset; the caller applies it to every subsequent lookup.
+        vec2 parallaxOffset(vec2 baseUv, vec3 viewDirW, vec3 nrmW, float scale) {
+          vec3 vDir = normalize(viewDirW);
+          // Project the view ray onto the surface plane (the terrain is a heightfield in XZ).
+          float ndv = max(dot(vDir, nrmW), 0.12);
+          vec2 dir = vDir.xz / ndv;
+          float len = length(dir);
+          if (len < 1e-4) return vec2(0.0);
+          dir /= len;
+          const int STEPS = 6;
+          vec2 offs = vec2(0.0);
+          vec2 stepUv = dir * (scale / float(STEPS));
+          float dz = 1.0 / float(STEPS);
+          for (int i = 0; i < STEPS; i++) {
+            float h = texture2D(uDispMap, baseUv + offs).r;
+            float travel = (1.0 - h) * dz;
+            offs += stepUv * travel;
+          }
+          return offs;
+        }
+
         void main() {
           if (uCollapseActive > 0.5) {
             float rPatch = length(vWorldPos.xz - uCollapseCenter.xz);
@@ -580,28 +605,60 @@ export class GlitchWorld {
             }
           }
 
-          // Only 3 texture fetches total (down from 7!) using screen-space derivatives for crisp basalt relief!
-          vec3 conc = texture2D(uConcreteMap, vWorldPos.xz * 0.16).rgb;
-          float disp = texture2D(uDispMap, vWorldPos.xz * 0.12).r;
-          vec4 macroN = texture2D(uNoiseTex, vWorldPos.xz * 0.045);
+          vec3 baseN = normalize(vNormal);
+          vec3 viewDir = normalize(cameraPosition - vWorldPos);
+          float camDist = length(cameraPosition - vWorldPos);
+
+          // ---- PARALLAX: only worth paying for near the camera; far away it is invisible.
+          vec2 terrainUv = vWorldPos.xz * 0.16;
+          float parallaxFade = 1.0 - smoothstep(26.0, 62.0, camDist);
+          vec2 pOff = parallaxOffset(terrainUv, viewDir, baseN, 0.055) * parallaxFade;
+          vec2 dispUv = vWorldPos.xz * 0.12 + pOff * 0.75;
+
+          vec3 conc = texture2D(uConcreteMap, terrainUv + pOff).rgb;
+          float disp = texture2D(uDispMap, dispUv).r;
+          vec4 macroN = texture2D(uNoiseTex, vWorldPos.xz * 0.045 + pOff * 0.28);
 
           float hField = disp * 0.7 + conc.r * 0.3;
           float dHx = dFdx(hField);
           float dHy = dFdy(hField);
           vec3 dPdx = dFdx(vWorldPos);
           vec3 dPdy = dFdy(vWorldPos);
-          vec3 baseN = normalize(vNormal);
           vec3 r1 = cross(dPdy, baseN);
           vec3 r2 = cross(baseN, dPdx);
           float det = dot(dPdx, r1);
-          vec3 surfGrad = sign(det) * (dHx * r1 + dHy * r2);
-          vec3 nrm = normalize(abs(det) * baseN - surfGrad * 1.45);
+          // Guard the degenerate determinant case so normalize() can never produce NaN.
+          float detSafe = (det < 0.0 ? -det : det);
+          float detSign = det < 0.0 ? -1.0 : 1.0;
+          vec3 surfGrad = detSign * (dHx * r1 + dHy * r2);
+          vec3 nrm = normalize(abs(detSafe) * baseN - surfGrad * 1.45 + baseN * 1e-5);
+
+          // ---- WORLD-SPACE MICRO-NORMAL from the relief height field.
+          // This is what makes the basalt read as a rough, view-dependent surface: the fine
+          // facets catch the light differently as the camera swings around them.
+          float e = 0.035;
+          float hL = texture2D(uDispMap, dispUv - vec2(e, 0.0)).r;
+          float hR = texture2D(uDispMap, dispUv + vec2(e, 0.0)).r;
+          float hD = texture2D(uDispMap, dispUv - vec2(0.0, e)).r;
+          float hU = texture2D(uDispMap, dispUv + vec2(0.0, e)).r;
+          float microFade = parallaxFade * (1.0 - smoothstep(12.0, 44.0, camDist));
+          vec3 microN = normalize(vec3((hL - hR) * 3.4 * microFade, 1.0, (hD - hU) * 3.4 * microFade));
+          // Rotate the micro-normal into the terrain's local frame (XZ plane, +Y up).
+          nrm = normalize(vec3(nrm.x + microN.x, nrm.y * (0.35 + 0.65 * microN.y), nrm.z + microN.z));
 
           vec3 lightDir = normalize(vec3(0.12, 0.62, -0.78));
-          vec3 viewDir = normalize(cameraPosition - vWorldPos);
           vec3 halfDir = normalize(lightDir + viewDir);
           float ndl = clamp(dot(nrm, lightDir), 0.0, 1.0);
           float spec = pow(max(dot(nrm, halfDir), 0.0), 42.0) * (0.35 + 0.65 * conc.r);
+
+          // ---- ANISOTROPIC SHEEN: a stretched highlight that slides across the ground as the
+          // view angle changes, so the basalt reads as brushed, directional stone.
+          vec3 tangent = normalize(vec3(1.0, 0.0, 0.0) - nrm * dot(nrm, vec3(1.0, 0.0, 0.0)));
+          vec3 bitan = normalize(cross(nrm, tangent));
+          vec3 Ht = normalize(lightDir + viewDir);
+          float th = dot(Ht, tangent);
+          float bh = dot(Ht, bitan);
+          float aniso = pow(max(1.0 - th * th, 0.0), 24.0) * pow(max(dot(nrm, Ht), 0.0), 8.0);
 
           float puddle = smoothstep(0.48, 0.72, macroN.r * 0.72 + disp * 0.42);
           vec3 reflDir = reflect(-viewDir, nrm);
@@ -612,8 +669,17 @@ export class GlitchWorld {
           vec3 baseBlue = mix(darkObsidian, litStone, conc.r * 0.72 + disp * 0.28);
           baseBlue += (macroN.g - 0.5) * 0.045;
           vec3 col = baseBlue * (0.40 + 0.78 * ndl) + vec3(0.55, 0.88, 1.0) * spec * 0.58;
+          col += vec3(0.35, 0.62, 1.0) * aniso * 0.30 * (0.4 + 0.6 * disp);
           col += mix(vec3(0.18, 0.55, 1.0), vec3(1.0, 0.22, 0.30), uAnomaly * 0.7) * eyeSpec * puddle * 0.88;
           col = mix(col, baseBlue * 0.55 + vec3(0.02, 0.10, 0.24) * (1.0 - ndl), puddle * 0.42);
+
+          // ---- THIN-FILM IRIDESCENCE: the obsidian carries a data-crystal sheen whose hue
+          // depends on the view angle (Fresnel-driven), so the surface visibly changes colour
+          // as the player turns their head.
+          float fres = pow(1.0 - clamp(dot(nrm, viewDir), 0.0, 1.0), 3.0);
+          float filmPhase = fres * 7.4 + hField * 5.5 + uTime * 0.12;
+          vec3 irid = 0.5 + 0.5 * cos(vec3(0.0, 2.094, 4.188) + filmPhase);
+          col += irid * fres * (0.055 + 0.11 * uAnomaly) * (0.35 + 0.65 * (1.0 - puddle));
 
           vec2 fwMajor = max(fwidth(vWorldPos.xz * 0.25), vec2(0.0001));
           vec2 gMajor = abs(fract(vWorldPos.xz * 0.25 - 0.5) - 0.5) / fwMajor;
@@ -641,7 +707,6 @@ export class GlitchWorld {
           col += accentGlow * railLine * (0.35 + 0.50 * pathPulse);
           col += vec3(0.45, 0.88, 1.0) * shoreGlow * 0.65;
 
-          float camDist = length(cameraPosition - vWorldPos);
           float heightMist = exp(-max(vWorldPos.y + 1.5, 0.0) * 0.022);
           float airDensity = uFogDensity * (0.72 + heightMist * 1.25);
           float fogFactor = 1.0 - exp(-airDensity * airDensity * camDist * camDist);
@@ -944,6 +1009,20 @@ export class GlitchWorld {
           col += vec3(0.52, 0.84, 1.0) * crownBand * 0.22;
           col *= 0.62 + 0.38 * smoothstep(-4.0, 46.0, vWorldPos.y);
 
+          // ---- VIEW-DEPENDENT TOWER GLAZING ----
+          // The curtain walls are coated in smart glass that reflects the sky-eye. The reflection
+          // intensity is Fresnel-driven, so a tower face glows hard when you look at it edge-on
+          // and goes almost matte when you face it head-on. Walk past a tower and its whole
+          // facade changes brightness - a strong, readable view-dependent cue.
+          vec3 vDirC = normalize(cameraPosition - vWorldPos);
+          float fresC = pow(1.0 - clamp(dot(nrm, vDirC), 0.0, 1.0), 2.6);
+          vec3 skyRefl = mix(vec3(0.04, 0.16, 0.44), vec3(0.30, 0.62, 1.0), fresC);
+          col += skyRefl * fresC * 0.26 * (0.5 + 0.5 * abs(nrm.y) * 0.0 + 0.5);
+          // A tight specular glint off the glass that tracks the eye across the facade.
+          vec3 hC = normalize(normalize(vec3(0.0, 0.42, -0.91)) + vDirC);
+          float glintC = pow(max(dot(nrm, hC), 0.0), 90.0);
+          col += vec3(0.75, 0.92, 1.0) * glintC * 0.35;
+
           float camDist = length(cameraPosition - vWorldPos);
           float heightMist = exp(-max(vWorldPos.y + 1.5, 0.0) * 0.022);
           float airDensity = uFogDensity * (0.72 + heightMist * 1.25);
@@ -1147,14 +1226,17 @@ export class GlitchWorld {
     this.group.add(finMesh);
     this.finMat = finMat;
 
-    // D) Colossal Circular Single-Row Parasyte Sky-Maw & Solid 58m Vortex Exit Sleeve at (0, 46, 86)
-    //    Aimed cleanly at (0, 22, -6) (-14.62 deg pitch) so you fly seamlessly out through the physical 3D tooth rim!
+    // D) Colossal Circular Sky-Maw & Solid 58m Vortex Exit Sleeve at (0, 46, 86)
+    //    Aimed cleanly at (0, 22, -6) (-14.62 deg pitch) so you fly seamlessly out through the physical 3D rim!
     const skyMonGroup = new THREE.Group();
     skyMonGroup.position.copy(this.skyPortalPos);
     skyMonGroup.lookAt(0, 22.0, -6.0);
     this.skyPortalQuat.copy(skyMonGroup.quaternion);
 
-    // 58m Solid Vortex Sleeve (radius 3.8m deep -> flared 6.4m Parasyte lip right at z=0, ZERO premature wall fade!)
+    // 58m Solid Vortex Sleeve (radius 3.8m deep -> flared 6.4m lip right at z=0, ZERO premature wall fade!)
+    // NOTE: the exit deliberately carries NO teeth. The mouth is a clean, smoothly-flared aperture that
+    // dissolves into the open sky, so the tunnel->sky junction reads as one continuous organic surface
+    // instead of a hard ring of spikes (see the seam-fix below).
     const sleeveLen = 58.0;
     const sleeveGeo = new THREE.CylinderGeometry(5.6, 3.8, sleeveLen, 32, 28, true);
     sleeveGeo.rotateX(Math.PI * 0.5);
@@ -1176,8 +1258,12 @@ export class GlitchWorld {
           vUv = uv;
           float d = clamp(-position.z / 58.0, 0.0, 1.0);
           vDepth = d;
-          // Bell-flare organic lip collar right over the final 3.5m (-3.5m .. 0.0m) where the 48 teeth root!
-          float lipFlare = 1.0 + 0.145 * exp(position.z * 0.65);
+          // Bell-flare organic lip collar right over the final ~6m. The flare is a smooth C1 curve
+          // (cubic ease-out) instead of the old exponential, so the wall has no visible crease where
+          // the collar begins - that crease was what read as an abrupt seam at the junction.
+          float lipT = clamp((position.z + 6.0) / 6.0, 0.0, 1.0);
+          float lipEase = 1.0 - pow(1.0 - lipT, 3.0);
+          float lipFlare = 1.0 + 0.145 * lipEase;
           vec3 p = vec3(position.xy * lipFlare, position.z);
           vLocalPos = p;
           gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
@@ -1202,17 +1288,30 @@ export class GlitchWorld {
           float helixB = pow(max(0.0, cos(angle * 10.0 - vLocalPos.z * 0.16 + uTime * 12.7)), 10.0);
           float shockRing = smoothstep(0.92, 1.0, fract(vLocalPos.z * 0.09 + uTime * 7.0));
 
-          // Matches BsodScreen's deep sleeveBase palette 1:1, darkening into a fleshy crimson-obsidian gum rim right at z=0!
+          // Matches BsodScreen's deep sleeveBase palette 1:1.
           vec3 col = mix(vec3(0.006, 0.12, 0.44), vec3(0.004, 0.065, 0.28), smoothstep(0.08, 0.65, vDepth));
           col += vec3(0.28, 0.76, 1.0) * line * 0.46;
           col += vec3(0.32, 0.84, 1.0) * (helixA * 0.55 + helixB * 0.45) * 0.88;
           col += vec3(0.70, 0.94, 1.0) * shockRing * 0.72;
 
-          // Anatomical dark gum collar at the very mouth lip (z = -2.2m .. 0.0m) anchoring the 48 single-row teeth!
-          float gumLip = smoothstep(0.045, 0.0, vDepth);
-          float socketWave = 0.5 + 0.5 * cos(angle * 48.0);
-          vec3 lipGumCol = mix(vec3(0.16, 0.008, 0.038), vec3(0.015, 0.04, 0.14), socketWave * 0.6);
-          col = mix(col, lipGumCol + nSample.r * 0.02, gumLip * 0.88);
+          // === SMOOTH JUNCTION FIX ===
+          // The old build painted a hard "gum collar" ring (with 48 scalloped tooth sockets) across the
+          // final 2.6m of the sleeve. That band terminated dead against the open sky and read as a
+          // bolted-on seam. It is replaced by a wide, feathered rim-light gradient that keeps the wall
+          // alive right up to the aperture and lets the sky colour bleed into it continuously.
+          float rimT = clamp((vLocalPos.z + 9.0) / 9.0, 0.0, 1.0);
+          float rimGlow = smoothstep(0.0, 1.0, rimT);
+          // Slow breathing shimmer along the aperture so the lip feels alive, not machined.
+          float breathe = 0.5 + 0.5 * sin(angle * 3.0 + uTime * 0.9 + vLocalPos.z * 0.12);
+          vec3 skyBleed = mix(vec3(0.012, 0.10, 0.30), vec3(0.10, 0.34, 0.72), breathe * 0.55 + 0.25);
+          col = mix(col, skyBleed, rimGlow * rimGlow * 0.62);
+          // A soft luminous edge exactly at the aperture, feathered inward over ~2.5m so it reads as a
+          // glow diffusing through the membrane rather than a hard rim.
+          float edgeGlow = exp(-max(0.0, -vLocalPos.z) * 0.42);
+          col += vec3(0.42, 0.78, 1.0) * edgeGlow * 0.55;
+          // Fine organic striation across the collar so the surface still has texture at the seam.
+          float striation = 0.5 + 0.5 * sin(angle * 34.0 + vLocalPos.z * 0.9 + uTime * 1.7);
+          col += vec3(0.10, 0.26, 0.52) * striation * rimGlow * 0.22;
           gl_FragColor = vec4(col, 1.0);
         }
       `,
@@ -1230,12 +1329,16 @@ export class GlitchWorld {
     skyMonGroup.add(backCap);
     this.skySleeveBackCap = backCap;
 
-    // Soft Radial Corona + Single-Row Sky Maw Iris right around the 6.4m flared lip!
+    // Soft Radial Corona halo around the 6.4m flared aperture.
+    // The old build had a dark "lip shroud" band here which visually completed a toothed maw. With the
+    // teeth removed from the exit, that band would read as a disembodied ring of gums, so it is replaced
+    // by a pure light halo: a soft radial bloom that hides the sleeve/sky boundary instead of drawing it.
     const riftGeo = new THREE.PlaneGeometry(30.0, 30.0);
     this.skyRiftMat = new THREE.ShaderMaterial({
       transparent: true,
       side: THREE.DoubleSide,
       depthWrite: false,
+      blending: THREE.AdditiveBlending,
       uniforms: {
         uTime: { value: 0 },
       },
@@ -1250,95 +1353,29 @@ export class GlitchWorld {
         varying vec2 vUv;
         uniform float uTime;
         void main() {
-          vec2 d = (vUv - 0.5) * 2.0; // -1..+1 over 30m -> r=0.427 is 6.4m flared sleeve lip!
+          vec2 d = (vUv - 0.5) * 2.0; // -1..+1 over 30m -> r=0.427 is the 6.4m flared sleeve lip!
           float safeX = (abs(d.x) < 1e-5 && abs(d.y) < 1e-5) ? 1e-5 : d.x;
           float ang = atan(d.y, safeX);
           float r = length(d);
-          // Completely clear inside the 6.1m mouth opening (r < 0.405), dark solid lip shroud from 0.41..0.58, feathered corona outside!
-          float lipBand = smoothstep(0.395, 0.425, r) * (1.0 - smoothstep(0.54, 0.94, r));
-          if (lipBand < 0.008) discard;
-          float rimGlow = exp(-abs(r - 0.435) * 24.0);
-          vec3 col = mix(vec3(0.025, 0.012, 0.045), vec3(0.28, 0.72, 1.0), rimGlow * 0.85);
-          gl_FragColor = vec4(col, clamp(lipBand * 0.92, 0.0, 0.95));
+
+          // Feathered halo: a wide inner glow that spills INTO the aperture plus a thin bright ring
+          // exactly on the lip radius. Both are soft, so nothing reads as an edge.
+          float innerGlow = smoothstep(0.62, 0.30, r) * smoothstep(0.20, 0.32, r);
+          float ring = exp(-abs(r - 0.427) * 16.0);
+          float outer = exp(-max(0.0, r - 0.427) * 3.4) * smoothstep(0.427, 0.50, r);
+
+          float a = innerGlow * 0.34 + ring * 0.62 + outer * 0.30;
+          // Gentle angular shimmer so the halo breathes instead of looking like a decal.
+          a *= 0.82 + 0.18 * (0.5 + 0.5 * sin(ang * 5.0 + uTime * 0.8));
+          vec3 col = mix(vec3(0.06, 0.24, 0.62), vec3(0.42, 0.82, 1.0), ring);
+          gl_FragColor = vec4(col, clamp(a, 0.0, 1.0));
         }
       `,
     });
     const skyRift = new THREE.Mesh(riftGeo, this.skyRiftMat);
     skyRift.frustumCulled = false;
+    skyRift.renderOrder = 2;
     skyMonGroup.add(skyRift);
-
-    // 48 Single-Row 3D Sculpted Parasyte Sky-Maw Teeth rooted cleanly into the flared 6.2m lip (ZERO multi-tier floating rings!)
-    const skyFangCount = 48;
-    const skyFangGeo = new THREE.ConeGeometry(0.40, 2.15, 6, 2);
-    skyFangGeo.translate(0, 1.075, 0);
-    const sfSeed = new Float32Array(skyFangCount * 4);
-    for (let i = 0; i < skyFangCount; i++) {
-      sfSeed[i * 4 + 0] = (i / skyFangCount) * Math.PI * 2;
-      sfSeed[i * 4 + 1] = 0.0;
-      sfSeed[i * 4 + 2] = 0.74 + ((i * 0.618034) % 1) * 0.55;
-      sfSeed[i * 4 + 3] = (i * 2.39996) % (Math.PI * 2);
-    }
-    skyFangGeo.setAttribute('aSkyFang4', new THREE.InstancedBufferAttribute(sfSeed, 4));
-
-    this.skyFangMat = new THREE.ShaderMaterial({
-      side: THREE.DoubleSide,
-      uniforms: {
-        uTime: { value: 0 },
-      },
-      vertexShader: /* glsl */ `
-        attribute vec4 aSkyFang4;
-        uniform float uTime;
-        varying float vTip;
-        varying vec3 vNrm;
-        varying vec3 vViewPos;
-        void main() {
-          float ang = aSkyFang4.x;
-          float lenSc = aSkyFang4.z;
-          float phase = aSkyFang4.w;
-
-          // Hinged wide open around the 6.25m flared lip so the Sky-Maw holds gaping open without pakupaku flapping!
-          float chomp = sin(uTime * 1.1 + phase * 0.25) * 0.02;
-          float rad = 6.22;
-          vec2 dir = vec2(cos(ang), sin(ang));
-          vec2 tang = vec2(-dir.y, dir.x);
-          vec3 fangAxis = normalize(vec3(-dir * (0.58 + chomp), 0.76));
-          vec3 sideAxis = vec3(tang, 0.0);
-          vec3 hookAxis = normalize(cross(sideAxis, fangAxis));
-
-          vec3 root = vec3(dir * rad, -0.22);
-          float w = 0.96;
-          vec3 lp = root + sideAxis * (position.x * w) + fangAxis * (position.y * lenSc) + hookAxis * (position.z * w * 0.68);
-          vec3 ln = normalize(sideAxis * normal.x + fangAxis * normal.y + hookAxis * normal.z);
-
-          vec4 mv = modelViewMatrix * vec4(lp, 1.0);
-          vViewPos = -mv.xyz;
-          vNrm = normalize(normalMatrix * ln);
-          vTip = clamp(position.y / 2.15, 0.0, 1.0);
-          gl_Position = projectionMatrix * mv;
-        }
-      `,
-      fragmentShader: /* glsl */ `
-        varying float vTip;
-        varying vec3 vNrm;
-        varying vec3 vViewPos;
-        void main() {
-          vec3 N = normalize(vNrm);
-          vec3 V = normalize(vViewPos);
-          vec3 L = normalize(vec3(0.2, 0.6, 0.78));
-          vec3 H = normalize(L + V);
-          float diff = 0.28 + 0.72 * max(dot(N, L), 0.0);
-          float spec = pow(max(dot(N, H), 0.0), 48.0);
-          float rim = pow(1.0 - abs(dot(N, V)), 2.4);
-          vec3 col = mix(vec3(0.18, 0.015, 0.055), vec3(0.88, 0.86, 0.80), smoothstep(0.0, 0.32, vTip));
-          col = mix(col, vec3(0.96, 0.98, 1.0), smoothstep(0.35, 0.92, vTip));
-          col = col * diff + vec3(0.95, 0.99, 1.0) * spec * 1.2 + vec3(0.32, 0.82, 1.0) * rim * 0.55;
-          gl_FragColor = vec4(col, 1.0);
-        }
-      `,
-    });
-    const skyFangs = new THREE.InstancedMesh(skyFangGeo, this.skyFangMat, skyFangCount);
-    skyFangs.frustumCulled = false;
-    skyMonGroup.add(skyFangs);
 
     // 140 Continuous Outward-Streaming Hyperspace Speed-Lines & Mist Filaments (-48m inside sleeve -> +42m in open sky!)
     // Bridges the tunnel-to-sky transition so speed filaments fly right out into the 3D world around the player!
@@ -3165,6 +3202,22 @@ export class GlitchWorld {
           // Vertical seam running down the edge of every slab.
           col += vec3(0.42, 0.80, 1.0) * smoothstep(0.03, 0.0, min(vUv.x, 1.0 - vUv.x)) * 0.22;
 
+          // ---- VIEW-DEPENDENT DATA-CRYSTAL SHEEN ----
+          // The slab faces are coated in a thin holographic film. Its interference colour is a
+          // function of the FRESNEL term (i.e. of the angle between the face and the eye), so
+          // each slab changes hue as the player walks around it, and the seam highlight slides
+          // along the edge as the viewing angle shifts.
+          float fres = pow(1.0 - clamp(dot(nrm, viewDir), 0.0, 1.0), 2.2);
+          float phase = fres * 9.2 + vUv.y * 3.1 + uTime * 0.22;
+          vec3 irid = 0.5 + 0.5 * cos(vec3(0.0, 2.094, 4.188) + phase);
+          col += irid * fres * (0.075 + 0.10 * uAnomaly);
+          // Anisotropic vertical streak: the film is stretched along the slab, so the sheen
+          // smears into a vertical band that slides with the view.
+          vec3 axis = normalize(vec3(0.0, 1.0, 0.0) - nrm * nrm.y);
+          vec3 hDir = normalize(normalize(vec3(0.1, 0.55, -0.82)) + viewDir);
+          float streak = pow(max(1.0 - dot(hDir, axis) * dot(hDir, axis), 0.0), 18.0);
+          col += mix(vec3(0.20, 0.55, 1.0), vec3(0.95, 0.35, 0.90), uAnomaly * 0.7) * streak * 0.22;
+
           float camDist = length(cameraPosition - vWorldPos);
           col = mix(col, vec3(0.02, 0.12, 0.30), clamp(1.0 - exp(-0.00006 * camDist * camDist), 0.0, 0.9));
           gl_FragColor = vec4(col, 1.0);
@@ -4238,7 +4291,6 @@ export class GlitchWorld {
     this.skyRiftMat.uniforms.uTime.value = elapsed;
     this.skyTunnelMat.uniforms.uTime.value = elapsed;
     this.skyExitStreamMat.uniforms.uTime.value = elapsed;
-    this.skyFangMat.uniforms.uTime.value = elapsed;
     this.causewayBusMat.uniforms.uTime.value = elapsed;
     this.causewayBusMat.uniforms.uAnomaly.value = this.anomalyIntensity;
     if (this.landingShockTimer < 2.5) {

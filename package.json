@@ -9,7 +9,11 @@
     "preview": "vite preview --host 0.0.0.0 --port 5173",
     "check:shaders": "node scripts/validate-shaders.mjs src/post/PostFX.ts src/world/BsodScreen.ts src/world/BedroomScene.ts src/world/GlitchWorld.ts",
     "verify": "npm run check:shaders && npm run build",
-    "test:canvas": "tsx scripts/inspect-bsod-canvas.mts"
+    "test:canvas": "tsx scripts/inspect-bsod-canvas.mts",
+    "test:world": "tsx scripts/smoke-world.mts",
+    "test:bedroom": "tsx scripts/smoke-bedroom.mts",
+    "test:features": "tsx scripts/smoke-features.mts",
+    "test": "npm run test:world && npm run test:bedroom && npm run test:features && npm run test:canvas"
   },
   "dependencies": {
     "three": "^0.186.1"

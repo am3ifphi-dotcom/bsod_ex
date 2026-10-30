@@ -163,6 +163,8 @@ class BsodExperienceApp {
   private scaleCheckAccum = 0;
   private isLowTierGpu = false;
   private autoBloomEnabled = true;
+  // Edge-aware AA toggle (kept off on the lowest quality preset for perf).
+  private fxaaEnabled = true;
 
   constructor() {
     this.renderer = new THREE.WebGLRenderer({
@@ -408,6 +410,15 @@ class BsodExperienceApp {
 
       if (this.paused) return;
 
+      // SPACE = jump. Prevent the browser's default page scroll so the key is ours alone.
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (this.phase === 'ROAM_BEDROOM' || this.phase === 'ROAM_GLITCH' || this.phase === 'AFTERMATH_ROAM') {
+          this.player.onKeyDown(e.code);
+        }
+        return;
+      }
+
       if (e.code === 'KeyC' && this.phase === 'ROAM_GLITCH') {
         e.preventDefault();
         this.player.clearKeys();
@@ -585,30 +596,43 @@ class BsodExperienceApp {
     );
   }
 
+  /**
+   * Internal render-resolution budget for 'auto' quality.
+   *
+   * The previous budget (1.44M px normal / 0.88M px low-tier) forced a 1920x1080 window down to
+   * ~0.83x internal scale, which is exactly why the bedroom read as "low resolution / soft".
+   * The budget is now sized so a 1080p window renders at native 1.0x on a healthy GPU, and the
+   * adaptive governor handles the machines that cannot keep up. Low-tier GPUs keep a tighter
+   * budget but are no longer forced to the floor immediately.
+   */
   private computeAutoBaseScale(): number {
     const area = Math.max(1, window.innerWidth * window.innerHeight);
-    const maxPixels = this.isLowTierGpu ? 880_000 : 1_440_000;
-    return THREE.MathUtils.clamp(Math.sqrt(maxPixels / area), 0.55, 1.0);
+    const maxPixels = this.isLowTierGpu ? 1_250_000 : 2_600_000;
+    return THREE.MathUtils.clamp(Math.sqrt(maxPixels / area), 0.62, 1.0);
   }
 
   private applyQualityMode(mode: 'auto' | 'low' | 'medium' | 'high'): void {
     this.qualityMode = mode;
     if (mode === 'low') {
-      this.renderScale = 0.65;
+      this.renderScale = 0.70;
       this.autoBloomEnabled = false;
+      this.fxaaEnabled = false;
       this.postFX.setQuality(0, false);
     } else if (mode === 'medium') {
-      this.renderScale = 0.90;
+      this.renderScale = 0.95;
       this.autoBloomEnabled = true;
+      this.fxaaEnabled = true;
       this.postFX.setQuality(0, true);
     } else if (mode === 'high') {
-      this.renderScale = Math.min(window.devicePixelRatio || 1, 1.25);
+      this.renderScale = Math.min(window.devicePixelRatio || 1, 1.35);
       this.autoBloomEnabled = true;
-      this.postFX.setQuality(this.isLowTierGpu ? 0 : 2, true);
+      this.fxaaEnabled = true;
+      this.postFX.setQuality(this.isLowTierGpu ? 0 : 4, true);
     } else {
       this.renderScale = +this.computeAutoBaseScale().toFixed(2);
       // Keep the cheap 1/5-res 2-pass bloom active in auto mode so the player's highlight-lift filter is always on!
       this.autoBloomEnabled = true;
+      this.fxaaEnabled = !this.isLowTierGpu;
       this.postFX.setQuality(0, true);
     }
     this.applyViewportResolution();
@@ -620,6 +644,8 @@ class BsodExperienceApp {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
+    // The scene is rendered into the PostFX offscreen buffer, so THAT buffer must be sized to
+    // the internal resolution while the canvas itself stays at native size.
     const rw = Math.max(2, Math.round(w * this.renderScale));
     const rh = Math.max(2, Math.round(h * this.renderScale));
     this.postFX.setSize(rw, rh);
@@ -1413,16 +1439,18 @@ class BsodExperienceApp {
     const dt = Math.min(rawDt, 0.05);
 
     // Fast-reacting 0.40s adaptive resolution governor in 'auto' mode so ANY GPU stays locked smooth!
+    // The floor is now 0.62 (was 0.55) because the new FXAA resolve keeps the image crisp even
+    // below native resolution - dropping further only made the bedroom look soft and muddy.
     if (this.qualityMode === 'auto' && !this.paused && rawDt > 0.001 && rawDt < 0.35) {
       this.emaFrameMs = this.emaFrameMs * 0.85 + rawDt * 1000 * 0.15;
       this.scaleCheckAccum += dt;
       if (this.scaleCheckAccum > 0.40) {
         this.scaleCheckAccum = 0;
         const maxAuto = this.computeAutoBaseScale();
-        if (this.emaFrameMs > 18.8 && this.renderScale > 0.56) {
-          this.renderScale = Math.max(0.55, +(this.renderScale - 0.10).toFixed(2));
+        if (this.emaFrameMs > 19.6 && this.renderScale > 0.63) {
+          this.renderScale = Math.max(0.62, +(this.renderScale - 0.08).toFixed(2));
           this.applyViewportResolution();
-        } else if (this.emaFrameMs < 12.2 && this.renderScale < maxAuto - 0.04) {
+        } else if (this.emaFrameMs < 12.6 && this.renderScale < maxAuto - 0.04) {
           this.renderScale = Math.min(maxAuto, +(this.renderScale + 0.08).toFixed(2));
           this.applyViewportResolution();
         }
@@ -1483,6 +1511,8 @@ class BsodExperienceApp {
     let horrorAmt = this.horrorPulse;
     // Always-on subtle highlight-lift & bloom glow across all phases
     let bloomAmt = 0.58 + bendAmt * 0.16 + ghostAmt * 0.12;
+    // Partial low-resolution sector filter (only over PART of the view). Strength 0 = disabled.
+    let lowResAmt = 0.0;
 
     if (this.phase === 'ROAM_BEDROOM') {
       vigAmt = 0.36;
@@ -1520,6 +1550,9 @@ class BsodExperienceApp {
       warpAmt = this.glitchWorld.anomalyIntensity * 0.12;
       horrorAmt = Math.max(horrorAmt, this.glitchWorld.anomalyIntensity * 0.28);
       bloomAmt = 0.84 + this.glitchWorld.anomalyIntensity * 0.42;
+      // The corrupted data plane: a drifting sector of the world drops to a coarse raster.
+      // It only ever touches the PERIPHERY of the view, so the centre stays readable.
+      lowResAmt = 0.30 + this.glitchWorld.anomalyIntensity * 0.34;
     } else if (this.phase === 'COLLAPSE_CUTSCENE') {
       const fallFactor = THREE.MathUtils.clamp((this.collapseTimer - 3.8) / 4.8, 0, 1);
       distortAmt = Math.max(distortAmt, 0.24 + fallFactor * 0.38);
@@ -1530,6 +1563,7 @@ class BsodExperienceApp {
       sortAmt = Math.max(sortAmt, fallFactor * 0.18);
       ghostAmt = Math.max(ghostAmt, fallFactor * 0.12);
       bloomAmt = 0.82 + fallFactor * 0.34;
+      lowResAmt = 0.34 + fallFactor * 0.42;
     }
 
     this.postFX.render(this.renderer, this.getActiveScene(), this.camera, this.elapsed, {
@@ -1546,6 +1580,10 @@ class BsodExperienceApp {
       roll: rollAmt,
       ghost: ghostAmt,
       bloom: bloomAmt,
+      // Partial low-resolution sector: only active in the Glitch World (the "corrupted data
+      // plane" conceit), never over the bedroom where crisp image quality matters most.
+      lowRes: lowResAmt,
+      fxaa: this.fxaaEnabled ? 1 : 0,
     });
   };
 

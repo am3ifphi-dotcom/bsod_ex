@@ -28,6 +28,10 @@ export type PostFXOptions = {
   roll?: number;
   ghost?: number;
   bloom?: number;
+  /** Strength of the partial low-resolution optical filter (0..1) */
+  lowRes?: number;
+  /** 1 = enable the edge-aware anti-aliasing pass */
+  fxaa?: number;
 };
 
 export class PostFX {
@@ -86,6 +90,9 @@ export class PostFX {
         uGhost: { value: 0 },
         tBloom: { value: null },
         uBloom: { value: 0.0 },
+        uTexel: { value: new THREE.Vector2(1 / Math.max(1, width), 1 / Math.max(1, height)) },
+        uLowRes: { value: 0.0 },
+        uFxaa: { value: 1.0 },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -112,6 +119,9 @@ export class PostFX {
         uniform float uGhost;
         uniform sampler2D tBloom;
         uniform float uBloom;
+        uniform vec2 uTexel;
+        uniform float uLowRes;
+        uniform float uFxaa;
 
         float hash21(vec2 p) {
           p = fract(p * vec2(123.34, 456.21));
@@ -136,6 +146,41 @@ export class PostFX {
 
         vec3 fetch(vec2 p) {
           return texture2D(tDiffuse, clamp(p, 0.0015, 0.9985)).rgb;
+        }
+
+        vec3 rawFetch(vec2 p) {
+          return texture2D(tDiffuse, clamp(p, vec2(0.0), vec2(1.0))).rgb;
+        }
+
+        // ---------------------------------------------------------------- FXAA (edge-directed)
+        // Resolves the geometric aliasing that the adaptive render-scale leaves behind, so the
+        // frame stays crisp even when the internal buffer is running below native resolution.
+        vec3 fxaa(vec2 uv) {
+          vec2 px = uTexel;
+          vec3 mNW = rawFetch(uv + vec2(-1.0, -1.0) * px);
+          vec3 mNE = rawFetch(uv + vec2( 1.0, -1.0) * px);
+          vec3 mSW = rawFetch(uv + vec2(-1.0,  1.0) * px);
+          vec3 mSE = rawFetch(uv + vec2( 1.0,  1.0) * px);
+          vec3 mM  = rawFetch(uv);
+          vec3 lw = vec3(0.299, 0.587, 0.114);
+          float lNW = dot(mNW, lw);
+          float lNE = dot(mNE, lw);
+          float lSW = dot(mSW, lw);
+          float lSE = dot(mSE, lw);
+          float lM  = dot(mM, lw);
+          float lMin = min(lM, min(min(lNW, lNE), min(lSW, lSE)));
+          float lMax = max(lM, max(max(lNW, lNE), max(lSW, lSE)));
+          vec2 dir = vec2(
+            -((lNW + lNE) - (lSW + lSE)),
+             ((lNW + lSW) - (lNE + lSE))
+          );
+          float reduce = max((lNW + lNE + lSW + lSE) * 0.03125, 0.0078125);
+          float rcpMin = 1.0 / (min(abs(dir.x), abs(dir.y)) + reduce);
+          dir = clamp(dir * rcpMin, vec2(-8.0), vec2(8.0)) * px;
+          vec3 a = 0.5 * (rawFetch(uv + dir * (1.0 / 3.0 - 0.5)) + rawFetch(uv + dir * (2.0 / 3.0 - 0.5)));
+          vec3 b = a * 0.5 + 0.25 * (rawFetch(uv - dir * 0.5) + rawFetch(uv + dir * 0.5));
+          float lB = dot(b, lw);
+          return (lB < lMin || lB > lMax) ? a : b;
         }
 
         void main() {
@@ -229,17 +274,50 @@ export class PostFX {
             }
           }
 
+          // ---------------------------------------------------------------- PARTIAL LOW-RESOLUTION SECTOR
+          // A drifting sector of the frame loses its internal resolution: the pixels there are
+          // re-gridded into coarse blocks so the eye reads a genuinely lower-detail image, while
+          // the focal centre of the view stays fully resolved. The boundary is feathered so the
+          // degradation reads as an optical/optical-feed artifact rather than a hard mask.
+          float lowResMask = 0.0;
+          if (uLowRes > 0.001) {
+            vec2 flow = vec2(uTime * 0.021, uTime * 0.013);
+            float n1 = vnoise(vUv * vec2(2.4, 1.9) + flow);
+            float n2 = vnoise(vUv * vec2(5.3, 4.1) - flow * 1.7);
+            float cellNoise = n1 * 0.66 + n2 * 0.34;
+            // Peripheral bias: the centre of vision stays sharp, the edges of vision degrade.
+            float periph = smoothstep(0.14, 0.66, rad);
+            lowResMask = smoothstep(0.50, 0.87, cellNoise) * periph * uLowRes;
+          }
+
           // ---------------------------------------------------------------- BASE SAMPLE + PERIPHERAL LENS FRINGE
+          // The base image is edge-resolved with FXAA FIRST (so the adaptive render scale never
+          // shows raw stair-stepping), and the chromatic split is then layered on top of that
+          // resolved image so the lens fringing never undoes the anti-aliasing.
           vec3 col;
           float baseLensChr = smoothstep(0.10, 0.56, r2) * 0.0022;
           float dispersion = baseLensChr + uChromatic * 0.011 + waveMask * 0.011 + uWarp * 0.016 + seam * 0.02;
+          bool useFxaa = uFxaa > 0.5;
+          col = useFxaa ? fxaa(uv) : fetch(uv);
           if (dispersion > 0.0005) {
             vec2 dispVec = centered * dispersion * (0.45 + r2 * 2.1) + refractOffset * 0.38;
             col.r = fetch(uv + dispVec).r;
-            col.g = fetch(uv).g;
             col.b = fetch(uv - dispVec).b;
-          } else {
-            col = fetch(uv);
+          }
+
+          // Re-grid the degraded sector into coarse blocks (nearest-neighbour block sampling).
+          if (lowResMask > 0.003) {
+            vec2 grid = vec2(118.0, 66.0);
+            vec2 blockUv = (floor(vUv * grid) + 0.5) / grid;
+            vec3 lowCol = fetch(blockUv);
+            // Slightly raise contrast + lift so the blocky region reads as a different signal path.
+            lowCol = mix(vec3(dot(lowCol, vec3(0.299, 0.587, 0.114))), lowCol, 0.86);
+            lowCol = clamp((lowCol - 0.5) * 1.10 + 0.5, 0.0, 1.0);
+            // Faint block grid so the coarse raster is legible as an intentional artifact.
+            vec2 gf = abs(fract(vUv * grid) - 0.5);
+            float gridLine = smoothstep(0.46, 0.5, max(gf.x, gf.y));
+            lowCol *= 1.0 - gridLine * 0.10;
+            col = mix(col, lowCol, lowResMask);
           }
 
           // Ghost echo of the bend (double vision on strong spatial warps)
@@ -469,6 +547,7 @@ export class PostFX {
     this.rtBlur.setSize(bw, bh);
     this.brightMat.uniforms.uTexelX.value = 1 / bw;
     this.blurMat.uniforms.uTexelY.value = 1 / bh;
+    this.mat.uniforms.uTexel.value.set(1 / Math.max(1, width), 1 / Math.max(1, height));
   }
 
   /**
@@ -529,6 +608,8 @@ export class PostFX {
     u.uSort.value = opts.sort ?? 0;
     u.uRoll.value = opts.roll ?? 0;
     u.uGhost.value = opts.ghost ?? 0;
+    u.uLowRes.value = opts.lowRes ?? 0;
+    u.uFxaa.value = opts.fxaa ?? 1;
 
     renderer.setRenderTarget(this.rt);
     renderer.clear(true, true, true);

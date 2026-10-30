@@ -44,6 +44,7 @@ export class BedroomScene {
   private monitorBeamMesh!: THREE.Mesh;
   private roomDustMat!: THREE.ShaderMaterial;
   private rainGlassMat!: THREE.ShaderMaterial;
+  private outdoorRainMat!: THREE.ShaderMaterial;
 
   private officeChair!: THREE.Object3D;
   private clockCanvas!: HTMLCanvasElement;
@@ -355,7 +356,12 @@ export class BedroomScene {
     shaft.rotation.set(0, -Math.PI * 0.5, -0.34);
     this.group.add(shaft);
 
-    // Subtle 2:47 AM rain-streaked window glass catching city neon & cold monitor reflections (1 ultra-light quad)
+    // 2:47 AM rain on the window glass.
+    // Layered for realism: (1) a static condensation/droplet field that beads and clings,
+    // (2) fast micro-droplets that rattle across the glass, (3) slow fat rivulets that
+    // snake downward leaving a wet trail, and (4) a soft refractive smear of the city
+    // neon that the water bends. The old version was a single scrolling noise streak, which
+    // read as a flat animated texture rather than water on glass.
     this.rainGlassMat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
@@ -377,21 +383,109 @@ export class BedroomScene {
         uniform float uTime;
         uniform float uInfect;
         uniform sampler2D uNoiseTex;
+
+        float hash21(vec2 p) {
+          p = fract(p * vec2(123.34, 456.21));
+          p += dot(p, p + 45.32);
+          return fract(p.x * p.y);
+        }
+
+        // A single water bead: round lens that brightens where the city light refracts through it.
+        float bead(vec2 uv, float scale, float t, float seed) {
+          vec2 gv = uv * scale;
+          vec2 id = floor(gv);
+          vec2 f = fract(gv) - 0.5;
+          vec2 rnd = vec2(hash21(id + seed), hash21(id + seed + 17.3));
+          float present = step(0.62, rnd.x);
+          vec2 c = (rnd - 0.5) * 0.62;
+          // Beads slowly jitter as more water accumulates and they swell.
+          c += vec2(sin(t * 0.7 + rnd.y * 6.28), cos(t * 0.5 + rnd.x * 6.28)) * 0.012;
+          float d = length((f - c) * vec2(1.0, 1.12));
+          float r = (0.10 + rnd.y * 0.13) * present;
+          float lens = smoothstep(r, r * 0.18, d);
+          // Rim of the bead catches a hard specular highlight.
+          float rim = smoothstep(r * 0.95, r * 0.62, d) * smoothstep(r * 0.45, r * 0.85, d);
+          return lens * 0.85 + rim * 1.5;
+        }
+
+        // A rivulet: a fat drop that slides down the pane, leaving a thinner wet trail behind it.
+        float rivulet(vec2 uv, float t, float seed) {
+          float acc = 0.0;
+          for (int i = 0; i < 3; i++) {
+            float fi = float(i);
+            float scale = 3.0 + fi * 2.4;
+            vec2 gv = uv * vec2(scale * 0.55, scale);
+            vec2 id = floor(gv);
+            vec2 f = fract(gv);
+            float rnd = hash21(id + seed + fi * 31.7);
+            float rnd2 = hash21(id + seed + fi * 71.3);
+            if (rnd < 0.80) continue;
+            // Each rivulet has its own speed and phase; speed varies a lot between rivulets.
+            float speed = 0.10 + rnd2 * 0.34;
+            float y = fract(rnd2 * 3.7 + t * speed);
+            float x = 0.15 + rnd * 0.7;
+            float d = length((f - vec2(x, y)) * vec2(2.6, 1.0));
+            float r = 0.13 + rnd2 * 0.10;
+            float head = smoothstep(r, r * 0.15, d);
+            // Trail: a narrow vertical smear extending upward from the head.
+            float trailY = clamp((f.y - y), 0.0, 1.0);
+            float trail = smoothstep(0.045, 0.0, abs(f.x - x)) * smoothstep(0.42, 0.0, trailY) * 0.42;
+            acc = max(acc, head + trail);
+          }
+          return acc;
+        }
+
         void main() {
-          vec4 n1 = texture2D(uNoiseTex, vec2(vUv.x * 5.5, vUv.y * 1.4 + uTime * 0.055));
-          vec4 n2 = texture2D(uNoiseTex, vec2(vUv.x * 11.0 + 0.37, vUv.y * 2.2 + uTime * 0.095));
-          float streak = pow(n1.b, 4.0) * 0.55 + pow(n2.b, 5.0) * 0.65;
-          float edgeVig = smoothstep(0.0, 0.12, vUv.x) * smoothstep(1.0, 0.88, vUv.x)
-                        * smoothstep(0.0, 0.12, vUv.y) * smoothstep(1.0, 0.88, vUv.y);
-          vec3 tint = mix(vec3(0.32, 0.55, 0.95), vec3(0.08, 0.68, 1.0), uInfect);
-          gl_FragColor = vec4(tint, streak * edgeVig * 0.16);
+          vec2 uv = vUv;
+          float t = uTime;
+
+          // (1) Clinging condensation micro-beads (static-ish, two densities).
+          float beads = bead(uv, 26.0, t, 0.0) * 0.55 + bead(uv, 44.0, t, 91.7) * 0.35;
+
+          // (2) Fast micro-droplets: fine noise streaks jittering sideways as they skitter.
+          vec4 nf = texture2D(uNoiseTex, vec2(uv.x * 26.0 + 0.31, uv.y * 3.0 - t * 1.65));
+          vec4 nf2 = texture2D(uNoiseTex, vec2(uv.x * 42.0 - 0.17, uv.y * 4.5 - t * 2.35));
+          float micro = pow(nf.b, 5.0) * 0.75 + pow(nf2.b, 6.0) * 0.55;
+
+          // (3) Slow fat rivulets snaking down the pane.
+          float riv = rivulet(uv, t, 13.0);
+
+          // (4) Sheeting water film: broad, very soft vertical wash that gathers at the bottom.
+          vec4 sheet = texture2D(uNoiseTex, vec2(uv.x * 3.2, uv.y * 1.1 - t * 0.075));
+          float film = pow(sheet.b, 2.2) * 0.30 * smoothstep(0.15, 0.95, 1.0 - uv.y);
+
+          float water = beads + micro * 0.85 + riv * 0.95 + film;
+
+          // Refracted city light: the water picks up the neon behind it and smears it.
+          float neonBand = 0.5 + 0.5 * sin(uv.y * 3.1 + uv.x * 1.7 - t * 0.11);
+          vec3 neonCool = vec3(0.34, 0.58, 0.98);
+          vec3 neonWarm = vec3(0.98, 0.62, 0.30);
+          vec3 tint = mix(neonCool, neonWarm, smoothstep(0.35, 0.85, neonBand) * 0.75);
+          tint = mix(tint, vec3(0.08, 0.72, 1.0), uInfect);
+
+          // Specular glints only where there is a bead or a rivulet head.
+          float glint = beads * 0.55 + riv * 0.4;
+          vec3 col = tint * (water * 0.32) + vec3(0.82, 0.90, 1.0) * glint * 0.30;
+
+          // Edge falloff so the pane never shows a hard rectangular border.
+          float edgeVig = smoothstep(0.0, 0.14, uv.x) * smoothstep(1.0, 0.86, uv.x)
+                        * smoothstep(0.0, 0.14, uv.y) * smoothstep(1.0, 0.86, uv.y);
+
+          gl_FragColor = vec4(col, clamp(water * 0.42 + glint * 0.18, 0.0, 1.0) * edgeVig);
         }
       `,
     });
     const rainPane = new THREE.Mesh(new THREE.PlaneGeometry(2.15, 1.75), this.rainGlassMat);
     rainPane.rotation.y = -Math.PI * 0.5;
     rainPane.position.set(2.68, 1.62, -0.55);
+    rainPane.renderOrder = 3;
     this.group.add(rainPane);
+
+    // Outdoor rainfall volume beyond the glass: a dense field of falling streaks seen through
+    // the window. This is what actually sells "it is actually raining" - the glass shader alone
+    // only shows water already ON the pane. Implemented as one instanced draw call of
+    // camera-facing quads, entirely GPU-animated.
+    this.buildOutdoorRainfall();
 
     // Dead pendant fixture under ceiling rose
     const cordMat = new THREE.MeshLambertMaterial({ color: 0x15181f });
@@ -671,8 +765,99 @@ export class BedroomScene {
     }
   }
 
-  private buildDeskLegsAndCables(cablesTemplate: THREE.Object3D): void {
-    const legMat = new THREE.MeshLambertMaterial({ color: 0x12151c });
+  /**
+   * Outdoor rainfall volume beyond the window.
+   *
+   * The glass shader only shows water already sitting ON the pane; to make the night read as
+   * genuinely wet you also need to see rain falling OUTSIDE. This is one instanced draw call of
+   * 420 streaks, entirely animated on the GPU (no CPU per-particle work at all).
+   *
+   * Each streak is a thin billboard stretched along its fall direction. Falling speed, length,
+   * brightness and lateral drift are all derived from the per-instance seed, and the streaks are
+   * depth-sorted by the renderer so the near ones occlude the far ones properly.
+   */
+  private buildOutdoorRainfall(): void {
+    const RAIN_COUNT = 420;
+    const streakGeo = new THREE.PlaneGeometry(1, 1);
+    const seeds = new Float32Array(RAIN_COUNT * 4);
+    for (let i = 0; i < RAIN_COUNT; i++) {
+      seeds[i * 4 + 0] = (i * 0.6180339887) % 1; // x: lateral position
+      seeds[i * 4 + 1] = (i * 0.3819660113) % 1; // y: depth / height jitter
+      seeds[i * 4 + 2] = 0.55 + ((i * 0.7548776662) % 1) * 0.9; // z: fall speed
+      seeds[i * 4 + 3] = (i * 2.3999632) % (Math.PI * 2); // w: phase
+    }
+    streakGeo.setAttribute('aRainSeed', new THREE.InstancedBufferAttribute(seeds, 4));
+
+    const rainMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      uniforms: {
+        uTime: this.infectUniforms.uTime,
+        uInfect: this.infectUniforms.uInfect,
+        uPixelRatio: { value: 1 },
+      },
+      vertexShader: /* glsl */ `
+        attribute vec4 aRainSeed;
+        uniform float uTime;
+        uniform float uPixelRatio;
+        varying float vFade;
+        varying float vAcross;
+        void main() {
+          // The rain volume lives OUTSIDE the window (x > 2.9), spread across the street depth.
+          float spreadX = 3.0 + aRainSeed.y * 2.6;
+          float spreadZ = -3.1 + aRainSeed.x * 6.4;
+          float topY = 6.4;
+          float fallSpan = 7.6;
+          float speed = 5.6 + aRainSeed.z * 5.4;
+          float y = topY - mod(aRainSeed.x * 13.7 + uTime * speed + aRainSeed.w, fallSpan);
+
+          // Slight wind shear: streaks lean and drift as they fall.
+          float wind = 0.16 + 0.06 * sin(uTime * 0.35 + aRainSeed.w);
+          vec3 fallDir = normalize(vec3(wind, -1.0, 0.05));
+          float len = 0.16 + aRainSeed.z * 0.30;
+          float wide = 0.0055 + aRainSeed.y * 0.0045;
+
+          // Billboard the streak: face the camera around the fall axis so it always reads as a line.
+          vec3 toCam = normalize(cameraPosition - vec3(spreadX, y, spreadZ));
+          vec3 sideDir = normalize(cross(fallDir, toCam));
+          vec3 localPos = vec3(spreadX, y, spreadZ)
+                        + sideDir * (position.x * wide)
+                        + fallDir * (position.y * len);
+
+          vAcross = position.x;
+          // Fade in at the top and out at the bottom of the fall, plus distance fade.
+          float camDist = length(cameraPosition - vec3(spreadX, y, spreadZ));
+          vFade = smoothstep(0.0, 1.2, topY - y) * smoothstep(fallSpan, fallSpan - 1.6, topY - y);
+          vFade *= smoothstep(1.2, 3.4, camDist) * (1.0 - smoothstep(9.0, 16.0, camDist));
+
+          gl_Position = projectionMatrix * viewMatrix * vec4(localPos, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying float vFade;
+        varying float vAcross;
+        uniform float uInfect;
+        void main() {
+          // Soft round cross-section + a bright core so each streak reads as a lit water filament.
+          float across = 1.0 - abs(vAcross) * 2.0;
+          across = clamp(across, 0.0, 1.0);
+          float core = pow(across, 2.2);
+          vec3 col = mix(vec3(0.52, 0.66, 0.92), vec3(0.30, 0.82, 1.0), uInfect);
+          gl_FragColor = vec4(col, core * vFade * 0.42);
+        }
+      `,
+    });
+
+    const rain = new THREE.InstancedMesh(streakGeo, rainMat, RAIN_COUNT);
+    rain.frustumCulled = false;
+    rain.renderOrder = 1;
+    this.group.add(rain);
+    this.outdoorRainMat = rainMat;
+  }
+
+  private buildDeskLegsAndCables(cablesTemplate: THREE.Object3D): void {    const legMat = new THREE.MeshLambertMaterial({ color: 0x12151c });
     const legBatch: THREE.BufferGeometry[] = [];
     const legCoords = [
       [-1.98, -0.14],
@@ -997,8 +1182,15 @@ export class BedroomScene {
    * Uses 2 bilinear fetches from uNoiseTex instead of 28 per-pixel hash calls (~8x faster GPU ALU!).
    */
   private injectRoomInfectionShader(mat: THREE.Material): void {
-    if (mat.userData.bsodInfected) return;
-    mat.userData.bsodInfected = true;
+    // NOTE: the "already injected" marker must NOT live in `userData`. THREE.Material.copy()
+    // deep-copies userData (JSON round-trip), so a cloned material would inherit the flag and
+    // then silently skip the injection - and Material.copy() does NOT carry over `onBeforeCompile`,
+    // meaning the clone would end up with NO infection shader at all. The architectural walls are
+    // built by cloning the room's wall template, so this bug left the two biggest wall/ceiling
+    // planes completely untextured by the room shader. A plain own-property is not copied by
+    // Material.copy(), so the clone correctly gets the injection.
+    if ((mat as unknown as { __bsodInfected?: boolean }).__bsodInfected) return;
+    (mat as unknown as { __bsodInfected?: boolean }).__bsodInfected = true;
 
     mat.customProgramCacheKey = () => 'bsod_lambert_infect_v4';
     mat.onBeforeCompile = (shader) => {
@@ -1014,6 +1206,7 @@ export class BedroomScene {
           /* glsl */ `
           #include <common>
           varying vec3 vBsodWorldPos;
+          varying vec3 vBsodWorldNormal;
           varying float vBsodWallAmt;
           varying float vBsodMonGlint;
           uniform float uInfect;
@@ -1047,6 +1240,7 @@ export class BedroomScene {
           #endif
           vec3 wnrmV = normalize(mat3(modelMatrix) * bsodN);
           vBsodWallAmt = 1.0 - smoothstep(0.32, 0.72, abs(wnrmV.y));
+          vBsodWorldNormal = wnrmV;
 
           // Compute monitor specular glint IN VERTEX SHADER (eliminates 4 normalize + pow per pixel!)
           vec3 toCamV = normalize(cameraPosition - bsodWp.xyz);
@@ -1066,6 +1260,7 @@ export class BedroomScene {
           /* glsl */ `
           #include <common>
           varying vec3 vBsodWorldPos;
+          varying vec3 vBsodWorldNormal;
           varying float vBsodWallAmt;
           varying float vBsodMonGlint;
           uniform float uInfect;
@@ -1087,11 +1282,45 @@ export class BedroomScene {
             // Single bilinear fetch in calm bedroom (R = coarse FBM, G = fine grain)!
             vec4 nCoarse = texture2D(uNoiseTex, vec2(uAxis * 0.28, wp.y * 0.28));
 
+            // ---- MICRO-SURFACE DETAIL (the "room looks low-res" fix) ------------------
+            // The bedroom's walls and floor were flat Lambert surfaces with only a very low
+            // frequency tint, so the room read as a blurry, low-detail set. This adds a
+            // high-frequency plaster/board grain per pixel, derived from the noise atlas with
+            // screen-space derivatives, plus a matching micro-normal so the desk lamp and the
+            // monitor pick out the texture instead of flooding it flat. The result is a surface
+            // that holds up when the camera is close.
+            vec4 nSurf = texture2D(uNoiseTex, vec2(uAxis * 5.6, wp.y * 5.6 + wp.z * 1.7));
+            vec4 nMicro = texture2D(uNoiseTex, vec2(uAxis * 14.0 + 0.41, wp.y * 14.0 - wp.z * 3.1));
+            float grain = (nSurf.g - 0.5) * 0.075 + (nMicro.g - 0.5) * 0.052;
+            // Patchy plaster mottling at a mid frequency.
+            float mottle = (nSurf.r - 0.5) * 0.055;
+            // Height field for the micro-normal: fine grain + a hint of the mottle.
+            float hDetail = nSurf.g * 0.6 + nMicro.g * 0.4;
+            float dHx = dFdx(hDetail);
+            float dHy = dFdy(hDetail);
+            vec3 dPdx = dFdx(wp);
+            vec3 dPdy = dFdy(wp);
+            vec3 flatN = normalize(vBsodWorldNormal);
+            vec3 r1 = cross(dPdy, flatN);
+            vec3 r2 = cross(flatN, dPdx);
+            float det = dot(dPdx, r1);
+            // Guard against a degenerate determinant (parallel view/derivative vectors) which
+            // would otherwise make normalize() produce NaN and punch black holes in the room.
+            float detSafe = (det < 0.0 ? -det : det);
+            float detSign = det < 0.0 ? -1.0 : 1.0;
+            vec3 grad = detSign * (dHx * r1 + dHy * r2);
+            vec3 bumped = normalize(abs(detSafe) * flatN - grad * 0.85 + flatN * 1e-5);
+            // Re-light with the perturbed normal so the grain actually catches light.
+            vec3 keyDir = normalize(vec3(0.42, 0.78, 0.46));
+            float bumpLam = clamp(dot(bumped, keyDir), 0.0, 1.0);
+            float baseLam = clamp(dot(flatN, keyDir), 0.0, 1.0);
+            gl_FragColor.rgb *= 1.0 + (bumpLam - baseLam) * 1.35;
+
             float stripe = smoothstep(0.40, 0.50, abs(fract(uAxis * 1.92) - 0.5)) * wallAmt;
             float floorAO = smoothstep(0.52, 0.0, wp.y) * wallAmt;
             float ceilAO = smoothstep(2.58, 3.15, wp.y) * wallAmt;
 
-            gl_FragColor.rgb *= 1.0 - (nCoarse.g - 0.5) * 0.07 + (nCoarse.r - 0.5) * 0.11 + stripe * 0.055;
+            gl_FragColor.rgb *= 1.0 + grain + mottle + stripe * 0.055;
             gl_FragColor.rgb *= 1.0 - (floorAO * 0.40 + ceilAO * 0.32);
             gl_FragColor.rgb += vec3(0.05, 0.26, 0.62) * vBsodMonGlint;
 
