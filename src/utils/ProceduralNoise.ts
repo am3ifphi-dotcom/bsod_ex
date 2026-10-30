@@ -108,6 +108,7 @@ export function getSharedNoiseTexture(): THREE.DataTexture {
   tex.wrapT = THREE.RepeatWrapping;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.magFilter = THREE.LinearFilter;
+  tex.anisotropy = 8;
   tex.generateMipmaps = true;
   tex.needsUpdate = true;
   cachedNoiseTex = tex;
@@ -236,8 +237,15 @@ export function toAtmosphericMaterial(
     if (hit) return hit;
   }
 
-  if (std.map) std.map.anisotropy = 1;
-  if (std.emissiveMap) std.emissiveMap.anisotropy = 1;
+  if (std.map) {
+    std.map.anisotropy = 8;
+    if (std.map.generateMipmaps !== false) {
+      std.map.minFilter = THREE.LinearMipmapLinearFilter;
+    }
+  }
+  if (std.emissiveMap) {
+    std.emissiveMap.anisotropy = 8;
+  }
 
   const lam = new THREE.MeshLambertMaterial({
     name: std.name,

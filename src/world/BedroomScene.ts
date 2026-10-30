@@ -13,9 +13,12 @@ export interface BoxCollider2D {
   maxX: number;
   minZ: number;
   maxZ: number;
+  topY?: number;
 }
 
 const PEEL_SHARD_COUNT = 64;
+const EXTERIOR_RAIN_STREAK_COUNT = 420;
+const EXTERIOR_SPLASH_COUNT = 96;
 
 /**
  * Upgrades heavy PBR MeshStandardMaterial into a fast, specular + Fresnel-rim atmospheric material.
@@ -36,6 +39,7 @@ export class BedroomScene {
 
   public readonly pcTowerSoundPos = new THREE.Vector3(-1.74, 0.98, 0.04);
   public readonly clockSoundPos = new THREE.Vector3(-1.62, 0.56, -2.12);
+  public readonly windowSoundPos = new THREE.Vector3(2.68, 1.62, -0.55);
 
   private deskLampLight!: THREE.PointLight;
   private deskLampBulbMat!: THREE.MeshBasicMaterial;
@@ -44,6 +48,12 @@ export class BedroomScene {
   private monitorBeamMesh!: THREE.Mesh;
   private roomDustMat!: THREE.ShaderMaterial;
   private rainGlassMat!: THREE.ShaderMaterial;
+  private skylightRainMat!: THREE.ShaderMaterial;
+  private rainStreakMat!: THREE.ShaderMaterial;
+  private rainSplashMat!: THREE.ShaderMaterial;
+  private floorCausticMat!: THREE.ShaderMaterial;
+  private lenticularMat!: THREE.ShaderMaterial;
+  private mirrorAnomalyMat!: THREE.ShaderMaterial;
 
   private officeChair!: THREE.Object3D;
   private clockCanvas!: HTMLCanvasElement;
@@ -58,13 +68,15 @@ export class BedroomScene {
     uInfect: { value: 0 },
     uPull: { value: 0 },
     uTime: { value: 0 },
+    uAftermath: { value: 0 },
     uPortalPos: { value: new THREE.Vector3(-1.723, 1.045, 0.735) },
+    uCamForward: { value: new THREE.Vector3(0, 0, -1) },
     uNoiseTex: { value: getSharedNoiseTexture() },
   };
 
   private readonly colliders: BoxCollider2D[] = [
-    // Bed platform & mattress (ModernBed + BedUnit)
-    { minX: -2.07, maxX: 1.18, minZ: -2.86, maxZ: -0.20 },
+    // Bed platform & mattress (ModernBed + BedUnit) — jumpable onto topY = 0.54!
+    { minX: -2.07, maxX: 1.18, minZ: -2.86, maxZ: -0.20, topY: 0.54 },
     // Right-side bedside nightstand
     { minX: 1.18, maxX: 1.72, minZ: -2.58, maxZ: -1.88 },
     // PC Desk against -X wall (front edge at X = -1.25)
@@ -92,7 +104,9 @@ export class BedroomScene {
       ]);
 
     clockTexWebp.colorSpace = THREE.SRGBColorSpace;
+    clockTexWebp.anisotropy = 8;
     lampTexWebp.colorSpace = THREE.SRGBColorSpace;
+    lampTexWebp.anisotropy = 8;
 
     // 1. Convert Bedroom materials to specular/rim AtmosphericMaterial & inject fast texture-backed infection shader
     const roomRoot = bedroomGltf.scene;
@@ -124,6 +138,8 @@ export class BedroomScene {
 
           if (isInfectedArch) {
             const std = m as THREE.MeshStandardMaterial;
+            if (std.map) std.map.anisotropy = 8;
+            if (std.emissiveMap) std.emissiveMap.anisotropy = 8;
             const lam = new THREE.MeshLambertMaterial({
               name: mName,
               color: std.color ? std.color.clone() : new THREE.Color(0xffffff),
@@ -201,6 +217,7 @@ export class BedroomScene {
         if (!cached) {
           if (m.name === 'Material') {
             const std = m as THREE.MeshStandardMaterial;
+            if (std.map) std.map.anisotropy = 8;
             const deskLam = new THREE.MeshLambertMaterial({
               name: m.name,
               color: std.color ? std.color.clone() : new THREE.Color(0xffffff),
@@ -295,33 +312,272 @@ export class BedroomScene {
     this.group.add(doorCrackGlow);
   }
 
+  /**
+   * Builds a physically-inspired wet window glass ShaderMaterial with:
+   * - Cold 2:47 AM interior condensation film cleared dynamically along sliding droplet wakes
+   * - 3 octaves of stick-slip hemispheric water droplets + micro-bead wake trails
+   * - True view-dependent world-space normal refraction & specular reflection of city bokeh, moon & PC monitor!
+   */
+  private createRealisticRainGlassMaterial(uvAspectX: number, uvAspectY: number, isSkylight: boolean): THREE.ShaderMaterial {
+    return new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: THREE.FrontSide,
+      uniforms: {
+        uTime: this.infectUniforms.uTime,
+        uInfect: this.infectUniforms.uInfect,
+        uAftermath: this.infectUniforms.uAftermath,
+        uPortalPos: this.infectUniforms.uPortalPos,
+        uNoiseTex: this.infectUniforms.uNoiseTex,
+        uGridAspect: { value: new THREE.Vector2(uvAspectX, uvAspectY) },
+        uIsSkylight: { value: isSkylight ? 1.0 : 0.0 },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        varying vec3 vWorldPos;
+        varying vec3 vWorldNormal;
+        varying vec3 vWorldTangent;
+        varying vec3 vWorldBitangent;
+        void main() {
+          vUv = uv;
+          vec4 wp = modelMatrix * vec4(position, 1.0);
+          vWorldPos = wp.xyz;
+          mat3 nMat = mat3(modelMatrix);
+          vWorldNormal = normalize(nMat * normal);
+          vWorldTangent = normalize(nMat * vec3(1.0, 0.0, 0.0));
+          vWorldBitangent = normalize(nMat * vec3(0.0, 1.0, 0.0));
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec2 vUv;
+        varying vec3 vWorldPos;
+        varying vec3 vWorldNormal;
+        varying vec3 vWorldTangent;
+        varying vec3 vWorldBitangent;
+        uniform float uTime;
+        uniform float uInfect;
+        uniform float uAftermath;
+        uniform vec3 uPortalPos;
+        uniform sampler2D uNoiseTex;
+        uniform vec2 uGridAspect;
+        uniform float uIsSkylight;
+
+        vec3 hash13(float p) {
+          vec3 p3 = fract(vec3(p) * vec3(0.1031, 0.11369, 0.13787));
+          p3 += dot(p3, p3.yzx + 19.19);
+          return fract(vec3((p3.x + p3.y) * p3.z, (p3.x + p3.z) * p3.y, (p3.y + p3.z) * p3.x));
+        }
+
+        // Returns vec4(gradX, gradY, dropMask, wakeClear) for one sliding raindrop octave
+        vec4 rainDropLayer(vec2 uv, float t, float scale) {
+          vec2 grid = vec2(8.0, 2.2) * scale;
+          vec2 st = uv * grid;
+          float colId = floor(st.x);
+          st.y += fract(sin(colId * 127.1) * 43758.5453);
+
+          vec2 cellId = floor(st);
+          vec3 n = hash13(cellId.x * 37.0 + cellId.y * 251.0 + scale * 19.0);
+          vec2 p = fract(st) - vec2(0.5, 0.0);
+
+          // Stick-slip surface-tension motion: accelerates down, pauses, then slips again!
+          float phase = t * (0.68 + n.z * 0.55) + n.x * 6.2831853;
+          float slip = phase + sin(phase + sin(phase * 0.55) * 0.65) * 0.42;
+          float dropY = 0.84 - fract(slip * 0.24 + n.y) * 0.72;
+
+          // Surface-tension meander wiggle as the droplet slides down cold glass
+          float wiggle = (n.x - 0.5) * 0.46 + sin(uv.y * 22.0 * scale + n.y * 12.0) * 0.10 * (0.5 + n.z);
+          float dx = (p.x - wiggle) * (1.0 / 0.28);
+          float dy = (p.y - dropY) * (grid.x / grid.y) * (1.0 / 0.28);
+          // Teardrop elongation above main bead
+          float tearY = dy > 0.0 ? dy * 0.78 : dy * 1.12;
+          float dist = length(vec2(dx, tearY));
+          float mainDrop = smoothstep(1.0, 0.18, dist);
+
+          // Trailing micro-beads left in the wake above the sliding drop (p.y > dropY)
+          float above = smoothstep(dropY - 0.02, dropY + 0.08, p.y);
+          float trailEnv = smoothstep(1.0, dropY, p.y) * above;
+          float trailSubY = fract(p.y * 5.0 - n.z * 3.0) - 0.5;
+          float trailDist = length(vec2(dx * 1.75, trailSubY * 2.2));
+          float trailBead = smoothstep(0.85, 0.15, trailDist) * trailEnv * 0.78;
+
+          float wakeClear = smoothstep(0.95, 0.25, abs(dx)) * trailEnv;
+          float mask = max(mainDrop, trailBead);
+
+          // Hemispheric 3D water surface slope for realistic refraction & crisp specular glints!
+          vec2 grad = vec2(0.0);
+          if (mainDrop > 0.01) {
+            grad += vec2(-dx, -tearY) * mainDrop * 0.95;
+          }
+          if (trailBead > 0.01) {
+            grad += vec2(-dx * 1.75, -trailSubY * 2.2) * trailBead * 0.65;
+          }
+          return vec4(grad, mask, wakeClear);
+        }
+
+        // Fine static mist micro-droplets condensed across the pane
+        vec3 mistBeads(vec2 uv, float t) {
+          vec2 st = uv * 42.0;
+          vec2 id = floor(st);
+          vec3 h = hash13(id.x * 73.1 + id.y * 193.7);
+          vec2 p = fract(st) - 0.5 - (h.xy - 0.5) * 0.45;
+          float r = length(p) * (1.35 + h.z * 0.9);
+          float fade = smoothstep(0.0, 0.2, fract(t * 0.07 + h.z)) * smoothstep(1.0, 0.65, fract(t * 0.07 + h.z));
+          float m = smoothstep(0.42, 0.08, r) * fade * step(0.32, h.x);
+          return vec3(-p * 3.2 * m, m);
+        }
+
+        // Procedural out-of-focus wet night city & moonlight bokeh refracted inside each droplet
+        vec3 sampleNightRefraction(vec2 refrUv, float lightning, float infect) {
+          float h = clamp(refrUv.y, 0.0, 1.0);
+          vec3 sky = mix(vec3(0.06, 0.11, 0.24), vec3(0.012, 0.024, 0.068), pow(h, 0.7));
+          sky += vec3(0.35, 0.48, 0.78) * lightning * 0.55;
+
+          // Out-of-focus sodium-amber, cyan, and crimson city bokeh orbs visible upside-down inside water lens!
+          vec2 bGrid = refrUv * vec2(11.0, 6.0);
+          vec2 bId = floor(bGrid);
+          vec3 bh = hash13(bId.x * 41.0 + bId.y * 157.0);
+          vec2 bp = fract(bGrid) - 0.5 - (bh.xy - 0.5) * 0.35;
+          float orb = smoothstep(0.44, 0.12, length(bp)) * step(0.56, bh.z) * smoothstep(0.72, 0.15, h);
+          vec3 bokehCol = bh.x < 0.48
+            ? vec3(1.0, 0.68, 0.30)
+            : (bh.x < 0.82 ? vec3(0.36, 0.76, 1.0) : vec3(1.0, 0.26, 0.38));
+          sky += bokehCol * orb * (1.0 - uIsSkylight * 0.72) * 0.95;
+
+          // Moon corona glint
+          float moonD = length(refrUv - vec2(0.32, 0.68));
+          sky += vec3(0.78, 0.88, 1.0) * exp(-moonD * 9.5) * 0.58;
+          return mix(sky, vec3(0.02, 0.38, 0.92), infect * 0.72);
+        }
+
+        void main() {
+          vec2 metricUv = vUv * uGridAspect;
+          float rainRate = mix(1.0, 0.28, uAftermath);
+          float t = uTime * rainRate;
+
+          // Skylight droplets slide rapidly down the 48-deg pitched glass!
+          float speedMul = mix(1.0, 1.28, uIsSkylight);
+          vec4 d1 = rainDropLayer(metricUv, t * speedMul, 1.0);
+          vec4 d2 = rainDropLayer(metricUv + vec2(0.37, 0.19), t * speedMul * 1.24 + 4.7, 1.85);
+          vec3 mist = mistBeads(metricUv, t);
+
+          // Extra skylight impact ripples where falling rain pelts the angled roof glass directly!
+          vec2 impGrad = vec2(0.0);
+          float impRing = 0.0;
+          if (uIsSkylight > 0.5) {
+            vec2 rSt = metricUv * 4.5;
+            vec2 rId = floor(rSt);
+            vec3 rh = hash13(rId.x * 59.0 + rId.y * 131.0 + floor(t * 2.4));
+            float rAge = fract(t * 2.4 + rh.z);
+            vec2 rp = fract(rSt) - 0.5 - (rh.xy - 0.5) * 0.4;
+            float rDist = length(rp);
+            float wave = exp(-abs(rDist - rAge * 0.46) * 28.0) * (1.0 - rAge) * step(0.45, rh.x);
+            impRing = wave;
+            impGrad = normalize(rp + vec2(1e-4)) * wave * 0.85;
+          }
+
+          vec2 totalGrad = d1.xy + d2.xy * 0.82 + mist.xy * 0.38 + impGrad;
+          float dropMask = clamp(max(max(d1.z, d2.z * 0.9), mist.z * 0.65) + impRing * 0.5, 0.0, 1.0);
+          float wakeClear = clamp(d1.w + d2.w * 0.85, 0.0, 1.0);
+
+          // Cold nocturnal condensation breath-fog around window edges, wiped transparent by sliding drops!
+          vec4 fogNoise = texture2D(uNoiseTex, metricUv * 0.42 + vec2(0.0, uTime * 0.004));
+          float borderCool = 1.0 - (
+            smoothstep(0.0, 0.26, vUv.x) * smoothstep(1.0, 0.74, vUv.x) *
+            smoothstep(0.0, 0.26, vUv.y) * smoothstep(1.0, 0.74, vUv.y)
+          );
+          float condensation = clamp((0.22 + 0.52 * borderCool + (fogNoise.r - 0.5) * 0.18) * (1.0 - wakeClear * 0.88) * (1.0 - dropMask * 0.92), 0.0, 0.78);
+
+          // Subtle distant storm sheet-lightning flash every ~19s
+          float flashWave = pow(max(0.0, sin(uTime * 0.33) * sin(uTime * 1.91)), 18.0) * (1.0 - uAftermath);
+
+          // True 3D world-space droplet normal for view-dependent refraction & reflection!
+          vec3 N = normalize(
+            vWorldNormal
+            + vWorldTangent * (totalGrad.x * 0.62)
+            + vWorldBitangent * (totalGrad.y * 0.62)
+          );
+          vec3 V = normalize(cameraPosition - vWorldPos);
+          float ndv = clamp(abs(dot(N, V)), 0.0, 1.0);
+          float fresnel = pow(1.0 - ndv, 3.2);
+
+          // Refracted inverted exterior bokeh lens inside water beads!
+          vec2 refrUv = clamp(vUv - totalGrad * 0.14 + (V.zy * 0.035), 0.0, 1.0);
+          vec3 refrCol = sampleNightRefraction(refrUv, flashWave, uInfect);
+
+          // Specular highlights from exterior moon + interior cerulean BSOD monitor behind player!
+          vec3 moonDir = normalize(vec3(0.76, 0.54, -0.36));
+          vec3 monDir = normalize(uPortalPos - vWorldPos);
+          vec3 hMoon = normalize(moonDir + V);
+          vec3 hMon = normalize(monDir + V);
+          float moonSpec = pow(max(dot(N, hMoon), 0.0), 72.0) * (0.35 + 1.85 * dropMask);
+          float monSpec = pow(max(dot(N, hMon), 0.0), 54.0) * (0.20 + 1.45 * dropMask);
+
+          vec3 fogCol = mix(vec3(0.11, 0.17, 0.28), vec3(0.05, 0.28, 0.58), uInfect * 0.6) + vec3(0.22, 0.30, 0.48) * flashWave;
+          vec3 col = mix(fogCol, refrCol * 1.35, dropMask);
+          col += vec3(0.86, 0.93, 1.0) * moonSpec;
+          col += mix(vec3(0.10, 0.56, 1.0), vec3(0.35, 0.85, 1.0), dropMask) * (monSpec * 0.85 + fresnel * 0.28);
+
+          // Soft mullion edge fade so glass blends organically into window frame
+          float paneEdge = smoothstep(0.0, 0.03, vUv.x) * smoothstep(1.0, 0.97, vUv.x)
+                         * smoothstep(0.0, 0.03, vUv.y) * smoothstep(1.0, 0.97, vUv.y);
+          float alpha = clamp((condensation * 0.42 + dropMask * 0.72 + moonSpec * 0.55 + monSpec * 0.40 + fresnel * 0.16) * paneEdge, 0.0, 0.92);
+          gl_FragColor = vec4(col, alpha);
+        }
+      `,
+    });
+  }
+
   private buildAmbientPracticals(): void {
-    const poolCanvas = document.createElement('canvas');
-    poolCanvas.width = 128;
-    poolCanvas.height = 128;
-    const pctx = poolCanvas.getContext('2d')!;
-    const pgrad = pctx.createRadialGradient(64, 64, 2, 64, 64, 62);
-    pgrad.addColorStop(0, 'rgba(150,185,255,0.85)');
-    pgrad.addColorStop(0.45, 'rgba(90,130,215,0.30)');
-    pgrad.addColorStop(1, 'rgba(40,70,140,0)');
-    pctx.fillStyle = pgrad;
-    pctx.fillRect(0, 0, 128, 128);
-    const poolTex = new THREE.CanvasTexture(poolCanvas);
-    poolTex.minFilter = THREE.LinearFilter;
-    poolTex.generateMipmaps = false;
-    const pool = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.6, 3.2),
-      new THREE.MeshBasicMaterial({
-        map: poolTex,
-        transparent: true,
-        opacity: 0.28,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      })
-    );
+    // 1. Dynamic Rain-Rippled Moonlight & Mullion Caustic Projection on Floor/Rug (replaces static baked radial blob!)
+    this.floorCausticMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: this.infectUniforms.uTime,
+        uInfect: this.infectUniforms.uInfect,
+        uAftermath: this.infectUniforms.uAftermath,
+        uNoiseTex: this.infectUniforms.uNoiseTex,
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec2 vUv;
+        uniform float uTime;
+        uniform float uInfect;
+        uniform float uAftermath;
+        uniform sampler2D uNoiseTex;
+        void main() {
+          vec2 c = (vUv - 0.5) * 2.0;
+          float env = smoothstep(1.0, 0.18, length(c * vec2(1.05, 0.92)));
+          // Projected window frame mullions & sash bars
+          float mullionX = smoothstep(0.025, 0.065, abs(vUv.x - 0.5));
+          float mullionY = smoothstep(0.022, 0.060, abs(vUv.y - 0.52));
+
+          // Sliding watery raindrop caustic filaments cast across the floorboards!
+          float spd = mix(0.085, 0.025, uAftermath);
+          vec4 nA = texture2D(uNoiseTex, vec2(vUv.y * 3.4, vUv.x * 1.6 - uTime * spd));
+          vec4 nB = texture2D(uNoiseTex, vec2(vUv.y * 6.2 + 0.31, vUv.x * 2.4 - uTime * spd * 1.45));
+          float caustic = pow(clamp(1.0 - abs(nA.b - nB.g) * 2.4, 0.0, 1.0), 3.0);
+          float flashWave = pow(max(0.0, sin(uTime * 0.33) * sin(uTime * 1.91)), 18.0) * (1.0 - uAftermath);
+
+          vec3 baseMoon = mix(vec3(0.32, 0.48, 0.86), vec3(0.06, 0.44, 0.96), uInfect);
+          vec3 col = baseMoon * (0.52 + caustic * 0.95 + flashWave * 1.35);
+          float alpha = env * mullionX * mullionY * (0.14 + caustic * 0.16 + flashWave * 0.14);
+          gl_FragColor = vec4(col, alpha);
+        }
+      `,
+    });
+    const pool = new THREE.Mesh(new THREE.PlaneGeometry(2.7, 3.3), this.floorCausticMat);
     pool.rotation.x = -Math.PI * 0.5;
-    pool.rotation.z = 0.22;
-    pool.position.set(1.55, 0.024, -0.55);
+    pool.rotation.z = 0.20;
+    pool.position.set(1.52, 0.024, -0.55);
     this.group.add(pool);
 
     const shaftMat = new THREE.ShaderMaterial({
@@ -346,7 +602,7 @@ export class BedroomScene {
           float along = smoothstep(0.0, 0.35, vUv.y) * smoothstep(1.0, 0.6, vUv.y);
           float shimmer = 0.84 + 0.16 * sin(uTime * 0.6 + vUv.y * 2.0);
           vec3 col = mix(vec3(0.24, 0.42, 0.85), vec3(0.10, 0.28, 0.75), uInfect);
-          gl_FragColor = vec4(col, across * along * shimmer * 0.072);
+          gl_FragColor = vec4(col, across * along * shimmer * 0.068);
         }
       `,
     });
@@ -355,43 +611,25 @@ export class BedroomScene {
     shaft.rotation.set(0, -Math.PI * 0.5, -0.34);
     this.group.add(shaft);
 
-    // Subtle 2:47 AM rain-streaked window glass catching city neon & cold monitor reflections (1 ultra-light quad)
-    this.rainGlassMat = new THREE.ShaderMaterial({
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      uniforms: {
-        uTime: this.infectUniforms.uTime,
-        uInfect: this.infectUniforms.uInfect,
-        uNoiseTex: this.infectUniforms.uNoiseTex,
-      },
-      vertexShader: /* glsl */ `
-        varying vec2 vUv;
-        void main() {
-          vUv = uv;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-      `,
-      fragmentShader: /* glsl */ `
-        varying vec2 vUv;
-        uniform float uTime;
-        uniform float uInfect;
-        uniform sampler2D uNoiseTex;
-        void main() {
-          vec4 n1 = texture2D(uNoiseTex, vec2(vUv.x * 5.5, vUv.y * 1.4 + uTime * 0.055));
-          vec4 n2 = texture2D(uNoiseTex, vec2(vUv.x * 11.0 + 0.37, vUv.y * 2.2 + uTime * 0.095));
-          float streak = pow(n1.b, 4.0) * 0.55 + pow(n2.b, 5.0) * 0.65;
-          float edgeVig = smoothstep(0.0, 0.12, vUv.x) * smoothstep(1.0, 0.88, vUv.x)
-                        * smoothstep(0.0, 0.12, vUv.y) * smoothstep(1.0, 0.88, vUv.y);
-          vec3 tint = mix(vec3(0.32, 0.55, 0.95), vec3(0.08, 0.68, 1.0), uInfect);
-          gl_FragColor = vec4(tint, streak * edgeVig * 0.16);
-        }
-      `,
-    });
-    const rainPane = new THREE.Mesh(new THREE.PlaneGeometry(2.15, 1.75), this.rainGlassMat);
+    // 2. Photorealistic Wet Refractive Rain Glass on BOTH East Picture Window & Overhead Angled Skylight!
+    this.rainGlassMat = this.createRealisticRainGlassMaterial(2.35, 1.92, false);
+    const rainPane = new THREE.Mesh(new THREE.PlaneGeometry(2.35, 1.92), this.rainGlassMat);
     rainPane.rotation.y = -Math.PI * 0.5;
-    rainPane.position.set(2.68, 1.62, -0.55);
+    rainPane.position.set(2.685, 1.66, -0.55);
+    rainPane.renderOrder = 3;
     this.group.add(rainPane);
+
+    // Overhead Roof Skylight (RoofWindows_RoofWindow_0 slopes from (y=1.583, z=-2.91) up to (y=3.153, z=-1.501))
+    this.skylightRainMat = this.createRealisticRainGlassMaterial(4.32, 2.02, true);
+    const skylightPane = new THREE.Mesh(new THREE.PlaneGeometry(4.32, 2.02), this.skylightRainMat);
+    // Normal faces inward-downward into bedroom: tilt +0.742 rad around X from vertical +Z plane
+    skylightPane.rotation.x = 0.742;
+    skylightPane.position.set(0.34, 2.33, -2.16);
+    skylightPane.renderOrder = 3;
+    this.group.add(skylightPane);
+
+    // 3. View-Dependent Bedroom Elements (Requirement 6: 視界を動かすことによって見え方が変わる仕掛け!)
+    this.buildViewDependentRoomProps();
 
     // Dead pendant fixture under ceiling rose
     const cordMat = new THREE.MeshLambertMaterial({ color: 0x15181f });
@@ -405,6 +643,163 @@ export class BedroomScene {
     shade.position.set(0.34, 2.66, 0.1);
     shade.rotation.x = Math.PI;
     this.group.add(shade);
+  }
+
+  /**
+   * Builds two view-dependent eerie bedroom anomalies whose appearance transforms as you move your gaze/angle:
+   * 1) Ribbed Lenticular Wall Print beside the PC desk: rainy monochrome towers from one side -> glaring BSOD ':)' scan from the other!
+   * 2) Peripheral-Gaze / Grazing-Angle Vanity Mirror Anomaly over Mirror_Mirror_0: silhouette & eyes appear in peripheral vision, vanish when stared at directly!
+   */
+  private buildViewDependentRoomProps(): void {
+    // 3a. Framed Lenticular Artwork on West Wall (x = -2.045, y = 1.64, z = -0.58)
+    const frameGroup = new THREE.Group();
+    frameGroup.position.set(-2.044, 1.64, -0.58);
+    frameGroup.rotation.y = Math.PI * 0.5;
+
+    const frameBacking = new THREE.Mesh(
+      new THREE.BoxGeometry(0.56, 0.74, 0.024),
+      new THREE.MeshLambertMaterial({ color: 0x141821 })
+    );
+    frameGroup.add(frameBacking);
+
+    this.lenticularMat = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: this.infectUniforms.uTime,
+        uInfect: this.infectUniforms.uInfect,
+        uCamForward: this.infectUniforms.uCamForward,
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        varying vec3 vWorldPos;
+        varying vec3 vTangentW;
+        varying vec3 vNormalW;
+        void main() {
+          vUv = uv;
+          vec4 wp = modelMatrix * vec4(position, 1.0);
+          vWorldPos = wp.xyz;
+          mat3 nMat = mat3(modelMatrix);
+          vNormalW = normalize(nMat * normal);
+          vTangentW = normalize(nMat * vec3(1.0, 0.0, 0.0));
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec2 vUv;
+        varying vec3 vWorldPos;
+        varying vec3 vTangentW;
+        varying vec3 vNormalW;
+        uniform float uTime;
+        uniform float uInfect;
+        uniform vec3 uCamForward;
+
+        float hash21(vec2 p) {
+          p = fract(p * vec2(234.34, 435.345));
+          p += dot(p, p + 34.23);
+          return fract(p.x * p.y);
+        }
+
+        void main() {
+          vec3 V = normalize(cameraPosition - vWorldPos);
+          // Horizontal parallax angle + head-yaw gaze angle shifts the lenticular prism phase!
+          float lateralAngle = dot(V, vTangentW) + dot(uCamForward, vTangentW) * 0.55;
+          float flipFactor = clamp(smoothstep(-0.18, 0.24, lateralAngle) + uInfect * 0.85, 0.0, 1.0);
+
+          // Image A (viewed from bed / -Z side): calm moody monochrome rainy cityscape print
+          float colId = floor(vUv.x * 11.0);
+          float bHeight = 0.28 + 0.48 * hash21(vec2(colId, 3.7));
+          float inTower = step(vUv.y, bHeight);
+          vec2 winCell = fract(vUv * vec2(33.0, 44.0));
+          float winLit = step(0.72, hash21(floor(vUv * vec2(33.0, 44.0)))) * step(0.25, winCell.x) * step(0.3, winCell.y);
+          vec3 skyA = mix(vec3(0.16, 0.20, 0.28), vec3(0.05, 0.07, 0.12), vUv.y);
+          vec3 imgA = mix(skyA, vec3(0.03, 0.04, 0.07) + vec3(0.55, 0.68, 0.85) * winLit * 0.45, inTower);
+
+          // Image B (viewed as you walk toward desk / rotate gaze): stark BSOD ':)' watching eye diagram!
+          vec3 imgB = vec3(0.0, 0.26, 0.58);
+          vec2 p = (vUv - 0.5) * vec2(0.76, 1.0);
+          float irisRing = smoothstep(0.022, 0.006, abs(length(p * vec2(1.0, 1.45)) - 0.23));
+          float pupil = smoothstep(0.075, 0.045, length(p - vec2(lateralAngle * 0.08, 0.0)));
+          float scanGrid = step(0.92, fract(vUv.y * 32.0)) + step(0.92, fract(vUv.x * 24.0));
+          imgB += vec3(0.52, 0.88, 1.0) * (irisRing * 0.95 + scanGrid * 0.14);
+          imgB = mix(imgB, vec3(0.98, 0.24, 0.36), pupil);
+
+          // Physical vertical lenticular prism ridges catching light as view moves!
+          float ridge = 0.5 + 0.5 * sin(vUv.x * 240.0 + lateralAngle * 18.0);
+          float ridgeBlend = clamp(flipFactor + (ridge - 0.5) * 0.24 * sin(flipFactor * 3.14159), 0.0, 1.0);
+          vec3 col = mix(imgA, imgB, ridgeBlend);
+
+          // White matboard border + glass specular sheen
+          float matBorder = step(0.07, vUv.x) * step(vUv.x, 0.93) * step(0.06, vUv.y) * step(vUv.y, 0.94);
+          col = mix(vec3(0.76, 0.79, 0.84) * (0.45 + 0.2 * vUv.y), col, matBorder);
+          float spec = pow(max(dot(reflect(-V, vNormalW), normalize(vec3(0.5, 0.6, 0.4))), 0.0), 36.0);
+          col += vec3(0.35, 0.62, 0.95) * spec * (0.25 + 0.45 * ridge);
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `,
+    });
+    const artPrint = new THREE.Mesh(new THREE.PlaneGeometry(0.50, 0.68), this.lenticularMat);
+    artPrint.position.z = 0.014;
+    frameGroup.add(artPrint);
+    this.group.add(frameGroup);
+
+    // 3b. Peripheral-Vision / Grazing-Angle Mirror Anomaly over Mirror_Mirror_0 ([2.418..2.834, 0.684..1.293, -1.463..-0.974])
+    this.mirrorAnomalyMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: this.infectUniforms.uTime,
+        uInfect: this.infectUniforms.uInfect,
+        uCamForward: this.infectUniforms.uCamForward,
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        varying vec3 vWorldPos;
+        varying vec3 vNormalW;
+        void main() {
+          vUv = uv;
+          vec4 wp = modelMatrix * vec4(position, 1.0);
+          vWorldPos = wp.xyz;
+          vNormalW = normalize(mat3(modelMatrix) * normal);
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec2 vUv;
+        varying vec3 vWorldPos;
+        varying vec3 vNormalW;
+        uniform float uTime;
+        uniform float uInfect;
+        uniform vec3 uCamForward;
+        void main() {
+          vec3 toFrag = normalize(vWorldPos - cameraPosition);
+          vec3 V = -toFrag;
+          // gazeAlign = 1.0 when staring dead-center at mirror; drops < 0.94 in peripheral vision!
+          float gazeAlign = dot(normalize(uCamForward), toFrag);
+          float peripheral = smoothstep(0.965, 0.80, gazeAlign) * smoothstep(0.35, 0.68, gazeAlign);
+          float grazing = smoothstep(0.88, 0.35, abs(dot(vNormalW, V)));
+          float reveal = clamp(max(peripheral, grazing * 0.75) + uInfect * 0.65, 0.0, 1.0);
+
+          // Parallax-shifted dark watcher silhouette + twin cold eyes inside mirror depth!
+          vec2 p = vUv - vec2(0.5 + V.z * 0.14, 0.44 + V.y * 0.08);
+          float head = smoothstep(0.14, 0.07, length((p - vec2(0.0, 0.16)) * vec2(1.2, 1.0)));
+          float torso = smoothstep(0.24, 0.11, abs(p.x)) * smoothstep(0.12, -0.35, p.y);
+          float eyeL = smoothstep(0.022, 0.007, length(p - vec2(-0.042, 0.17)));
+          float eyeR = smoothstep(0.022, 0.007, length(p - vec2(0.042, 0.17)));
+          float border = smoothstep(0.0, 0.12, vUv.x) * smoothstep(1.0, 0.88, vUv.x)
+                       * smoothstep(0.0, 0.12, vUv.y) * smoothstep(1.0, 0.88, vUv.y);
+
+          vec3 col = vec3(0.12, 0.36, 0.72) * (head + torso * 0.65) * 0.32;
+          col += vec3(0.75, 0.94, 1.0) * (eyeL + eyeR) * (0.85 + 0.15 * sin(uTime * 11.0));
+          float alpha = clamp((head * 0.35 + torso * 0.22 + (eyeL + eyeR) * 0.95) * reveal * border, 0.0, 0.85);
+          gl_FragColor = vec4(col, alpha);
+        }
+      `,
+    });
+    const mirrorOverlay = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.54), this.mirrorAnomalyMat);
+    mirrorOverlay.rotation.y = -Math.PI * 0.5 - 0.18;
+    mirrorOverlay.position.set(2.50, 0.985, -1.215);
+    mirrorOverlay.renderOrder = 3;
+    this.group.add(mirrorOverlay);
   }
 
   private pushBox(
@@ -669,6 +1064,128 @@ export class BedroomScene {
         );
       }
     }
+
+    // 3D Exterior Falling Rain Sheets & Sill Impact Splashes visible through BOTH East Window & North Skylight!
+    const streakGeo = new THREE.PlaneGeometry(0.0085, 0.42);
+    const streakData = new Float32Array(EXTERIOR_RAIN_STREAK_COUNT * 4);
+    for (let i = 0; i < EXTERIOR_RAIN_STREAK_COUNT; i++) {
+      const overSkylight = i >= 260;
+      if (!overSkylight) {
+        // Outside East Window (x = 2.92 .. 4.85, z = -2.65 .. 1.55)
+        streakData[i * 4 + 0] = 2.92 + Math.random() * 1.92;
+        streakData[i * 4 + 1] = Math.random();
+        streakData[i * 4 + 2] = -2.65 + Math.random() * 4.20;
+      } else {
+        // Above Angled Roof Skylight (x = -2.10 .. 2.75, z = -3.45 .. -1.45)
+        streakData[i * 4 + 0] = -2.10 + Math.random() * 4.85;
+        streakData[i * 4 + 1] = Math.random();
+        streakData[i * 4 + 2] = -3.45 + Math.random() * 2.00;
+      }
+      streakData[i * 4 + 3] = (overSkylight ? 10.0 : 0.0) + 0.72 + Math.random() * 0.65;
+    }
+    streakGeo.setAttribute('aStreak4', new THREE.InstancedBufferAttribute(streakData, 4));
+
+    this.rainStreakMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: this.infectUniforms.uTime,
+        uInfect: this.infectUniforms.uInfect,
+        uAftermath: this.infectUniforms.uAftermath,
+      },
+      vertexShader: /* glsl */ `
+        attribute vec4 aStreak4;
+        uniform float uTime;
+        uniform float uAftermath;
+        varying vec2 vUv;
+        varying float vAlpha;
+        void main() {
+          vUv = uv;
+          float isSky = step(5.0, aStreak4.w);
+          float spdSeed = aStreak4.w - isSky * 10.0;
+          float rate = mix(1.0, 0.30, uAftermath);
+          float fallSpan = mix(4.6, 3.0, isSky);
+          float yTop = mix(4.3, 4.9, isSky);
+          float cycle = fract(aStreak4.y + uTime * (1.85 * spdSeed * rate));
+          float cy = yTop - cycle * fallSpan;
+          float windZ = cycle * 0.42;
+
+          // Billboard horizontally around vertical wind-slanted rain vector so streaks stay razor-visible from every angle!
+          vec3 center = vec3(aStreak4.x, cy, aStreak4.z + windZ);
+          vec3 rainAxis = normalize(vec3(-0.04, -1.0, 0.11));
+          vec3 toCam = normalize(cameraPosition - center);
+          vec3 sideAxis = normalize(cross(rainAxis, toCam));
+          float lenScale = spdSeed * mix(1.0, 0.72, uAftermath);
+          vec3 worldP = center + sideAxis * position.x + (-rainAxis) * (position.y * lenScale);
+
+          float distFade = smoothstep(5.4, 2.7, distance(cameraPosition, center));
+          vAlpha = (0.30 + 0.45 * distFade) * mix(1.0, 0.38, uAftermath);
+          gl_Position = projectionMatrix * viewMatrix * vec4(worldP, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec2 vUv;
+        varying float vAlpha;
+        uniform float uInfect;
+        void main() {
+          float taper = smoothstep(0.0, 0.25, vUv.y) * smoothstep(1.0, 0.15, vUv.y);
+          float core = smoothstep(0.5, 0.05, abs(vUv.x - 0.5));
+          vec3 col = mix(vec3(0.58, 0.74, 0.98), vec3(0.22, 0.72, 1.0), uInfect);
+          gl_FragColor = vec4(col, taper * core * vAlpha * 0.46);
+        }
+      `,
+    });
+    const rainStreaks = new THREE.InstancedMesh(streakGeo, this.rainStreakMat, EXTERIOR_RAIN_STREAK_COUNT);
+    rainStreaks.frustumCulled = false;
+    rainStreaks.renderOrder = 2;
+    this.group.add(rainStreaks);
+
+    // Exterior Window Sill & Skylight Frame Raindrop Crown Splashes!
+    const splashGeo = new THREE.RingGeometry(0.18, 0.5, 10, 1);
+    splashGeo.rotateX(-Math.PI * 0.5);
+    const splashData = new Float32Array(EXTERIOR_SPLASH_COUNT * 4);
+    for (let i = 0; i < EXTERIOR_SPLASH_COUNT; i++) {
+      splashData[i * 4 + 0] = 2.84 + Math.random() * 0.22;
+      splashData[i * 4 + 1] = 0.65;
+      splashData[i * 4 + 2] = -1.95 + Math.random() * 2.80;
+      splashData[i * 4 + 3] = Math.random();
+    }
+    splashGeo.setAttribute('aSplash4', new THREE.InstancedBufferAttribute(splashData, 4));
+    this.rainSplashMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: this.infectUniforms.uTime,
+        uAftermath: this.infectUniforms.uAftermath,
+      },
+      vertexShader: /* glsl */ `
+        attribute vec4 aSplash4;
+        uniform float uTime;
+        uniform float uAftermath;
+        varying float vLife;
+        void main() {
+          float rate = mix(3.4, 0.9, uAftermath);
+          float age = fract(uTime * rate + aSplash4.w * 13.7);
+          vLife = (1.0 - age) * mix(1.0, 0.45, uAftermath);
+          float r = (0.015 + age * 0.065);
+          vec3 wp = aSplash4.xyz + vec3(position.x * r, age * 0.018 * (1.0 - age), position.z * r);
+          gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying float vLife;
+        void main() {
+          gl_FragColor = vec4(0.68, 0.84, 1.0, vLife * 0.42);
+        }
+      `,
+    });
+    const splashes = new THREE.InstancedMesh(splashGeo, this.rainSplashMat, EXTERIOR_SPLASH_COUNT);
+    splashes.frustumCulled = false;
+    splashes.renderOrder = 2;
+    this.group.add(splashes);
   }
 
   private buildDeskLegsAndCables(cablesTemplate: THREE.Object3D): void {
@@ -734,14 +1251,15 @@ export class BedroomScene {
     mug.position.set(-1.38, 0.802, 1.06);
     this.group.add(mug);
 
-    // Bedside Digital Alarm Clock
+    // Bedside Digital Alarm Clock (crisp 512x256 LED canvas + 8x anisotropy)
     this.clockCanvas = document.createElement('canvas');
-    this.clockCanvas.width = 256;
-    this.clockCanvas.height = 128;
+    this.clockCanvas.width = 512;
+    this.clockCanvas.height = 256;
     this.clockTex = new THREE.CanvasTexture(this.clockCanvas);
     this.clockTex.colorSpace = THREE.SRGBColorSpace;
-    this.clockTex.generateMipmaps = false;
-    this.clockTex.minFilter = THREE.LinearFilter;
+    this.clockTex.anisotropy = 8;
+    this.clockTex.generateMipmaps = true;
+    this.clockTex.minFilter = THREE.LinearMipmapLinearFilter;
     this.updateClockDisplay('02:47', false);
 
     const clockBody = new THREE.Mesh(
@@ -766,13 +1284,16 @@ export class BedroomScene {
     this.lastClockText = key;
 
     const ctx = this.clockCanvas.getContext('2d')!;
-    ctx.fillStyle = '#07090e';
-    ctx.fillRect(0, 0, 256, 128);
-    ctx.fillStyle = glitching ? '#38a8ff' : '#ff3b3b';
-    ctx.font = 'bold 66px Consolas, monospace';
+    ctx.fillStyle = '#05070c';
+    ctx.fillRect(0, 0, 512, 256);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(timeStr, 128, 66);
+    ctx.font = 'bold 132px Consolas, monospace';
+    // Dim unlit 7-segment ghost mask behind active LEDs for photorealistic bedside clock feel
+    ctx.fillStyle = glitching ? 'rgba(56, 168, 255, 0.08)' : 'rgba(255, 59, 59, 0.08)';
+    ctx.fillText('88:88', 256, 132);
+    ctx.fillStyle = glitching ? '#38a8ff' : '#ff3b3b';
+    ctx.fillText(timeStr, 256, 132);
     this.clockTex.needsUpdate = true;
   }
 
@@ -1159,6 +1680,10 @@ export class BedroomScene {
     pos.z = THREE.MathUtils.clamp(pos.z, -2.80 + radius, 1.60 - radius);
 
     for (const box of this.colliders) {
+      // Allow jumping cleanly onto low platform surfaces such as the bed!
+      if (box.topY !== undefined && pos.y >= box.topY - 0.10) {
+        continue;
+      }
       const closestX = THREE.MathUtils.clamp(pos.x, box.minX, box.maxX);
       const closestZ = THREE.MathUtils.clamp(pos.z, box.minZ, box.maxZ);
       const dx = pos.x - closestX;
@@ -1186,6 +1711,23 @@ export class BedroomScene {
     }
   }
 
+  public getFloorHeight(x: number, z: number, currentY = 0.017): number {
+    let h = 0.017;
+    for (const box of this.colliders) {
+      if (
+        box.topY !== undefined &&
+        currentY >= box.topY - 0.12 &&
+        x >= box.minX - 0.08 &&
+        x <= box.maxX + 0.08 &&
+        z >= box.minZ - 0.08 &&
+        z <= box.maxZ + 0.08
+      ) {
+        h = Math.max(h, box.topY);
+      }
+    }
+    return h;
+  }
+
   public getFloorSurface(x: number, z: number): 'wood' | 'rug' {
     if (x > -1.55 && x < 1.32 && z > -1.75 && z < 1.12) {
       return 'rug';
@@ -1199,11 +1741,16 @@ export class BedroomScene {
     infectLevel: number,
     pullLevel: number,
     aftermath: boolean,
-    playerPos?: THREE.Vector3
+    playerPos?: THREE.Vector3,
+    camForward?: THREE.Vector3
   ): void {
     this.infectUniforms.uInfect.value = infectLevel;
     this.infectUniforms.uPull.value = pullLevel;
-    this.infectUniforms.uTime.value = aftermath ? elapsed * 0.08 : elapsed;
+    this.infectUniforms.uTime.value = elapsed;
+    this.infectUniforms.uAftermath.value = aftermath ? 1.0 : 0.0;
+    if (camForward) {
+      this.infectUniforms.uCamForward.value.copy(camForward);
+    }
 
     this.monitorBeamMat.uniforms.uTime.value = elapsed;
     this.monitorBeamMat.uniforms.uIntensity.value = aftermath ? 0.22 : 1.0 + infectLevel * 1.4;

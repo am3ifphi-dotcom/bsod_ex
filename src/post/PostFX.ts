@@ -28,6 +28,7 @@ export type PostFXOptions = {
   roll?: number;
   ghost?: number;
   bloom?: number;
+  sharpen?: number;
 };
 
 export class PostFX {
@@ -86,6 +87,8 @@ export class PostFX {
         uGhost: { value: 0 },
         tBloom: { value: null },
         uBloom: { value: 0.0 },
+        uSharpen: { value: 0.28 },
+        uResolution: { value: new THREE.Vector2(width, height) },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -112,6 +115,8 @@ export class PostFX {
         uniform float uGhost;
         uniform sampler2D tBloom;
         uniform float uBloom;
+        uniform float uSharpen;
+        uniform vec2 uResolution;
 
         float hash21(vec2 p) {
           p = fract(p * vec2(123.34, 456.21));
@@ -139,9 +144,10 @@ export class PostFX {
         }
 
         void main() {
+          float aspect = max(1.0, uResolution.x / max(1.0, uResolution.y));
           vec2 uv = vUv;
           vec2 centered = uv - 0.5;
-          vec2 aspectCentered = centered * vec2(1.777, 1.0);
+          vec2 aspectCentered = centered * vec2(aspect, 1.0);
           float rad = length(aspectCentered);
           float r2 = dot(centered, centered);
 
@@ -231,7 +237,7 @@ export class PostFX {
 
           // ---------------------------------------------------------------- BASE SAMPLE + PERIPHERAL LENS FRINGE
           vec3 col;
-          float baseLensChr = smoothstep(0.10, 0.56, r2) * 0.0022;
+          float baseLensChr = smoothstep(0.16, 0.62, r2) * 0.0014;
           float dispersion = baseLensChr + uChromatic * 0.011 + waveMask * 0.011 + uWarp * 0.016 + seam * 0.02;
           if (dispersion > 0.0005) {
             vec2 dispVec = centered * dispersion * (0.45 + r2 * 2.1) + refractOffset * 0.38;
@@ -240,6 +246,22 @@ export class PostFX {
             col.b = fetch(uv - dispVec).b;
           } else {
             col = fetch(uv);
+          }
+
+          // Contrast-Adaptive Sharpening (CAS-lite) on sharp non-glitched regions for crisp clarity!
+          float effSharpen = uSharpen * (1.0 - clamp(total * 1.5, 0.0, 1.0));
+          if (effSharpen > 0.01) {
+            vec2 texel = 1.0 / max(uResolution, vec2(2.0));
+            vec3 cN = fetch(uv + vec2(0.0, texel.y));
+            vec3 cS = fetch(uv - vec2(0.0, texel.y));
+            vec3 cE = fetch(uv + vec2(texel.x, 0.0));
+            vec3 cW = fetch(uv - vec2(texel.x, 0.0));
+            vec3 minC = min(col, min(min(cN, cS), min(cE, cW)));
+            vec3 maxC = max(col, max(max(cN, cS), max(cE, cW)));
+            // Soft local contrast limiter prevents haloing around bright BSOD text!
+            vec3 amp = clamp(min(minC, 1.0 - maxC) / max(maxC, vec3(0.08)), 0.0, 1.0);
+            vec3 ringAvg = (cN + cS + cE + cW) * 0.25;
+            col = clamp(col + (col - ringAvg) * (effSharpen * (0.45 + 0.55 * amp)), 0.0, 4.0);
           }
 
           // Ghost echo of the bend (double vision on strong spatial warps)
@@ -326,10 +348,14 @@ export class PostFX {
           vec3 hiTint = col * vec3(1.02, 1.05, 1.10);
           col = mix(shadowTint, hiTint, smoothstep(0.24, 0.76, luma));
 
-          // Subtle always-on optical phosphor weave & fine cinema sensor grain
-          float microScan = 0.988 + 0.012 * sin(vUv.y * 1080.0 * 3.14159);
-          float grain = (hash21(vUv * 540.0 + fract(uTime * 19.7)) - 0.5) * 0.017;
-          col = col * microScan + grain;
+          // Clean screen-pixel anti-banding dither (ZERO low-res 540p snow or 1080p scanline Moiré in calm room!)
+          float glitchScanAmt = clamp((uTear + uMash + uRoll + uHorror * 0.35) * 0.65, 0.0, 1.0);
+          if (glitchScanAmt > 0.01) {
+            float microScan = 1.0 - (0.014 * glitchScanAmt) * (0.5 + 0.5 * sin(gl_FragCoord.y * 1.570796));
+            col *= microScan;
+          }
+          float ditherGrain = (hash21(gl_FragCoord.xy + fract(uTime * 19.7) * 131.0) - 0.5) * 0.0045;
+          col += ditherGrain;
 
           // --- Bloom: 1/5-res anamorphic bright-pass glow so highlights & neon bloom cleanly
           if (uBloom > 0.001) {
@@ -467,6 +493,7 @@ export class PostFX {
     this.rt.setSize(width, height);
     this.rtBright.setSize(bw, bh);
     this.rtBlur.setSize(bw, bh);
+    this.mat.uniforms.uResolution.value.set(width, height);
     this.brightMat.uniforms.uTexelX.value = 1 / bw;
     this.blurMat.uniforms.uTexelY.value = 1 / bh;
   }
@@ -529,6 +556,7 @@ export class PostFX {
     u.uSort.value = opts.sort ?? 0;
     u.uRoll.value = opts.roll ?? 0;
     u.uGhost.value = opts.ghost ?? 0;
+    u.uSharpen.value = opts.sharpen ?? 0.28;
 
     renderer.setRenderTarget(this.rt);
     renderer.clear(true, true, true);

@@ -108,11 +108,11 @@ function stripHeavyPbrMaps(doc, keepNames = new Set()) {
     flatten(),
     weld(),
     // BSOD_SCREEN_NODE only has 2 triangles so ratio: 0.32 keeps all 4 verts 100% untouched!
-    simplify({ simplifier: MeshoptSimplifier, ratio: 0.32, error: 0.35 }),
+    simplify({ simplifier: MeshoptSimplifier, ratio: 0.62, error: 0.018 }),
     palette({ min: 2 }),
     join({ keepNamed: false }),
     prune(),
-    textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [256, 256], quality: 74 })
+    textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [1024, 1024], quality: 88 })
   );
 
   // Re-verify BSOD_SCREEN_NODE name on whichever node holds BSOD_SCREEN_MAT
@@ -131,12 +131,12 @@ function stripHeavyPbrMaps(doc, keepNames = new Set()) {
 
 // 3. Optimize remaining 6 props aggressively for ultra-fast GPU rendering
 const otherAssets = [
-  { src: 'cray-1_supercomputer.glb', dst: 'public/models/cray1.glb', ratio: 0.38, err: 0.35, tex: 512, keepGlass: false },
-  { src: 'data_center_server_rack.glb', dst: 'public/models/server_rack.glb', ratio: 0.25, err: 0.40, tex: 256, keepGlass: false },
-  { src: 'crt_computer_monitor.glb', dst: 'public/models/crt_monitor.glb', ratio: 0.45, err: 0.35, tex: 256, keepGlass: true },
-  { src: 'office_chair.glb', dst: 'public/models/office_chair.glb', ratio: 0.32, err: 0.40, tex: 256, keepGlass: false },
-  { src: 'motherboard.glb', dst: 'public/models/motherboard.glb', ratio: 0.35, err: 0.40, tex: 256, keepGlass: false },
-  { src: 'modular_cables_1m.glb', dst: 'public/models/cables.glb', ratio: 0.32, err: 0.40, tex: 256, keepGlass: false },
+  { src: 'cray-1_supercomputer.glb', dst: 'public/models/cray1.glb', ratio: 0.65, err: 0.015, tex: 1024, keepGlass: false },
+  { src: 'data_center_server_rack.glb', dst: 'public/models/server_rack.glb', ratio: 0.45, err: 0.025, tex: 512, keepGlass: false },
+  { src: 'crt_computer_monitor.glb', dst: 'public/models/crt_monitor.glb', ratio: 0.65, err: 0.018, tex: 512, keepGlass: true },
+  { src: 'office_chair.glb', dst: 'public/models/office_chair.glb', ratio: 0.60, err: 0.018, tex: 1024, keepGlass: false },
+  { src: 'motherboard.glb', dst: 'public/models/motherboard.glb', ratio: 0.50, err: 0.025, tex: 512, keepGlass: false },
+  { src: 'modular_cables_1m.glb', dst: 'public/models/cables.glb', ratio: 0.50, err: 0.025, tex: 512, keepGlass: false },
 ];
 
 for (const item of otherAssets) {

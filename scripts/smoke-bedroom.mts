@@ -77,7 +77,10 @@ if (bedroom.bsodScreen.parasyteGroup.visible !== false) {
 }
 
 // exercise the runtime updates across a full escalation + aftermath
+const camFwd = new THREE.Vector3(-0.9, -0.1, -0.4).normalize();
+let scrollPhase = 0;
 for (let i = 0; i < 300; i++) {
+  scrollPhase += (1 / 60) * 18.0;
   bedroom.bsodScreen.update(
     1 / 60,
     i / 60,
@@ -90,12 +93,13 @@ for (let i = 0; i < 300; i++) {
       suctionProgress: Math.max(0, (i - 200) / 100),
       aftermath: false,
     },
-    0.4
+    0.4,
+    scrollPhase
   );
   if (i === 120 && bedroom.bsodScreen.parasyteGroup.visible !== true) {
     throw new Error('parasyteGroup must be visible during active BSOD madness!');
   }
-  bedroom.update(1 / 60, i / 60, Math.min(1, i / 200), Math.min(0.5, i / 400), false);
+  bedroom.update(1 / 60, i / 60, Math.min(1, i / 200), Math.min(0.5, i / 400), false, new THREE.Vector3(0.35, 0.017, 0.62), camFwd);
 }
 const bsodAny = bedroom.bsodScreen as any;
 if (
@@ -106,6 +110,19 @@ if (
   bsodAny.parasyteEyesMesh.count !== 11
 ) {
   throw new Error('Unexpected 3D Parasyte BSOD mesh counts!');
+}
+// Verify realistic rain materials + bedroom view-dependent anomalies + jumpable bed height!
+if (!bedroom.rainGlassMat || !bedroom.skylightRainMat || !bedroom.rainStreakMat || !bedroom.rainSplashMat || !bedroom.floorCausticMat) {
+  throw new Error('Missing realistic bedroom rain shader materials!');
+}
+if (!bedroom.lenticularMat || !bedroom.mirrorAnomalyMat) {
+  throw new Error('Missing bedroom view-dependent shader materials!');
+}
+if (bedroom.getFloorHeight(0.35, 0.62, 0.017) > 0.05) {
+  throw new Error('Unexpected spawn floor height in bedroom!');
+}
+if (bedroom.getFloorHeight(-0.45, -1.35, 0.60) < 0.50) {
+  throw new Error('Bed platform should be jumpable when player is airborne above bed height!');
 }
 bedroom.setAftermathMode(true);
 bedroom.bsodScreen.update(1 / 60, 5, {
