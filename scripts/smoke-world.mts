@@ -48,6 +48,8 @@ w.buildFloatingAtmosphere();
 w.buildAtmosphericDepth();
 w.buildCausewayDetailAndMonoliths();
 w.buildHostEffigyAndPhantoms();
+w.buildSkyMonoliths();
+if (!w.group.children.length) throw new Error('Sky monoliths missing');
 w.buildCollapseAndAbyss(tex, tex);
 console.log('all builders OK, group children =', w.group.children.length);
 

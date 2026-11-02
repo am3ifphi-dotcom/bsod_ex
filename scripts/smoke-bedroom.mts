@@ -61,7 +61,7 @@ bedroom.group.traverse((o: any) => {
 });
 console.log('meshes:', meshes, '| instanced:', instanced);
 
-// Verify 3D Parasyte BSOD anatomy: cleanly hidden at Stage 0, active during madness, hidden in aftermath!
+// Verify Signal Death staging: clean Stage-0 BSOD shows no tunnel, no glass, no rift masks!
 bedroom.setAftermathMode(false);
 bedroom.bsodScreen.update(1 / 60, 0, {
   hoverFace: false,
@@ -72,8 +72,12 @@ bedroom.bsodScreen.update(1 / 60, 0, {
   suctionProgress: 0,
   aftermath: false,
 }, 0);
-if (bedroom.bsodScreen.parasyteGroup.visible !== false) {
-  throw new Error('parasyteGroup must be hidden at clean Stage-0 BSOD!');
+if (
+  bedroom.bsodScreen.throatGroup.visible !== false ||
+  bedroom.bsodScreen.glassShards.visible !== false ||
+  bedroom.bsodScreen.stencilMaskMesh.visible !== false
+) {
+  throw new Error('tunnel/glass/stencil must be hidden at clean Stage-0 BSOD!');
 }
 
 // exercise the runtime updates across a full escalation + aftermath
@@ -96,26 +100,25 @@ for (let i = 0; i < 300; i++) {
     0.4,
     scrollPhase
   );
-  if (bedroom.bsodScreen.parasyteGroup.visible || bedroom.bsodScreen.throatTeeth.visible) {
-    throw new Error('Anatomical meshes must remain hidden during digital face escalation and suction.');
-  }
   if (i === 120 && bedroom.bsodScreen.throatGroup.visible) {
     throw new Error('The tunnel must not replace the digital face during inspection.');
   }
   if (i === 250 && !bedroom.bsodScreen.throatGroup.visible) {
     throw new Error('The digital tunnel must open during suction.');
   }
+  if (i === 250 && !bedroom.bsodScreen.glassShards.visible) {
+    throw new Error('The shattered panel fragments must burst during suction.');
+  }
   bedroom.update(1 / 60, i / 60, Math.min(1, i / 200), Math.min(0.5, i / 400), false, new THREE.Vector3(0.35, 0.017, 0.62), camFwd);
 }
 const bsodAny = bedroom.bsodScreen as any;
 if (
-  bsodAny.rimTeethMesh.count !== 52 ||
-  bsodAny.jawFlapsMesh.count !== 4 ||
-  Boolean(bsodAny.tongueMesh) ||
-  bsodAny.sinewMesh.count !== 32 ||
-  bsodAny.parasyteEyesMesh.count !== 11
+  bsodAny.throatRings.count !== 40 ||
+  bsodAny.throatLines.count !== 180 ||
+  bsodAny.glassShards.count !== 64 ||
+  bsodAny.throatShards.count !== 128
 ) {
-  throw new Error('Unexpected 3D Parasyte BSOD mesh counts!');
+  throw new Error('Unexpected Signal Death staging mesh counts!');
 }
 // Verify realistic rain materials + bedroom view-dependent anomalies + jumpable bed height!
 if (!bedroom.rainGlassMat || !bedroom.skylightRainMat || !bedroom.rainStreakMat || !bedroom.rainSplashMat || !bedroom.floorCausticMat) {
@@ -140,8 +143,8 @@ bedroom.bsodScreen.update(1 / 60, 5, {
   suctionProgress: 0,
   aftermath: true,
 }, 0);
-if (bsodAny.parasyteGroup.visible !== false) {
-  throw new Error('parasyteGroup must be hidden in aftermath!');
+if (bsodAny.throatGroup.visible !== false || bsodAny.glassShards.visible !== false) {
+  throw new Error('tunnel/glass must be hidden in aftermath!');
 }
 bedroom.update(1 / 60, 5, 0, 0, true, new THREE.Vector3(1.2, 0.017, -1.0));
 

@@ -102,6 +102,25 @@ export class GlitchWorld {
   private lanternMat!: THREE.ShaderMaterial;
   private monolithMat!: THREE.ShaderMaterial;
 
+  // === SKY MONOLITHS: the world's outrageous centerpiece forms ===
+  // 1) A colossal floating ':(' — two data-orbs + a 48m parenthesis arc hanging in the sky.
+  // 2) A 26m-tall cursor monolith: the OS pointer, frozen mid-drag above the east basin.
+  // 3) Two data tornadoes spiraling up out of the Data Sea.
+  // 4) Holographic wayfinding panels (replaces the old lectern signs that felt pasted-on).
+  private skyFaceGroup!: THREE.Group;
+  private skyFaceMats: THREE.ShaderMaterial[] = [];
+  private skyFaceBasePos!: THREE.Vector3;
+  private skyFaceEchoCyan!: THREE.Mesh;
+  private skyFaceEchoRed!: THREE.Mesh;
+  private cursorGroup!: THREE.Group;
+  private cursorMats: THREE.ShaderMaterial[] = [];
+  private cursorBasePos!: THREE.Vector3;
+  private cursorEchoCyan!: THREE.Mesh;
+  private cursorEchoRed!: THREE.Mesh;
+  private cursorSelection!: THREE.LineSegments;
+  private tornadoMats: THREE.ShaderMaterial[] = [];
+  private holoMats: THREE.ShaderMaterial[] = [];
+
   // Central WAKE_UP glyph plates & Gyroscopic Sanctuary Rings!
   private readonly wakePlates: Array<{
     mesh: THREE.Mesh;
@@ -276,6 +295,9 @@ export class GlitchWorld {
 
     // 5d. Threshold Host Effigy & Peripheral Stalking Glitch Apparitions
     this.buildHostEffigyAndPhantoms();
+
+    // 5e. Sky Monoliths: colossal ':(' data-face, frozen cursor, data tornadoes & holo signs
+    this.buildSkyMonoliths();
 
     // 6. Act 4 True Voronoi Jigsaw Fracture & 245m Abyssal Freefall Shaft
     this.buildCollapseAndAbyss(concreteDiff, concreteDisp);
@@ -2813,15 +2835,15 @@ export class GlitchWorld {
       new THREE.Vector3(-2.8, this.getTerrainHeight(-2.8, 9) + 1.45, 9),
       0.38,
       'MEMORY_0247.DMP // 意識隔離領域',
-      'あなたの身体はまだ部屋の椅子に座ったまま、顎に咥えられています。',
-      '視線を動かすと変質する石碑や影を抜け、最奥の中央聖域核を目指せ。'
+      'あなたの身体はまだ、部屋の椅子に座ったまま。',
+      '[ C ] カーネルコンソールはどこでも開ける。覚醒の言葉は最奥に刻まれている。'
     );
 
     this.createDiegeticLogSign(
       new THREE.Vector3(3.1, this.getTerrainHeight(3.1, -18) + 1.45, -18),
       -0.38,
-      'OPTIC_HAZARD // 天球の紅い凝視と跳躍段丘',
-      '空の瞳が紅く脈動する間は直視せず、大聖堂アーチの影へ退避せよ。',
+      'OPTIC_HAZARD // 天球の凝視と跳躍段丘',
+      '空の瞳と巨大な顔が脈動したら直視せず、大聖堂アーチの影へ退避せよ。',
       '東西の支道には [ SPACE ] 跳躍で登れる記憶観測段丘が存在する。'
     );
   }
@@ -2912,6 +2934,10 @@ export class GlitchWorld {
     this.group.add(stepMesh);
   }
 
+  /**
+   * Holographic wayfinding terminal — a low emitter on the ground projects a flickering
+   * cyan data panel into thin air. No lectern, no pasted-on screen: the panel IS light.
+   */
   private createDiegeticLogSign(
     pos: THREE.Vector3,
     rotY: number,
@@ -2921,67 +2947,491 @@ export class GlitchWorld {
   ): void {
     const c = document.createElement('canvas');
     c.width = 768;
-    c.height = 280;
+    c.height = 300;
     const ctx = c.getContext('2d')!;
-    ctx.fillStyle = 'rgba(2, 22, 54, 0.94)';
-    ctx.fillRect(0, 0, 768, 280);
-    ctx.fillStyle = 'rgba(24, 118, 220, 0.28)';
-    ctx.fillRect(10, 10, 748, 56);
-    ctx.strokeStyle = 'rgba(130, 212, 255, 0.92)';
-    ctx.lineWidth = 4;
-    ctx.strokeRect(8, 8, 752, 264);
+    ctx.clearRect(0, 0, 768, 300);
 
-    ctx.fillStyle = '#8ad4ff';
-    ctx.font = 'bold 22px Consolas, monospace';
-    ctx.fillText(header, 32, 46);
+    // Faint projector backing (keeps text readable against bright backgrounds)
+    ctx.fillStyle = 'rgba(3, 18, 44, 0.42)';
+    ctx.fillRect(6, 6, 756, 288);
 
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '24px "Segoe UI", "Yu Gothic UI", sans-serif';
-    ctx.fillText(line1, 32, 136);
-    ctx.fillText(line2, 32, 188);
+    // Magenta corner brackets (cyber HUD language)
+    ctx.strokeStyle = 'rgba(255, 70, 150, 0.95)';
+    ctx.lineWidth = 5;
+    const bl = 44;
+    const corners: Array<[number, number, number, number]> = [
+      [6, 6, 1, 1],
+      [762, 6, -1, 1],
+      [6, 294, 1, -1],
+      [762, 294, -1, -1],
+    ];
+    for (const [cx, cy, sx, sy] of corners) {
+      ctx.beginPath();
+      ctx.moveTo(cx + sx * bl, cy);
+      ctx.lineTo(cx, cy);
+      ctx.lineTo(cx, cy + sy * bl);
+      ctx.stroke();
+    }
 
-    ctx.fillStyle = 'rgba(122, 200, 255, 0.65)';
-    ctx.font = '16px Consolas, monospace';
-    ctx.fillText('STATUS: DIAGNOSTIC_TERMINAL_ONLINE // [0x0078D7]', 32, 246);
+    ctx.fillStyle = '#9fe8ff';
+    ctx.font = 'bold 27px Consolas, "Yu Gothic UI", monospace';
+    ctx.fillText(header, 40, 62);
+    ctx.strokeStyle = 'rgba(120, 220, 255, 0.4)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(40, 78);
+    ctx.lineTo(728, 78);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(240, 252, 255, 0.98)';
+    ctx.font = '25px "Segoe UI", "Yu Gothic UI", sans-serif';
+    ctx.fillText(line1, 40, 146);
+    ctx.fillText(line2, 40, 196);
+
+    ctx.fillStyle = 'rgba(140, 216, 255, 0.72)';
+    ctx.font = '17px Consolas, monospace';
+    ctx.fillText('HOLO://NODE_0247 // STATUS: STREAM_ONLINE // [0x0078D7]', 40, 262);
+
+    // Projector scanline stripes baked into the texture
+    ctx.fillStyle = 'rgba(200, 240, 255, 0.05)';
+    for (let y = 0; y < 300; y += 6) ctx.fillRect(0, y, 768, 2);
 
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 8;
 
-    // Sculpted Brutalist Obsidian Diagnostic Lectern (replaces thin 5cm stick post!)
-    const consoleGroup = new THREE.Group();
-    consoleGroup.position.set(pos.x, pos.y - 1.45, pos.z);
-    consoleGroup.rotation.y = rotY;
+    const group = new THREE.Group();
+    group.position.set(pos.x, pos.y - 1.45, pos.z);
+    group.rotation.y = rotY;
 
+    // Low emitter plinth
     const obsidianMat = new THREE.MeshLambertMaterial({
-      color: 0x050e22,
-      emissive: 0x041d42,
-      emissiveIntensity: 0.65,
+      color: 0x040d20,
+      emissive: 0x05204a,
+      emissiveIntensity: 0.8,
     });
-    const trimMat = new THREE.MeshBasicMaterial({ color: 0x5cc2ff });
+    const plinth = new THREE.Mesh(this.makeChamferedColumnGeometry(8, 0.3, 2), obsidianMat);
+    plinth.position.set(0, 0.34, 0);
+    plinth.scale.set(0.72, 0.68, 0.46);
+    group.add(plinth);
 
-    const plinth = new THREE.Mesh(this.makeChamferedColumnGeometry(8, 0.35, 2), obsidianMat);
-    plinth.position.set(0, 0.68, -0.08);
-    plinth.scale.set(0.88, 1.36, 0.56);
-    consoleGroup.add(plinth);
-
-    const baseGlow = new THREE.Mesh(new THREE.BoxGeometry(1.04, 0.05, 0.72), trimMat);
-    baseGlow.position.set(0, 0.03, -0.08);
-    consoleGroup.add(baseGlow);
-
-    const hood = new THREE.Mesh(new THREE.BoxGeometry(2.08, 0.84, 0.14), obsidianMat);
-    hood.position.set(0, 1.42, 0.02);
-    hood.rotation.x = -0.24;
-    consoleGroup.add(hood);
-
-    const sign = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.94, 0.71),
-      new THREE.MeshBasicMaterial({ map: tex })
+    const emitter = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.3, 0.4, 0.1, 8),
+      new THREE.MeshBasicMaterial({ color: 0x54c8ff })
     );
-    sign.position.set(0, 1.42, 0.095);
-    sign.rotation.x = -0.24;
-    consoleGroup.add(sign);
+    emitter.position.set(0, 0.72, 0);
+    group.add(emitter);
 
-    this.group.add(consoleGroup);
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.46, 0.024, 8, 24),
+      new THREE.MeshBasicMaterial({ color: 0x66d4ff, transparent: true, opacity: 0.85 })
+    );
+    ring.rotation.x = Math.PI * 0.5;
+    ring.position.set(0, 0.76, 0);
+    group.add(ring);
+
+    // Projection beam (additive, fades upward)
+    const beamMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: { value: 0 },
+        uAnomaly: { value: 0 },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec2 vUv;
+        uniform float uTime;
+        uniform float uAnomaly;
+        float hash11(float p) {
+          p = fract(p * 0.1031);
+          p *= p + 33.33;
+          p *= p + p;
+          return fract(p);
+        }
+        void main() {
+          float fade = smoothstep(0.0, 0.25, vUv.y) * (1.0 - smoothstep(0.75, 1.0, vUv.y));
+          float flick = 0.85 + 0.15 * hash11(floor(uTime * 18.0));
+          float a = 0.055 * fade * flick * (1.0 + uAnomaly * 0.8);
+          gl_FragColor = vec4(vec3(0.3, 0.75, 1.0), a);
+        }
+      `,
+    });
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.26, 1.6, 12, 1, true), beamMat);
+    beam.position.set(0, 1.55, 0);
+    group.add(beam);
+    this.holoMats.push(beamMat);
+
+    // The floating data panel
+    const panelMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uPanelTex: { value: tex },
+        uTime: { value: 0 },
+        uAnomaly: { value: 0 },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec2 vUv;
+        uniform sampler2D uPanelTex;
+        uniform float uTime;
+        uniform float uAnomaly;
+        float hash11(float p) {
+          p = fract(p * 0.1031);
+          p *= p + 33.33;
+          p *= p + p;
+          return fract(p);
+        }
+        float hash21(vec2 p) {
+          vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+          p3 += dot(p3, p3.yzx + 33.33);
+          return fract((p3.x + p3.y) * p3.z);
+        }
+        void main() {
+          vec2 uv = vUv;
+          // Glitch rows: a few scan rows jump sideways, harder during anomalies
+          float row = floor(uv.y * 26.0);
+          float fr = floor(uTime * 9.0);
+          float jgate = step(0.965 - uAnomaly * 0.05, hash21(vec2(row, fr)));
+          uv.x += jgate * (hash21(vec2(row, fr + 7.0)) - 0.5) * 0.05;
+          uv = clamp(uv, 0.0, 1.0);
+
+          float chr = 0.0032 + uAnomaly * 0.005;
+          float r = texture2D(uPanelTex, clamp(uv + vec2(chr, 0.0), 0.0, 1.0)).r;
+          vec4 g = texture2D(uPanelTex, uv);
+          float b = texture2D(uPanelTex, clamp(uv - vec2(chr, 0.0), 0.0, 1.0)).b;
+          vec3 col = vec3(r, g.g, b);
+
+          float scan = 0.84 + 0.16 * sin(uv.y * 320.0 - uTime * 6.0);
+          float sweep = exp(-pow((fract(uv.y + uTime * 0.11) - 0.5) * 6.5, 2.0)) * 0.30;
+          float flick = 0.92 + 0.08 * hash11(floor(uTime * 24.0));
+          col *= scan * flick;
+          col += vec3(0.4, 0.9, 1.0) * sweep;
+
+          float ex = min(uv.x, 1.0 - uv.x);
+          float ey = min(uv.y, 1.0 - uv.y);
+          float edge = smoothstep(0.04, 0.0, min(ex, ey));
+          col += vec3(0.3, 0.8, 1.0) * edge * 0.7;
+
+          float alpha = clamp(max(g.a, edge * 0.85), 0.0, 1.0) * (0.94 + 0.06 * flick);
+          gl_FragColor = vec4(col * (1.2 + uAnomaly * 0.5), alpha);
+        }
+      `,
+    });
+    const panel = new THREE.Mesh(new THREE.PlaneGeometry(2.72, 1.06), panelMat);
+    panel.position.set(0, 2.16, 0);
+    panel.rotation.x = -0.1;
+    group.add(panel);
+    this.holoMats.push(panelMat);
+
+    this.group.add(group);
+  }
+
+  /**
+   * SKY MONOLITHS — the outrageous forms that give the world its silhouette:
+   *  - The colossal ':(' data-face hanging above the Sanctuary (two data-orbs + a 48m arc)
+   *  - A 26m frozen cursor monolith above the east basin (the OS pointer, caught mid-drag)
+   *  - Two data tornadoes spiraling up out of the Data Sea
+   * All GPU-animated; all glitch-jitter during anomaly surges.
+   */
+  private buildSkyMonoliths(): void {
+    // ------------------------------------------------------------------ 1. THE COLOSSAL ':('
+    const faceGroup = new THREE.Group();
+    const faceBase = new THREE.Vector3(0, 62, -56);
+    faceGroup.position.copy(faceBase);
+    this.skyFaceBasePos = faceBase.clone();
+
+    const orbVert = /* glsl */ `
+      varying vec3 vNrm;
+      varying vec3 vViewPos;
+      varying vec3 vObjPos;
+      void main() {
+        vNrm = normalize(normalMatrix * normal);
+        vObjPos = position;
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vViewPos = -mv.xyz;
+        gl_Position = projectionMatrix * mv;
+      }
+    `;
+    const orbFrag = /* glsl */ `
+      varying vec3 vNrm;
+      varying vec3 vViewPos;
+      varying vec3 vObjPos;
+      uniform float uTime;
+      uniform float uAnomaly;
+      uniform float uSeed;
+      float hash11(float p) {
+        p = fract(p * 0.1031);
+        p *= p + 33.33;
+        p *= p + p;
+        return fract(p);
+      }
+      float hash21(vec2 p) {
+        vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+        p3 += dot(p3, p3.yzx + 33.33);
+        return fract((p3.x + p3.y) * p3.z);
+      }
+      void main() {
+        vec3 N = normalize(vNrm);
+        vec3 V = normalize(vViewPos);
+        float fres = pow(1.0 - abs(dot(N, V)), 2.0);
+
+        // Scrolling data surface: horizontal bands + lit hash blocks
+        float band = fract(vObjPos.y * 0.55 - uTime * 0.22 + uSeed);
+        float block = step(0.78, hash21(vec2(floor(vObjPos.x * 1.6), floor(band * 7.0) + floor(uTime * 5.0))));
+        vec3 cyan = vec3(0.16, 0.62, 1.0);
+        vec3 red = vec3(1.0, 0.16, 0.30);
+        float anom = clamp(uAnomaly * (0.72 + 0.28 * sin(uTime * 3.1 + uSeed * 10.0)), 0.0, 1.0);
+        vec3 base = mix(cyan, red, anom * (0.5 + 0.5 * sin(uSeed * 40.0 + uTime * 0.7)));
+        vec3 col = base * (0.22 + 0.30 * band + 0.38 * block);
+        col += base * fres * 1.5;
+        col *= 0.88 + 0.24 * hash11(floor(uTime * 20.0) + uSeed * 50.0);
+        gl_FragColor = vec4(col * (1.25 + anom * 0.9), 1.0);
+      }
+    `;
+
+    const makeOrbMat = (seed: number): THREE.ShaderMaterial =>
+      new THREE.ShaderMaterial({
+        uniforms: { uTime: { value: 0 }, uAnomaly: { value: 0 }, uSeed: { value: seed } },
+        vertexShader: orbVert,
+        fragmentShader: orbFrag,
+      });
+
+    const orbGeo = new THREE.SphereGeometry(3.6, 28, 20);
+    const orbA = new THREE.Mesh(orbGeo, makeOrbMat(1.3));
+    orbA.position.set(-10, 9, 0);
+    faceGroup.add(orbA);
+    const orbB = new THREE.Mesh(orbGeo, makeOrbMat(7.9));
+    orbB.position.set(-10, -7, 0);
+    faceGroup.add(orbB);
+    this.skyFaceMats.push(orbA.material as THREE.ShaderMaterial, orbB.material as THREE.ShaderMaterial);
+
+    // The 48m parenthesis arc (240° opening to the right = a giant '(')
+    const arc = 4.19;
+    const arcGeo = new THREE.TorusGeometry(24, 2.6, 10, 56, arc);
+    const arcMat = makeOrbMat(3.7);
+    const arcMesh = new THREE.Mesh(arcGeo, arcMat);
+    arcMesh.position.set(30, 0, 0);
+    arcMesh.rotation.z = (Math.PI * 2 - arc) / 2;
+    faceGroup.add(arcMesh);
+    this.skyFaceMats.push(arcMat);
+
+    // Wireframe echo of the arc (the structure leaking its own geometry)
+    const arcWire = new THREE.LineSegments(
+      new THREE.WireframeGeometry(new THREE.TorusGeometry(24, 2.62, 4, 28, arc)),
+      new THREE.LineBasicMaterial({ color: 0x66d4ff, transparent: true, opacity: 0.16 })
+    );
+    arcWire.position.copy(arcMesh.position);
+    arcWire.rotation.z = arcMesh.rotation.z;
+    faceGroup.add(arcWire);
+
+    // Chromatic anomaly echoes (flash only during surges)
+    const echoGeo = new THREE.TorusGeometry(24, 2.6, 8, 40, arc);
+    this.skyFaceEchoCyan = new THREE.Mesh(
+      echoGeo,
+      new THREE.MeshBasicMaterial({
+        color: 0x00e8ff,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    this.skyFaceEchoRed = new THREE.Mesh(
+      echoGeo,
+      new THREE.MeshBasicMaterial({
+        color: 0xff2244,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    for (const e of [this.skyFaceEchoCyan, this.skyFaceEchoRed]) {
+      e.position.set(30, 0, 0);
+      e.rotation.z = (Math.PI * 2 - arc) / 2;
+      faceGroup.add(e);
+    }
+
+    this.group.add(faceGroup);
+    this.skyFaceGroup = faceGroup;
+
+    // ------------------------------------------------------------------ 2. THE FROZEN CURSOR
+    const cursorGroup = new THREE.Group();
+    const cursorBase = new THREE.Vector3(34, 30, -26);
+    cursorGroup.position.copy(cursorBase);
+    this.cursorBasePos = cursorBase.clone();
+
+    const s = new THREE.Shape();
+    s.moveTo(0, 0);
+    s.lineTo(0, 0.72);
+    s.lineTo(0.18, 0.545);
+    s.lineTo(0.29, 0.8);
+    s.lineTo(0.4, 0.75);
+    s.lineTo(0.29, 0.5);
+    s.lineTo(0.52, 0.5);
+    s.lineTo(0, 0);
+    const cursorGeo = new THREE.ExtrudeGeometry(s, { depth: 0.1, bevelEnabled: false });
+
+    cursorGroup.rotation.set(0, -0.5, 2.35);
+    cursorGroup.scale.setScalar(26);
+
+    const cursorBody = new THREE.Mesh(cursorGeo, new THREE.MeshBasicMaterial({ color: 0xf4faff }));
+    cursorGroup.add(cursorBody);
+
+    const cursorEdge = new THREE.LineSegments(
+      new THREE.EdgesGeometry(cursorGeo),
+      new THREE.LineBasicMaterial({ color: 0x66e0ff, transparent: true, opacity: 0.9 })
+    );
+    cursorGroup.add(cursorEdge);
+
+    const cursorGlow = new THREE.Mesh(
+      cursorGeo,
+      new THREE.MeshBasicMaterial({
+        color: 0x35c8ff,
+        transparent: true,
+        opacity: 0.22,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    cursorGlow.scale.setScalar(1.03);
+    cursorGlow.position.z = -0.02;
+    cursorGroup.add(cursorGlow);
+
+    // Anomaly echoes: the pointer's ghost trail
+    this.cursorEchoCyan = new THREE.Mesh(
+      cursorGeo,
+      new THREE.MeshBasicMaterial({
+        color: 0x00e8ff,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    this.cursorEchoRed = new THREE.Mesh(
+      cursorGeo,
+      new THREE.MeshBasicMaterial({
+        color: 0xff2255,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    cursorGroup.add(this.cursorEchoCyan);
+    cursorGroup.add(this.cursorEchoRed);
+
+    // The pointer's trailing "selection box"
+    const selGeo = new THREE.EdgesGeometry(new THREE.PlaneGeometry(0.9, 0.95));
+    this.cursorSelection = new THREE.LineSegments(
+      selGeo,
+      new THREE.LineBasicMaterial({ color: 0x8ae8ff, transparent: true, opacity: 0.5 })
+    );
+    this.cursorSelection.position.set(-0.62, -0.72, 0.06);
+    cursorGroup.add(this.cursorSelection);
+
+    this.group.add(cursorGroup);
+    this.cursorGroup = cursorGroup;
+
+    // ------------------------------------------------------------------ 3. DATA TORNADOES
+    const tornadoSeedCount = 170;
+    const tGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+    const tSeed = new Float32Array(tornadoSeedCount * 4);
+    for (let i = 0; i < tornadoSeedCount; i++) {
+      tSeed[i * 4 + 0] = (i / tornadoSeedCount) * Math.PI * 2 + Math.random() * 0.5;
+      tSeed[i * 4 + 1] = Math.random();
+      tSeed[i * 4 + 2] = Math.random();
+      tSeed[i * 4 + 3] = Math.random();
+    }
+    tGeo.setAttribute('aSeed4', new THREE.InstancedBufferAttribute(tSeed, 4));
+
+    const tornadoVert = /* glsl */ `
+      attribute vec4 aSeed4;
+      uniform float uTime;
+      uniform vec3 uCenter;
+      uniform float uAnomaly;
+      varying float vGlow;
+      void main() {
+        float H = 24.0;
+        float a0 = aSeed4.x;
+        float r0 = 1.7 + aSeed4.y * 3.6;
+        float ph = aSeed4.z;
+        float sp = 0.30 + aSeed4.w * 0.42 + uAnomaly * 0.5;
+        float y = mod(ph * H + uTime * sp * H, H);
+        float t = y / H;
+        float ang = a0 + y * 0.52 + uTime * (0.9 + uAnomaly * 1.4);
+        float r = r0 * (1.3 - t * 1.0) * (0.92 + 0.16 * sin(uTime * 2.0 + ph * 20.0));
+        vec3 p = position * (0.35 + aSeed4.w * 0.55);
+        vec3 wp = uCenter + vec3(cos(ang) * r, y, sin(ang) * r) + p;
+        vGlow = (1.0 - t) * (0.4 + 0.6 * fract(ph * 9.7));
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(wp, 1.0);
+      }
+    `;
+    const tornadoFrag = /* glsl */ `
+      varying float vGlow;
+      void main() {
+        vec3 col = mix(vec3(0.1, 0.5, 1.0), vec3(0.7, 0.95, 1.0), vGlow);
+        gl_FragColor = vec4(col, 0.5 * vGlow);
+      }
+    `;
+
+    const makeTornado = (cx: number, cz: number): void => {
+      const mat = new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        uniforms: {
+          uTime: { value: 0 },
+          uCenter: { value: new THREE.Vector3(cx, -2.4, cz) },
+          uAnomaly: { value: 0 },
+        },
+        vertexShader: tornadoVert,
+        fragmentShader: tornadoFrag,
+      });
+      const mesh = new THREE.InstancedMesh(tGeo, mat, tornadoSeedCount);
+      mesh.frustumCulled = false;
+      this.group.add(mesh);
+      this.tornadoMats.push(mat);
+    };
+    makeTornado(-20, -18);
+    makeTornado(20, 2);
+
+    // Tornado crown: a faint ring where the column meets the sky
+    const crownMat = new THREE.MeshBasicMaterial({
+      color: 0x4db8ff,
+      transparent: true,
+      opacity: 0.28,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    for (const [cx, cz] of [
+      [-20, -18],
+      [20, 2],
+    ] as Array<[number, number]>) {
+      const crown = new THREE.Mesh(new THREE.TorusGeometry(2.2, 0.16, 8, 32), crownMat);
+      crown.rotation.x = Math.PI * 0.5;
+      crown.position.set(cx, 21.4, cz);
+      this.group.add(crown);
+    }
   }
 
   private buildFloatingAtmosphere(): void {
@@ -4907,6 +5357,56 @@ export class GlitchWorld {
       ar.rotation.z = elapsed * (0.045 + i * 0.022) * dir * ringSpeedMult;
       ar.rotation.x = 0.38 + i * 0.36 + 0.18 * Math.sin(elapsed * 0.09 + i * 1.7);
       ar.rotation.y = 0.24 * Math.cos(elapsed * 0.07 + i * 2.1);
+    }
+
+    // 4b. Sky Monoliths: the colossal ':(' breathes, the frozen cursor drifts, tornadoes spin.
+    if (this.skyFaceGroup) {
+      const surge = this.anomalyIntensity;
+      this.skyFaceGroup.rotation.z = Math.sin(elapsed * 0.13) * 0.05;
+      this.skyFaceGroup.rotation.y = Math.sin(elapsed * 0.09) * 0.12;
+      this.skyFaceGroup.position.copy(this.skyFaceBasePos);
+      this.skyFaceGroup.position.y += Math.sin(elapsed * 0.4) * 0.9;
+      if (surge > 0.25) {
+        this.skyFaceGroup.position.x += (Math.random() - 0.5) * 1.7 * surge;
+        this.skyFaceGroup.position.y += (Math.random() - 0.5) * 1.1 * surge;
+      }
+      for (const m of this.skyFaceMats) {
+        m.uniforms.uTime.value = elapsed;
+        m.uniforms.uAnomaly.value = surge;
+      }
+      const echoAmp = Math.max(0, surge - 0.3) * 0.9;
+      const echoX = 0.9 + 0.5 * Math.sin(elapsed * 21.0);
+      (this.skyFaceEchoCyan.material as THREE.MeshBasicMaterial).opacity = echoAmp * 0.55;
+      this.skyFaceEchoCyan.position.x = 30 + echoX;
+      (this.skyFaceEchoRed.material as THREE.MeshBasicMaterial).opacity = echoAmp * 0.5;
+      this.skyFaceEchoRed.position.x = 30 - echoX;
+
+      this.cursorGroup.position.copy(this.cursorBasePos);
+      this.cursorGroup.position.y += Math.sin(elapsed * 0.7) * 0.8;
+      this.cursorGroup.rotation.z = 2.35 + Math.sin(elapsed * 0.33) * 0.05;
+      this.cursorGroup.rotation.y = -0.5 + Math.sin(elapsed * 0.21) * 0.08;
+      if (surge > 0.25) {
+        this.cursorGroup.position.x += (Math.random() - 0.5) * 1.4 * surge;
+        this.cursorGroup.position.z += (Math.random() - 0.5) * 1.0 * surge;
+      }
+      const cEcho = Math.max(0, surge - 0.3) * 0.85;
+      (this.cursorEchoCyan.material as THREE.MeshBasicMaterial).opacity = cEcho;
+      this.cursorEchoCyan.position.x = 0.10 + 0.05 * Math.sin(elapsed * 27.0);
+      this.cursorEchoCyan.position.y = -0.07;
+      (this.cursorEchoRed.material as THREE.MeshBasicMaterial).opacity = cEcho * 0.9;
+      this.cursorEchoRed.position.x = -0.10 - 0.05 * Math.cos(elapsed * 23.0);
+      this.cursorEchoRed.position.y = 0.07;
+      (this.cursorSelection.material as THREE.LineBasicMaterial).opacity =
+        (0.28 + 0.3 * Math.pow(0.5 + 0.5 * Math.sin(elapsed * 3.2), 3.0)) * (0.6 + surge * 0.5);
+
+      for (const m of this.tornadoMats) {
+        m.uniforms.uTime.value = elapsed;
+        m.uniforms.uAnomaly.value = surge;
+      }
+      for (const m of this.holoMats) {
+        m.uniforms.uTime.value = elapsed;
+        m.uniforms.uAnomaly.value = surge;
+      }
     }
 
     // 5. Update Act 4 True Voronoi Jigsaw Fracture & 245m Freefall Speed-Line Shaft!

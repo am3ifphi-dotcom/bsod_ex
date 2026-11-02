@@ -211,20 +211,20 @@ screen.root.traverse((o: any) => {
 });
 console.log('All BsodScreen stages (0..6) & GLSL uniform types verified OK!');
 
-// The old anatomical geometry may remain allocated, but must not be displayed.
+// The signal-river tunnel & panel shards must stay hidden until the dive begins.
 screen.update(1 / 60, 2, {
   hoverFace: true, cursorUv: new THREE.Vector2(0.5, 0.5), clickCount: 5,
   madness: 1, jawOpen: 1, suctionProgress: 0, aftermath: false,
 }, 0);
-if (anyS.parasyteGroup.visible || anyS.throatTeeth.visible || anyS.throatGroup.visible) {
-  throw new Error('Digital face inspection must not show anatomy or the tunnel.');
+if (anyS.throatGroup.visible || anyS.glassShards.visible) {
+  throw new Error('Signal death inspection must not show the tunnel or shards before the dive.');
 }
 screen.update(1 / 60, 3, {
   hoverFace: true, cursorUv: new THREE.Vector2(0.5, 0.5), clickCount: 6,
   madness: 1, jawOpen: 1, suctionProgress: 0.5, aftermath: false,
 }, 0);
-if (anyS.parasyteGroup.visible || anyS.throatTeeth.visible || !anyS.throatGroup.visible) {
-  throw new Error('Suction should show the tunnel without anatomical meshes.');
+if (!anyS.throatGroup.visible || !anyS.glassShards.visible) {
+  throw new Error('Suction should show the signal river and the shattered panel fragments.');
 }
 const versionsBefore = anyS.throatMaterials.map((m: any) => m.version);
 screen.setInsideTunnelMode(true);
