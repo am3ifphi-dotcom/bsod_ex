@@ -248,9 +248,28 @@ kbd {
   z-index: 26;
 }
 
-#pc-cursor.hover-face svg path {
-  fill: #8fd2ff;
-  stroke: #ff2a5f;
+/* Scan reticle. It compresses on hover over the glyph and snaps shut on contact. */
+#pc-cursor svg {
+  display: block;
+  transform-origin: 50% 50%;
+  transition: transform 0.12s ease-out;
+  filter: drop-shadow(0 0 6px rgba(90, 190, 255, 0.55));
+}
+#pc-cursor.hover-face svg {
+  transform: scale(0.86);
+}
+#pc-cursor.hover-face .rc-ring {
+  stroke: #ff5c7e;
+  opacity: 1;
+}
+#pc-cursor.hover-face .rc-inner {
+  stroke: #ff8fa6;
+}
+#pc-cursor.hover-face .rc-dot {
+  fill: #ffb3c2;
+}
+#pc-cursor.press svg {
+  transform: scale(0.68);
 }
 
 #interact-prompt {
@@ -572,4 +591,288 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
   #objective { top: 18px; left: 18px; }
   .pause-card { max-height: 90dvh; overflow-y: auto; padding: 24px; }
   #world-hint { bottom: 12px; left: 12px; }
+}
+
+
+/* ---------------------------------------------------------------------------------------------
+   DIRECTOR LAYER
+   A single full-screen black plate the director can slam over the frame for 1-2 frames. Hard
+   cuts are the cheapest, most underused tool in first-person horror: they cost nothing and they
+   make the audience flinch harder than any amount of blur.
+   --------------------------------------------------------------------------------------------- */
+#cut-flash {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 24;
+}
+
+/* ---------------------------------------------------------------------------------------------
+   KERNEL SHELL
+   Deliberately not a "game UI window": no rounded corners, no drop shadows on the type, no brand
+   colour. A monospaced terminal with a status strip, a hairline rule and a scanline wash.
+   --------------------------------------------------------------------------------------------- */
+#console-modal {
+  background: radial-gradient(circle at 50% 40%, rgba(0, 18, 38, 0.82), rgba(0, 4, 10, 0.94));
+  backdrop-filter: blur(2px);
+}
+
+.console-window {
+  position: relative;
+  width: min(760px, 94vw);
+  background: #030d1a;
+  border: 1px solid rgba(86, 176, 255, 0.34);
+  box-shadow:
+    0 30px 100px rgba(0, 0, 0, 0.9),
+    0 0 0 1px rgba(0, 0, 0, 0.8),
+    inset 0 0 90px rgba(0, 60, 120, 0.35);
+  overflow: hidden;
+}
+
+.console-window::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(140, 210, 255, 0.045) 0 1px, transparent 1px 3px);
+  mix-blend-mode: screen;
+}
+
+.console-titlebar {
+  padding: 8px 14px;
+  background: #071a2e;
+  border-bottom: 1px solid rgba(86, 176, 255, 0.22);
+  color: #9fd4f5;
+  font: 11px/1.4 var(--mono-font);
+  letter-spacing: 0.08em;
+  text-transform: none;
+}
+
+.console-sq {
+  width: 7px;
+  height: 7px;
+  background: #5ad1ff;
+  box-shadow: 0 0 10px #38b6ff;
+  animation: console-led 2.4s steps(2, end) infinite;
+}
+
+@keyframes console-led {
+  0%, 88% { opacity: 1; }
+  92% { opacity: 0.25; }
+  96% { opacity: 1; }
+}
+
+#console-close-btn {
+  font-family: var(--mono-font);
+  color: #7fb6d8;
+}
+#console-close-btn:hover {
+  background: rgba(255, 84, 112, 0.85);
+  color: #fff;
+}
+
+.console-status {
+  padding: 5px 18px;
+  font: 10.5px/1.6 var(--mono-font);
+  letter-spacing: 0.14em;
+  color: rgba(126, 186, 224, 0.72);
+  background: rgba(0, 16, 32, 0.9);
+  border-bottom: 1px solid rgba(86, 176, 255, 0.14);
+}
+
+.console-log {
+  height: min(46dvh, 340px);
+  padding: 18px 20px 20px;
+  font: 13px/1.72 var(--mono-font);
+  color: #cfe6f8;
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgba(0, 60, 120, 0.28), transparent 70%),
+    #020a14;
+}
+
+.console-line {
+  white-space: pre-wrap;
+  animation: console-print 0.22s ease-out;
+}
+
+@keyframes console-print {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: none; }
+}
+
+.console-line.echo { color: #8fd4ff; }
+.console-line.dim { color: rgba(150, 190, 216, 0.62); }
+.console-line.err { color: #ff7b95; }
+.console-line.warn { color: #ffcf7a; }
+.console-line.ok { color: #7cf0b0; font-weight: 600; }
+
+.console-input-row {
+  padding: 12px 20px;
+  background: rgba(0, 24, 48, 0.72);
+  border-top: 1px solid rgba(86, 176, 255, 0.22);
+}
+
+.console-prompt {
+  color: #6fc6ff;
+  font: 13px var(--mono-font);
+}
+
+#console-input {
+  font: 14px var(--mono-font);
+  letter-spacing: 0.04em;
+  caret-color: #7ce1ff;
+}
+
+.console-footer {
+  padding: 6px 20px;
+  gap: 18px;
+  justify-content: flex-start;
+  font: 10.5px var(--mono-font);
+  letter-spacing: 0.1em;
+  color: rgba(120, 170, 200, 0.6);
+  background: #01060d;
+  border-top: 1px solid rgba(86, 176, 255, 0.12);
+}
+
+/* ---------------------------------------------------------------------------------------------
+   TITLE
+   The first frame has to look like the last one: the same signal language, the same terminal
+   grammar. The wordmark is a real glitch — two offset copies clipped into bands — not a drop
+   shadow pretending to be one.
+   --------------------------------------------------------------------------------------------- */
+.game-title {
+  position: relative;
+  display: inline-block;
+  color: #eef7ff;
+}
+
+.game-title::before,
+.game-title::after {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  color: #eef7ff;
+}
+
+.game-title::before {
+  color: #37b6ff;
+  transform: translate(-2px, -1px);
+  clip-path: polygon(0 4%, 100% 4%, 100% 32%, 0 32%);
+  animation: title-glitch-a 5.4s steps(1, end) infinite;
+  opacity: 0.85;
+}
+
+.game-title::after {
+  color: #ff3f6a;
+  transform: translate(2px, 1px);
+  clip-path: polygon(0 58%, 100% 58%, 100% 84%, 0 84%);
+  animation: title-glitch-b 4.1s steps(1, end) infinite;
+  opacity: 0.7;
+}
+
+@keyframes title-glitch-a {
+  0%, 86%, 100% { transform: translate(-2px, -1px); opacity: 0.85; clip-path: polygon(0 4%, 100% 4%, 100% 32%, 0 32%); }
+  88% { transform: translate(-9px, 2px); opacity: 1; clip-path: polygon(0 18%, 100% 18%, 100% 26%, 0 26%); }
+  90% { transform: translate(4px, -3px); opacity: 0.4; clip-path: polygon(0 44%, 100% 44%, 100% 52%, 0 52%); }
+  92% { transform: translate(-2px, -1px); opacity: 0.85; }
+}
+
+@keyframes title-glitch-b {
+  0%, 74%, 100% { transform: translate(2px, 1px); opacity: 0.7; clip-path: polygon(0 58%, 100% 58%, 100% 84%, 0 84%); }
+  76% { transform: translate(11px, -2px); opacity: 1; clip-path: polygon(0 66%, 100% 66%, 100% 72%, 0 72%); }
+  78% { transform: translate(-6px, 4px); opacity: 0.35; clip-path: polygon(0 30%, 100% 30%, 100% 40%, 0 40%); }
+  80% { transform: translate(2px, 1px); opacity: 0.7; }
+}
+
+.title-rule {
+  font-variant-numeric: tabular-nums;
+}
+
+.loading-bar-track {
+  position: relative;
+  height: 2px;
+  background: rgba(140, 190, 230, 0.14);
+}
+
+.loading-bar-track::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(90deg, transparent 0 9px, rgba(0, 0, 0, 0.55) 9px 10px);
+  pointer-events: none;
+}
+
+#loading-bar-fill {
+  background: linear-gradient(90deg, #0a5f9e, #7ad4ff);
+  box-shadow: 0 0 14px rgba(90, 200, 255, 0.55);
+}
+
+#loading-status {
+  letter-spacing: 0.06em;
+}
+
+/* ---------------------------------------------------------------------------------------------
+   HUD
+   Thin, analogue, unobtrusive. Nothing here should ever look like a modern game HUD: no pills, no
+   rounded corners, no gradients behind text.
+   --------------------------------------------------------------------------------------------- */
+.ch-dot {
+  width: 3px;
+  height: 3px;
+  background: rgba(226, 244, 255, 0.9);
+  box-shadow: 0 0 8px rgba(90, 190, 255, 0.9);
+}
+
+.ch-ring {
+  border: 1px solid rgba(140, 210, 255, 0.32);
+  border-radius: 1px;
+  transform: rotate(45deg) scale(0.85);
+}
+
+#crosshair.active .ch-ring {
+  border-color: rgba(160, 226, 255, 0.95);
+  transform: rotate(45deg) scale(1.15);
+}
+
+#objective {
+  font-family: var(--mono-font);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  border-left: 1px solid rgba(120, 200, 255, 0.55);
+  padding: 2px 0 2px 12px;
+}
+
+#subtitle-banner {
+  font-size: 14.5px;
+  letter-spacing: 0.12em;
+  color: #e9f5ff;
+  text-shadow:
+    0 0 24px rgba(0, 0, 0, 0.98),
+    0 2px 6px rgba(0, 0, 0, 0.95);
+}
+
+#interact-prompt {
+  background: rgba(2, 10, 20, 0.72);
+  border: 1px solid rgba(120, 196, 255, 0.28);
+  border-radius: 0;
+  font-family: var(--mono-font);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: #dcefff;
+}
+
+#world-hint {
+  border-left: 1px solid rgba(120, 198, 255, 0.6);
+  background: rgba(0, 12, 26, 0.55);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .game-title::before,
+  .game-title::after {
+    animation: none;
+    opacity: 0.35;
+  }
 }

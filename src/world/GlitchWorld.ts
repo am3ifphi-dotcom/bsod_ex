@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { toFastLambert } from './BedroomScene';
 import { getSharedNoiseTexture } from '../utils/ProceduralNoise';
+import { jpFontStack, monoFontStack } from '../utils/CanvasText';
 
 const FLOATING_SHARD_COUNT = 120;
 const ABYSS_DEBRIS_COUNT = 96;
@@ -101,6 +102,8 @@ export class GlitchWorld {
   private spireMat!: THREE.ShaderMaterial;
   private lanternMat!: THREE.ShaderMaterial;
   private monolithMat!: THREE.ShaderMaterial;
+  private vaultCity: THREE.InstancedMesh | null = null;
+  private vaultPivot: THREE.Group | null = null;
 
   // Central WAKE_UP glyph plates & Gyroscopic Sanctuary Rings!
   private readonly wakePlates: Array<{
@@ -1173,6 +1176,32 @@ export class GlitchWorld {
     citadels.instanceMatrix.needsUpdate = true;
     this.group.add(citadels);
 
+    // ------------------------------------------------------------ THE SECOND CITY, HANGING
+    // The dump has no ground truth for "up". The same skyline exists again above the clouds,
+    // mirrored and slowly turning, so looking up is as structured as looking out. One draw call:
+    // the geometry, attributes and material are the originals; only the matrices differ.
+    const vaultCount = idx;
+    const vault = new THREE.InstancedMesh(boxGeo, this.citadelMat, vaultCount);
+    vault.name = 'VaultCity';
+    vault.frustumCulled = false;
+    vault.renderOrder = 1;
+    const mirror = new THREE.Matrix4().makeScale(1, -1, 1);
+    const lift = new THREE.Matrix4();
+    const src = new THREE.Matrix4();
+    for (let i = 0; i < vaultCount; i++) {
+      citadels.getMatrixAt(i, src);
+      // Mirror about the cloud deck (y = 96) so the two skylines meet at the horizon.
+      lift.makeTranslation(0, 192, 0);
+      src.premultiply(lift).multiply(mirror);
+      vault.setMatrixAt(i, src);
+    }
+    vault.instanceMatrix.needsUpdate = true;
+    this.vaultCity = vault;
+    const vaultPivot = new THREE.Group();
+    vaultPivot.add(vault);
+    this.vaultPivot = vaultPivot;
+    this.group.add(vaultPivot);
+
     // ---------------------------------------------------------------- SPIRES & BEACON CAPS
     // Cap the skyline: antenna spires with pulsing beacon tips on the taller towers. One draw call.
     const spireMat = new THREE.ShaderMaterial({
@@ -2051,36 +2080,131 @@ export class GlitchWorld {
     fallsMesh.instanceMatrix.needsUpdate = true;
     this.group.add(fallsMesh);
 
-    // 3. 72 Frozen Exploding Windows Error-Cascade Panes suspended in mid-air spirals (100% GPU animated!)
-    const errCanvas = document.createElement('canvas');
-    errCanvas.width = 512;
-    errCanvas.height = 256;
-    const ectx = errCanvas.getContext('2d')!;
-    ectx.fillStyle = '#005bb5';
-    ectx.fillRect(0, 0, 512, 256);
-    ectx.fillStyle = '#e8f4ff';
-    ectx.fillRect(0, 0, 512, 38);
-    ectx.fillStyle = '#003a7a';
-    ectx.font = 'bold 22px Consolas, monospace';
-    ectx.fillText('FATAL_EXCEPTION // 0x000000F4', 14, 27);
-    ectx.fillStyle = '#d92b3a';
-    ectx.fillRect(466, 5, 38, 28);
-    ectx.fillStyle = '#ffffff';
-    ectx.fillText('X', 478, 27);
-    ectx.strokeStyle = '#9ad8ff';
-    ectx.lineWidth = 5;
-    ectx.strokeRect(3, 3, 506, 250);
-    ectx.font = '300 68px "Segoe UI", sans-serif';
-    ectx.fillText(':(', 24, 124);
-    ectx.font = '20px Consolas, monospace';
-    ectx.fillText('CRITICAL_PROCESS_DIED', 126, 98);
-    ectx.fillText('MEM_SECTOR_CORRUPTED [99%]', 126, 132);
-    ectx.strokeStyle = '#ffffff';
-    ectx.lineWidth = 3;
-    ectx.strokeRect(176, 184, 160, 42);
-    ectx.fillText('[ ABORT ]', 202, 212);
-    const errTex = new THREE.CanvasTexture(errCanvas);
+    // 3. Dead-pane cascade: the crash dialogs that were open when the host died, still hanging in
+    //    the air. Four authored variants in one atlas so the cascade never repeats the same card,
+    //    and each pane is drawn with its own bezel so it reads as a dead monitor, not a poster.
+    const atlasCanvas = document.createElement('canvas');
+    atlasCanvas.width = 2048;
+    atlasCanvas.height = 1024;
+    const actx = atlasCanvas.getContext('2d')!;
+    actx.fillStyle = '#000000';
+    actx.fillRect(0, 0, 2048, 1024);
+    const mono = monoFontStack();
+    const jp = jpFontStack();
+    const paneVariants: Array<(x: number, y: number, w: number, h: number) => void> = [
+      // 0 — a real Windows-style fatal error dialog.
+      (x, y, w, h) => {
+        actx.fillStyle = '#0a1c33';
+        actx.fillRect(x, y, w, h);
+        actx.fillStyle = '#0068c9';
+        actx.fillRect(x, y, w, 54);
+        actx.fillStyle = '#ffffff';
+        actx.font = `600 24px ${mono}`;
+        actx.fillText('wininit.exe - 致命的な割り込み (0x000000F4)', x + 20, y + 36);
+        actx.fillStyle = '#cfe8ff';
+        actx.font = `300 66px ${mono}`;
+        actx.fillText(':(', x + 34, y + 156);
+        actx.fillStyle = '#e8f4ff';
+        actx.font = `400 24px ${mono}`;
+        actx.fillText('CRITICAL_PROCESS_DIED', x + 150, y + 122);
+        actx.fillText('DISPLAY_BUFFER  ...  LOST', x + 150, y + 158);
+        actx.strokeStyle = 'rgba(150, 214, 255, 0.72)';
+        actx.lineWidth = 2;
+        actx.strokeRect(x + 150, y + 186, 190, 46);
+        actx.fillStyle = '#dff1ff';
+        actx.font = `400 22px ${jp}`;
+        actx.fillText('中断する', x + 186, y + 216);
+      },
+      // 1 — an operator log, already talking back.
+      (x, y, w, h) => {
+        actx.fillStyle = '#04121f';
+        actx.fillRect(x, y, w, h);
+        actx.strokeStyle = 'rgba(120, 210, 255, 0.55)';
+        actx.lineWidth = 3;
+        actx.strokeRect(x + 8, y + 8, w - 16, h - 16);
+        actx.fillStyle = '#9fdcff';
+        actx.font = `400 21px ${mono}`;
+        actx.fillText('OPERATOR_LOG  //  02:47:19', x + 26, y + 46);
+        actx.fillStyle = 'rgba(220, 242, 255, 0.88)';
+        actx.font = `400 21px ${mono}`;
+        actx.fillText('> attach host', x + 26, y + 92);
+        actx.fillText('  host is not responding', x + 26, y + 122);
+        actx.fillText('> continue anyway', x + 26, y + 152);
+        actx.fillStyle = '#ff8fa6';
+        actx.fillText('  host is responding too much', x + 26, y + 182);
+        actx.fillStyle = '#ffd166';
+        actx.fillText('> ', x + 26, y + 214);
+        actx.fillRect(x + 46, y + 196, 12, 22);
+      },
+      // 2 — sensor depth slice of something standing behind the chair.
+      (x, y, w, h) => {
+        actx.fillStyle = '#050d18';
+        actx.fillRect(x, y, w, h);
+        actx.fillStyle = '#8fd4ff';
+        actx.font = `400 20px ${mono}`;
+        actx.fillText('IR_LIDAR_0  //  DEPTH_SLICE', x + 24, y + 40);
+        for (let i = 0; i < 34; i++) {
+          const v = i / 33;
+          actx.beginPath();
+          for (let ix = 0; ix <= 60; ix++) {
+            const u = ix / 60;
+            const host = 26 * Math.exp(-(((u - 0.38) / 0.10) ** 2 + ((v - 0.72) / 0.16) ** 2));
+            const other = 22 * Math.exp(-(((u - 0.62) / 0.08) ** 2 + ((v - 0.34) / 0.13) ** 2));
+            const yy = y + 60 + v * (h - 96) - Math.max(host, other);
+            if (ix === 0) actx.moveTo(x + 22 + u * (w - 44), yy);
+            else actx.lineTo(x + 22 + u * (w - 44), yy);
+          }
+          actx.strokeStyle = v > 0.25 && v < 0.45 ? 'rgba(255, 96, 128, 0.55)' : 'rgba(120, 212, 255, 0.32)';
+          actx.lineWidth = 1.2;
+          actx.stroke();
+        }
+        actx.fillStyle = '#ff7b96';
+        actx.font = `500 19px ${jp}`;
+        actx.fillText('背後 0.38m  //  未登録質量', x + 24, y + h - 22);
+      },
+      // 3 — the panel itself, seen from inside.
+      (x, y, w, h) => {
+        actx.fillStyle = '#0078d7';
+        actx.fillRect(x, y, w, h);
+        actx.fillStyle = 'rgba(255,255,255,0.92)';
+        actx.font = `300 30px ${jp}`;
+        actx.fillText('問題が発生したため、', x + 30, y + 120);
+        actx.fillText('PC を再起動する必要があります。', x + 30, y + 164);
+        actx.font = `300 26px ${jp}`;
+        actx.fillText('99% 完了', x + 30, y + 236);
+        actx.fillStyle = 'rgba(255,255,255,0.55)';
+        actx.font = `400 18px ${mono}`;
+        actx.fillText('停止コード: OPTIC_NERVE_PAGE_FAULT', x + 30, y + h - 30);
+        // A faint face burned into the corner of the panel.
+        for (let r = 0; r < 12; r++) {
+          for (let c = 0; c < 18; c++) {
+            const nx = (c / 17) * 2 - 1;
+            const ny = (r / 11) * 2 - 1;
+            const eye = Math.min(Math.hypot((nx + 0.34) / 0.26, (ny + 0.22) / 0.16), Math.hypot((nx - 0.34) / 0.26, (ny + 0.22) / 0.16));
+            const mouth = Math.max(Math.abs(ny - (0.42 + 0.14 * (1 - nx * nx))) / 0.13, Math.abs(nx) / 0.55);
+            if (Math.min(eye, mouth) < 0.98) continue;
+            actx.fillStyle = 'rgba(255,255,255,0.30)';
+            actx.font = `400 18px ${mono}`;
+            actx.fillText(c % 3 === 0 ? '(' : ':', x + w * 0.62 + c * 22, y + 90 + r * 24);
+          }
+        }
+      },
+    ];
+    for (let v = 0; v < 4; v++) {
+      const cx = (v % 2) * 1024;
+      const cy = Math.floor(v / 2) * 512;
+      actx.save();
+      actx.beginPath();
+      actx.rect(cx, cy, 1024, 512);
+      actx.clip();
+      paneVariants[v](cx, cy, 1024, 512);
+      actx.restore();
+    }
+    const errTex = new THREE.CanvasTexture(atlasCanvas);
     errTex.colorSpace = THREE.SRGBColorSpace;
+    errTex.minFilter = THREE.LinearMipmapLinearFilter;
+    errTex.generateMipmaps = true;
+    errTex.anisotropy = 8;
 
     const errCount = 72;
     const errGeo = new THREE.PlaneGeometry(2.3, 1.15);
@@ -2135,8 +2259,22 @@ export class GlitchWorld {
           float gazeAlign = dot(normalize(uCamForward), toPane);
           float periphShift = smoothstep(0.92, 0.72, gazeAlign);
 
-          vec4 tex = texture2D(uTex, uv);
-          vec3 col = mix(tex.rgb, vec3(1.0, 0.18, 0.28), uAnomaly * 0.45 * step(0.6, vSeed));
+          // Pick one of four authored panes, then frame it inside a bezel so the cascade reads as
+          // a field of dead monitors instead of a wall of posters.
+          float paneIdx = floor(fract(vSeed * 7.31) * 4.0);
+          vec2 paneCell = vec2(mod(paneIdx, 2.0), floor(paneIdx * 0.5));
+          vec2 inner = (uv - vec2(0.055, 0.075)) / vec2(0.89, 0.85);
+          float inside = step(0.0, inner.x) * step(inner.x, 1.0) * step(0.0, inner.y) * step(inner.y, 1.0);
+          vec2 atlasUv = clamp(inner, 0.0, 1.0) * 0.5 + vec2(mod(paneCell.x, 2.0) * 0.5, paneCell.y * 0.5);
+          vec4 tex = texture2D(uTex, atlasUv);
+          vec3 bezel = vec3(0.012, 0.030, 0.055);
+          float bezelLip = smoothstep(0.045, 0.058, abs(uv.x - 0.5) * 2.0) * 0.0;
+          vec3 col = mix(bezel + vec3(0.05, 0.14, 0.24) * 0.25, tex.rgb, inside);
+          col += vec3(0.20, 0.45, 0.70) * bezelLip;
+          // Glass: a diagonal reflection across the bezel and a faint inner glow.
+          float sheen = smoothstep(0.55, 0.0, abs((uv.x - uv.y) - 0.34)) * 0.05 * (1.0 - inside * 0.6);
+          col += vec3(0.35, 0.55, 0.75) * sheen;
+          col = mix(col, vec3(1.0, 0.18, 0.28), uAnomaly * 0.45 * step(0.6, vSeed));
 
           if (periphShift > 0.02) {
             vec2 ep = (vUv - vec2(0.5, 0.46)) * vec2(2.0, 1.0);
@@ -2457,56 +2595,97 @@ export class GlitchWorld {
     addInstancedGltf(sanctuary, rackTemplate, sanctRackMats);
     addInstancedGltf(sanctuary, cablesTemplate, sanctCableMats);
 
-    // === THE WORLD SECRET: "WAKE_UP" 3D OBSIDIAN & CRYSTAL STELE MONOLITHS ===
+    // === THE WORD: "WAKE_UP" ENGRAVED INTO SEVEN OBSIDIAN MONOLITHS ===
+    // These are not letter tiles on stands. Each slab is a single quarried block with the glyph cut
+    // into its face: the stroke walls catch the core light, the cut interior stays black, and a
+    // hairline of signal leaks out of the incision. When they converge they read as one inscription.
     const chars = ['W', 'A', 'K', 'E', '_', 'U', 'P'];
     const spacing = 1.44;
     const startX = -((chars.length - 1) * spacing) * 0.5;
-    const steleBackingMat = new THREE.MeshLambertMaterial({
-      color: 0x050e22,
-      emissive: 0x062858,
-      emissiveIntensity: 0.75,
+    const stoneMat = new THREE.MeshLambertMaterial({
+      color: 0x070c18,
+      emissive: 0x03152e,
+      emissiveIntensity: 0.55,
     });
+    const monoStack = monoFontStack();
+    const stoneGeo = this.makeChamferedColumnGeometry(4, 0.34, 3);
 
     for (let i = 0; i < chars.length; i++) {
-      const chCanvas = document.createElement('canvas');
-      chCanvas.width = 256;
-      chCanvas.height = 320;
-      const cctx = chCanvas.getContext('2d')!;
-      cctx.fillStyle = '#031d44';
-      cctx.fillRect(0, 0, 256, 320);
-      cctx.strokeStyle = '#6ec8ff';
-      cctx.lineWidth = 8;
-      cctx.strokeRect(10, 10, 236, 300);
-      cctx.strokeStyle = 'rgba(255,255,255,0.45)';
-      cctx.lineWidth = 2;
-      cctx.strokeRect(22, 22, 212, 276);
+      const slabW = 512;
+      const slabH = 640;
+      const slabCanvas = document.createElement('canvas');
+      slabCanvas.width = slabW;
+      slabCanvas.height = slabH;
+      const sctx = slabCanvas.getContext('2d')!;
+      // Stone face: near-black with a faint mineral grain and a cooler top edge.
+      sctx.fillStyle = '#050a14';
+      sctx.fillRect(0, 0, slabW, slabH);
+      let grain = 12345 + i * 977;
+      for (let g = 0; g < 2600; g++) {
+        grain = (grain * 1103515245 + 12345) & 0x7fffffff;
+        const gx = (grain / 0x7fffffff) * slabW;
+        grain = (grain * 1103515245 + 12345) & 0x7fffffff;
+        const gy = (grain / 0x7fffffff) * slabH;
+        grain = (grain * 1103515245 + 12345) & 0x7fffffff;
+        const gv = grain / 0x7fffffff;
+        sctx.fillStyle = gv > 0.5 ? 'rgba(120, 170, 220, 0.05)' : 'rgba(0, 0, 0, 0.22)';
+        sctx.fillRect(gx, gy, 1 + gv * 2, 1 + gv * 3);
+      }
+      const faceGrad = sctx.createLinearGradient(0, 0, 0, slabH);
+      if (faceGrad) {
+        faceGrad.addColorStop(0, 'rgba(90, 140, 190, 0.10)');
+        faceGrad.addColorStop(0.55, 'rgba(0, 0, 0, 0)');
+        faceGrad.addColorStop(1, 'rgba(0, 0, 0, 0.45)');
+        sctx.fillStyle = faceGrad;
+        sctx.fillRect(0, 0, slabW, slabH);
+      }
 
-      cctx.fillStyle = '#7acbff';
-      cctx.font = '18px Consolas, monospace';
-      cctx.textAlign = 'center';
-      cctx.fillText(`0x0${i + 1}`, 128, 44);
+      // The incision: dark cavity, bright chipped edge, then the leaked signal inside it.
+      sctx.font = `700 430px ${monoStack}`;
+      sctx.textAlign = 'center';
+      sctx.textBaseline = 'middle';
+      const glyphY = slabH * 0.5;
+      sctx.fillStyle = 'rgba(0, 0, 0, 0.95)';
+      sctx.fillText(chars[i], slabW * 0.5, glyphY);
+      sctx.strokeStyle = 'rgba(150, 210, 255, 0.55)';
+      sctx.lineWidth = 3;
+      sctx.strokeText(chars[i], slabW * 0.5, glyphY);
+      sctx.strokeStyle = 'rgba(80, 160, 230, 0.30)';
+      sctx.lineWidth = 9;
+      sctx.strokeText(chars[i], slabW * 0.5, glyphY);
+      // Signal residue: a few lit pixels crawling inside the cut.
+      sctx.font = `400 430px ${monoStack}`;
+      sctx.fillStyle = 'rgba(190, 236, 255, 0.85)';
+      for (let k = 0; k < 26; k++) {
+        grain = (grain * 1103515245 + 12345) & 0x7fffffff;
+        const rx = slabW * 0.34 + (grain / 0x7fffffff) * slabW * 0.32;
+        grain = (grain * 1103515245 + 12345) & 0x7fffffff;
+        const ry = glyphY - 190 + (grain / 0x7fffffff) * 380;
+        sctx.fillRect(rx, ry, 2 + (k % 3) * 2, 1 + (k % 2) * 2);
+      }
+      // A single etched register line under the glyph, the only ornament allowed.
+      sctx.strokeStyle = 'rgba(130, 190, 240, 0.22)';
+      sctx.lineWidth = 2;
+      sctx.beginPath();
+      sctx.moveTo(slabW * 0.24, slabH * 0.86);
+      sctx.lineTo(slabW * 0.76, slabH * 0.86);
+      sctx.stroke();
 
-      cctx.fillStyle = '#ffffff';
-      cctx.font = 'bold 186px Consolas, "Segoe UI", monospace';
-      cctx.textBaseline = 'middle';
-      cctx.shadowColor = '#66c8ff';
-      cctx.shadowBlur = 22;
-      cctx.fillText(chars[i], 128, 172);
-
-      const tex = new THREE.CanvasTexture(chCanvas);
+      const tex = new THREE.CanvasTexture(slabCanvas);
       tex.colorSpace = THREE.SRGBColorSpace;
-      tex.minFilter = THREE.LinearFilter;
-      tex.generateMipmaps = false;
+      tex.minFilter = THREE.LinearMipmapLinearFilter;
+      tex.anisotropy = 8;
 
-      // Sculpted 3D obsidian tablet with front & back illuminated crystal glyph face
-      const steleBody = new THREE.Mesh(new THREE.BoxGeometry(1.26, 1.58, 0.18), steleBackingMat);
-      const faceMat = new THREE.MeshBasicMaterial({ map: tex });
-      const frontFace = new THREE.Mesh(new THREE.PlaneGeometry(1.18, 1.48), faceMat);
-      frontFace.position.z = 0.095;
-      const backFace = new THREE.Mesh(new THREE.PlaneGeometry(1.18, 1.48), faceMat);
+      const slab = new THREE.Mesh(stoneGeo, stoneMat);
+      slab.scale.set(1.28, 1.72, 0.30);
+      const faceMat = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false });
+      const faceGeo = new THREE.PlaneGeometry(1.16, 1.55);
+      const frontFace = new THREE.Mesh(faceGeo, faceMat);
+      frontFace.position.z = 0.148;
+      const backFace = new THREE.Mesh(faceGeo, faceMat);
       backFace.rotation.y = Math.PI;
-      backFace.position.z = -0.095;
-      steleBody.add(frontFace, backFace);
+      backFace.position.z = -0.148;
+      slab.add(frontFace, backFace);
 
       const alignedPos = new THREE.Vector3(startX + i * spacing, 7.55, 1.8);
       const scatteredPos = new THREE.Vector3(
@@ -2520,54 +2699,69 @@ export class GlitchWorld {
         Math.sin(i * 1.7) * 0.48
       );
 
-      steleBody.position.copy(scatteredPos);
-      steleBody.rotation.copy(scatteredRot);
-      sanctuary.add(steleBody);
+      slab.position.copy(scatteredPos);
+      slab.rotation.copy(scatteredRot);
+      sanctuary.add(slab);
 
-      this.wakePlates.push({
-        mesh: steleBody,
-        alignedPos,
-        scatteredPos,
-        scatteredRot,
-      });
+      this.wakePlates.push({ mesh: slab, alignedPos, scatteredPos, scatteredRot });
     }
 
     // Sculpted Brutalist Lectern Pedestal + Core Terminal Inscription Plaque at front of Cray-1 Core
     const lecternPedestal = new THREE.Mesh(
       this.makeChamferedColumnGeometry(8, 0.38, 4),
-      steleBackingMat
+      stoneMat
     );
     lecternPedestal.position.set(0, 1.0, 3.74);
     lecternPedestal.scale.set(1.15, 2.0, 0.72);
     sanctuary.add(lecternPedestal);
 
-    const plaqueBezel = new THREE.Mesh(new THREE.BoxGeometry(2.64, 1.06, 0.12), steleBackingMat);
+    const plaqueBezel = new THREE.Mesh(new THREE.BoxGeometry(2.64, 1.06, 0.12), stoneMat);
     plaqueBezel.position.set(0, 2.05, 3.59);
     plaqueBezel.rotation.x = -0.22;
     sanctuary.add(plaqueBezel);
 
+    // The core plate is a *register*, not a tutorial. It records what the machine thinks happened to
+    // the host. Nothing on it tells the player which key to press.
     const plaqueCanvas = document.createElement('canvas');
     plaqueCanvas.width = 1024;
     plaqueCanvas.height = 384;
     const pctx = plaqueCanvas.getContext('2d')!;
-    pctx.fillStyle = '#001836';
+    const monoP = monoFontStack();
+    const jpP = jpFontStack();
+    pctx.fillStyle = '#020a16';
     pctx.fillRect(0, 0, 1024, 384);
-    pctx.strokeStyle = '#6ec4ff';
+    // Engraved border: a bright hairline inside a dark channel.
+    pctx.strokeStyle = 'rgba(110, 190, 250, 0.55)';
+    pctx.lineWidth = 2;
+    pctx.strokeRect(16, 16, 992, 352);
+    pctx.strokeStyle = 'rgba(20, 50, 90, 0.9)';
     pctx.lineWidth = 6;
-    pctx.strokeRect(8, 8, 1008, 368);
+    pctx.strokeRect(23, 23, 978, 338);
 
-    pctx.fillStyle = '#82cdff';
-    pctx.font = '25px Consolas, monospace';
-    pctx.fillText('KERNEL_CORE_REGISTER // 0x0078D7 [HOST_SESSION: 02:47]', 44, 66);
+    pctx.fillStyle = 'rgba(150, 205, 245, 0.75)';
+    pctx.font = `400 22px ${monoP}`;
+    pctx.fillText('KERNEL CORE REGISTER', 48, 74);
+    pctx.textAlign = 'right';
+    pctx.fillText('0x0078D7  //  SESSION 0x0247', 976, 74);
+    pctx.textAlign = 'left';
 
-    pctx.fillStyle = '#ffffff';
-    pctx.font = 'bold 54px Consolas, monospace';
-    pctx.fillText('EMERGENCY INTERRUPT : WAKE_UP', 44, 166);
+    pctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+    pctx.font = `700 46px ${monoP}`;
+    pctx.fillText('WAKE_UP', 48, 152);
+    pctx.fillStyle = 'rgba(150, 205, 245, 0.62)';
+    pctx.font = `400 20px ${monoP}`;
+    pctx.fillText('FORCED INTERRUPT VECTOR  //  RING0', 48, 190);
 
-    pctx.fillStyle = '#d4ecff';
-    pctx.font = '28px "Segoe UI", "Yu Gothic UI", sans-serif';
-    pctx.fillText('[ C ] でカーネルコンソールを開き WAKE_UP を実行せよ。', 44, 254);
-    pctx.fillText('※ 意識が完全にダンプ固定される前に強制割り込みをかけろ', 44, 304);
+    pctx.fillStyle = 'rgba(214, 236, 255, 0.86)';
+    pctx.font = `400 25px ${jpP}`;
+    pctx.fillText('この演算核は、二度と起動しない。', 48, 254);
+    pctx.fillStyle = 'rgba(255, 150, 170, 0.86)';
+    pctx.font = `400 23px ${jpP}`;
+    pctx.fillText('ホストの意識は 99% 転送済み。残りは、まだ息をしている。', 48, 300);
+
+    pctx.fillStyle = 'rgba(130, 180, 220, 0.55)';
+    pctx.font = `400 18px ${monoP}`;
+    pctx.fillText('02:47:19  //  CRAY-1  //  CORE TEMP 41C  //  OPERATOR: NONE', 48, 344);
 
     const plaqueTex = new THREE.CanvasTexture(plaqueCanvas);
     plaqueTex.colorSpace = THREE.SRGBColorSpace;
@@ -4888,6 +5082,12 @@ export class GlitchWorld {
     this.lanternMat.uniforms.uAnomaly.value = this.anomalyIntensity;
     this.monolithMat.uniforms.uTime.value = elapsed;
     this.monolithMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+
+    // The upside-down city turns a few degrees a minute, so the sky is never quite where you left it.
+    if (this.vaultPivot) {
+      this.vaultPivot.rotation.y = elapsed * 0.0075;
+      this.vaultPivot.position.y = Math.sin(elapsed * 0.06) * 1.6;
+    }
 
     // The shattered monitor wreckage orbits its own broken screen.
     this.skyDebris.rotation.z = elapsed * 0.045;
