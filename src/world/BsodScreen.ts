@@ -809,7 +809,7 @@ export class BsodScreen {
           vec2 block = floor(uv * vec2(32.0, 16.0));
           float bFrame = floor(uTime * 5.0);
           float bRnd = hash21(block + vec2(bFrame, bFrame * 2.3));
-          float dead = step(1.0 - uMadness * 0.60 - uClickPulse * 0.22, bRnd) * step(0.03, uMadness + uClickPulse);
+          float dead = step(1.0 - uMadness * 0.60 - uClickPulse * 0.15, bRnd) * step(0.03, uMadness + uClickPulse);
           vec2 bp = fract(uv * vec2(32.0, 16.0));
           float hexline = step(0.88, bp.x) + step(0.88, bp.y);
           float hexcell = step(0.78, hash21(floor(bp * 6.0) + block * 3.1));
