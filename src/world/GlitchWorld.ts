@@ -3025,7 +3025,11 @@ export class GlitchWorld {
     ctx.restore();
 
     // --- Japanese sets vertically, right to left (真の縦書き)
-    const drawVertical = (text: string, x: number, top: number, size: number, color: string) => {
+    const drawVertical = (text: string, x: number, top: number, baseSize: number, color: string) => {
+      // Auto-fit the column into the etched window so long inscriptions never clip.
+      const advances = Array.from(text).filter((ch) => ch !== '。' && ch !== '、').length;
+      const maxBottom = H - 190;
+      const size = Math.min(baseSize, Math.max(24, (maxBottom - top) / Math.max(1, advances * 1.08)));
       ctx.save();
       ctx.fillStyle = color;
       ctx.font = `400 ${size}px ${jp}`;
@@ -4632,6 +4636,60 @@ export class GlitchWorld {
     obelisk.instanceMatrix.needsUpdate = true;
     this.group.add(obelisk);
     this.glyphSignMats.push(obeliskMat);
+
+    // ---------------------------------------------------------------- 5. SKY CABLE HARNESS
+    // Sagging trunks of cable strung across the basin with typed packets running along them.
+    // Cheap silhouettes that make the sky read as infrastructure instead of empty volume.
+    const cableMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      uniforms: {
+        uTime: { value: 0 },
+        uAnomaly: { value: 0 },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec2 vUv;
+        uniform float uTime;
+        uniform float uAnomaly;
+
+        void main() {
+          // packets of data sprint along the trunk
+          float run = fract(vUv.x * 3.0 - uTime * 0.55);
+          float packet = smoothstep(0.055, 0.0, abs(run - 0.5));
+          float run2 = fract(vUv.x * 5.0 + uTime * 0.31);
+          float packet2 = smoothstep(0.035, 0.0, abs(run2 - 0.5)) * 0.6;
+          float sheath = 0.20 + 0.10 * sin(vUv.y * 12.0);
+          vec3 tint = mix(vec3(0.35, 0.85, 1.0), vec3(1.0, 0.22, 0.32), uAnomaly * 0.8);
+          vec3 col = vec3(0.02, 0.07, 0.16) + tint * (sheath + packet * 2.2 + packet2 * 1.5);
+          gl_FragColor = vec4(col, 0.42 + packet * 0.5);
+        }
+      `,
+    });
+    this.glyphSignMats.push(cableMat);
+
+    for (let c = 0; c < 9; c++) {
+      const z0 = 12 - c * 8.2;
+      const y0 = 26 + (c % 3) * 7;
+      const x0 = c % 2 === 0 ? -78 : 78;
+      const x1 = -x0;
+      const sag = 6 + (c % 4) * 2.4;
+      const curve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(x0, y0, z0 + 14),
+        new THREE.Vector3(x0 * 0.35, y0 - sag, z0 + 2),
+        new THREE.Vector3(0, y0 - sag * 1.35, z0 - 4),
+        new THREE.Vector3(x1 * 0.35, y0 - sag * 0.8, z0 - 10),
+        new THREE.Vector3(x1, y0 + 3, z0 - 22),
+      ]);
+      const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 40, 0.09 + (c % 3) * 0.03, 4, false), cableMat);
+      this.group.add(tube);
+    }
   }
 
   private buildCollapseAndAbyss(concreteDiff: THREE.Texture, concreteDisp: THREE.Texture): void {

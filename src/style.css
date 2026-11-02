@@ -434,10 +434,17 @@ kbd {
 #hl-target { color: rgba(200, 240, 255, 0.8); }
 #hl-state { color: rgba(255, 120, 150, 0.85); }
 
-#host-link.hl-corrupt .hl-left,
-#host-link.hl-corrupt .hl-right,
-#host-link.hl-corrupt .hl-top {
+#host-link.hl-corrupt .hl-top,
+#host-link.hl-corrupt .hl-bottom {
   animation: hl-glitch 0.28s steps(2, end) infinite;
+}
+#host-link.hl-corrupt .hl-left,
+#host-link.hl-corrupt .hl-right {
+  animation: hl-glitch-fade 0.28s steps(2, end) infinite;
+}
+@keyframes hl-glitch-fade {
+  0%, 100% { opacity: 1; filter: none; }
+  50% { opacity: 0.74; filter: hue-rotate(10deg) contrast(1.18); }
 }
 #host-link.hl-hot .hl-scan {
   background: repeating-linear-gradient(
@@ -868,4 +875,70 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 
 @media (max-width: 600px) {
   #dump-hud { top: 14px; right: 14px; width: 140px; font-size: 8.5px; }
+}
+
+/* ---------------------------------------------------------------- COLD OPEN POLISH */
+.game-title::before,
+.game-title::after {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  mix-blend-mode: screen;
+}
+.game-title::before {
+  color: #57c8ff;
+  animation: title-slice-a 7.4s steps(1, end) infinite;
+}
+.game-title::after {
+  color: #ff3358;
+  animation: title-slice-b 9.1s steps(1, end) infinite;
+}
+@keyframes title-slice-a {
+  0%, 88%, 100% { opacity: 0; transform: translate(0, 0); clip-path: inset(0 0 100% 0); }
+  89% { opacity: 0.55; transform: translate(3px, -1px); clip-path: inset(18% 0 62% 0); }
+  91% { opacity: 0.42; transform: translate(-4px, 1px); clip-path: inset(52% 0 28% 0); }
+  93% { opacity: 0; }
+}
+@keyframes title-slice-b {
+  0%, 74%, 100% { opacity: 0; transform: translate(0, 0); clip-path: inset(0 0 100% 0); }
+  75% { opacity: 0.45; transform: translate(-3px, 0); clip-path: inset(64% 0 12% 0); }
+  78% { opacity: 0.3; transform: translate(2px, 1px); clip-path: inset(8% 0 74% 0); }
+  80% { opacity: 0; }
+}
+
+.title-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(140, 210, 255, 0.035) 0px,
+    rgba(140, 210, 255, 0.035) 1px,
+    transparent 1px,
+    transparent 4px
+  );
+  mix-blend-mode: screen;
+}
+
+#loading-status::after {
+  content: '▌';
+  margin-left: 3px;
+  color: rgba(150, 215, 255, 0.85);
+  animation: caret-blink 1.05s steps(1, end) infinite;
+}
+@keyframes caret-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+.title-vignette {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(0, 40, 96, 0.16), transparent 58%),
+    radial-gradient(circle at 50% 50%, transparent 34%, rgba(0, 2, 8, 0.82) 100%);
+  pointer-events: none;
 }
