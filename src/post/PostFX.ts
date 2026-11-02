@@ -29,6 +29,10 @@ export type PostFXOptions = {
   ghost?: number;
   bloom?: number;
   sharpen?: number;
+  /** Radial concentration-line energy (0..1): ink-style speed lines converging on the centre. */
+  focus?: number;
+  /** Radial zoom blur (0..1): the frame rushing past the camera during dives and landings. */
+  zoomBlur?: number;
   transition?: { scene: THREE.Scene; camera: THREE.Camera; progress: number };
 };
 
@@ -98,6 +102,8 @@ export class PostFX {
         tBloom: { value: null },
         uBloom: { value: 0.0 },
         uSharpen: { value: 0.28 },
+        uFocus: { value: 0.0 },
+        uZoomBlur: { value: 0.0 },
         uResolution: { value: new THREE.Vector2(width, height) },
       },
       vertexShader: /* glsl */ `
@@ -128,6 +134,8 @@ export class PostFX {
         uniform sampler2D tBloom;
         uniform float uBloom;
         uniform float uSharpen;
+        uniform float uFocus;
+        uniform float uZoomBlur;
         uniform vec2 uResolution;
 
         float hash21(vec2 p) {
@@ -284,6 +292,58 @@ export class PostFX {
             col = clamp(col + (col - ringAvg) * (effSharpen * (0.45 + 0.55 * amp)), 0.0, 4.0);
           }
 
+          // ---------------------------------------------------------------- RADIAL ZOOM RUSH
+          // Six taps dragged toward the centre: raw speed without ever moving the camera, so it is
+          // intense but not nauseating. Strongest at the frame edge, where the eye expects it.
+          if (uZoomBlur > 0.01) {
+            vec2 dir = centered;
+            float dirLen = max(1e-4, length(dir));
+            vec2 dirN = dir / dirLen;
+            float edgeMask = smoothstep(0.10, 0.95, dirLen * 1.85);
+            float strength = uZoomBlur * (0.006 + edgeMask * 0.075);
+            float jitter = fract(sin(dot(vUv, vec2(12.9898, 78.233)) + uTime * 7.0) * 43758.5453);
+            vec3 rush = vec3(0.0);
+            float wSum = 0.0;
+            for (int i = 0; i < 6; i++) {
+              float fi = float(i);
+              float t = (fi + jitter * 0.85) / 6.0;
+              float w = 1.0 - t * 0.72;
+              rush += fetch(vUv - dirN * (t * strength * 6.2)) * w;
+              wSum += w;
+            }
+            rush /= max(1e-4, wSum);
+            col = mix(col, rush, clamp(0.34 + edgeMask * 0.52, 0.0, 0.92) * uZoomBlur);
+            col += vec3(0.05, 0.14, 0.24) * edgeMask * uZoomBlur * 0.55;
+          }
+
+          // ---------------------------------------------------------------- CONCENTRATION LINES
+          // Hand-inked style: thin wedges radiating from the vanishing point, drawn only in the
+          // periphery. Every wedge runs on its own cycle, so the set is never a static pattern.
+          if (uFocus > 0.01) {
+            float ang = atan(centered.y, centered.x);
+            float rNorm = length(centered) * 2.0;
+            float lineAcc = 0.0;
+            for (int L = 0; L < 3; L++) {
+              float fl = float(L);
+              float spokes = 78.0 + fl * 26.0;
+              float a = ang / 6.2831853 * spokes + fl * 0.37;
+              float band = fract(a);
+              float w = 0.012;
+              float line = smoothstep(w, 0.0, abs(band - 0.5));
+              float cycle = floor(uTime * (14.0 + fl * 9.0) + fl * 71.0);
+              float pick = hash21(vec2(floor(a), cycle + fl * 13.0));
+              float lineOn = step(0.55 - uFocus * 0.22, pick);
+              float innerR = 0.28 + hash21(vec2(floor(a) + 3.1, cycle)) * 0.82;
+              float radialGate = smoothstep(innerR, innerR + 0.22, rNorm);
+              lineAcc += line * lineOn * radialGate;
+            }
+            float flicker = 0.72 + 0.28 * sin(uTime * 41.0);
+            vec3 lineCol = mix(vec3(0.86, 0.96, 1.0), vec3(1.0, 0.72, 0.66), uHorror * 0.6);
+            col += lineCol * clamp(lineAcc, 0.0, 1.6) * uFocus * 0.85 * flicker;
+            float haze = smoothstep(0.05, 0.55, rNorm) * uFocus;
+            col *= mix(1.0, 1.10, haze);
+          }
+
           // Ghost echo of the bend (double vision on strong spatial warps)
           if (uDistort > 0.18) {
             vec3 ghost = fetch(vUv - refractOffset * 1.35);
@@ -327,9 +387,19 @@ export class PostFX {
             col.b = mix(col.b, fetch(uv - vec2(chan, 0.0)).b, uMash * 0.7);
           }
 
-          // ---------------------------------------------------------------- SEAMS & BEAM
+          // ---------------------------------------------------------------- SEAMS, CYBER MACROBLOCKS & BEAM
+          if (uTear + uMash > 0.08) {
+            float cyTick = floor(uTime * 16.0);
+            vec2 cyCell = floor(vUv * vec2(32.0, 18.0));
+            float cyPick = hash21(cyCell + cyTick * 0.71);
+            float cyGate = step(0.955 - clamp(uTear + uMash, 0.0, 1.0) * 0.07, cyPick);
+            if (cyGate > 0.5) {
+              vec3 inv = vec3(1.0) - col;
+              col = mix(col, mix(inv * vec3(0.25, 0.95, 1.0), vec3(1.0, 0.16, 0.42), step(0.65, fract(cyPick * 17.0))), 0.65);
+            }
+          }
           if (seam > 0.01) {
-            col += vec3(0.42, 0.86, 1.0) * clamp(seam, 0.0, 1.0) * 0.16;
+            col += vec3(0.42, 0.88, 1.0) * clamp(seam, 0.0, 1.0) * 0.24;
           }
           if (uRoll > 0.02) {
             float rollY = fract(uTime * 0.31 + 0.15);
@@ -595,6 +665,8 @@ export class PostFX {
     u.uRoll.value = opts.roll ?? 0;
     u.uGhost.value = opts.ghost ?? 0;
     u.uSharpen.value = opts.sharpen ?? 0.28;
+    u.uFocus.value = opts.focus ?? 0.0;
+    u.uZoomBlur.value = opts.zoomBlur ?? 0.0;
 
     renderer.setRenderTarget(this.rt);
     renderer.clear(true, true, true);

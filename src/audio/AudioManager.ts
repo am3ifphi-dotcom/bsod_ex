@@ -54,6 +54,12 @@ export const SOUND_MANIFEST: SoundManifestEntry[] = [
   { id: 'dissonance', url: '/audio/dissonance.mp3' },
   { id: 'noise_wave', url: '/audio/noise_wave.mp3' },
   { id: 'heartbeat', url: '/audio/heartbeat.mp3' },
+  // Dedicated thunder recordings (baked offline by scripts/generate-thunder-audio.mjs).
+  // Layered strike/crack/roll assets replace pitch-shifted generic SFX for weather.
+  { id: 'thunder_close', url: '/audio/thunder_close.wav' },
+  { id: 'thunder_mid', url: '/audio/thunder_mid.wav' },
+  { id: 'thunder_far', url: '/audio/thunder_far.wav' },
+  { id: 'thunder_roll', url: '/audio/thunder_roll.wav' },
 ];
 
 interface ActiveLoop {

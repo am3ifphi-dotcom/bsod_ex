@@ -44,6 +44,11 @@ if (!w.group.getObjectByName('ImpossibleArchive')) throw new Error('Missing impo
 w.buildCathedralCausewayAndLeviathan();
 w.buildCentralSanctuary(new THREE.Object3D(), new THREE.Object3D(), new THREE.Object3D());
 w.buildWorldLandmarks(new THREE.Object3D(), new THREE.Object3D(), new THREE.Object3D(), new THREE.Object3D());
+w.buildCorruptedMegaRemnants();
+w.buildSkyMonuments();
+w.buildSpireVortex();
+if (!w.group.getObjectByName('BrokenHaloCrown')) throw new Error('Missing 340m Broken Halo Crown');
+if (!w.group.getObjectByName('InvertedHangingCathedral')) throw new Error('Missing inverted hanging cathedral');
 w.buildFloatingAtmosphere();
 w.buildAtmosphericDepth();
 w.buildCausewayDetailAndMonoliths();

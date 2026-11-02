@@ -353,8 +353,9 @@ export class FirstPersonController {
     desiredPos.y += ny * 0.018 + Math.sin(elapsed * 1.6) * 0.0025;
 
     this.scratchDir.copy(lookTarget).sub(targetPos).normalize();
-    const flinchRecoil = madness > 0.45 ? clickPulse * 0.13 : clickPulse * 0.03;
-    desiredPos.addScaledVector(this.scratchDir, madness * 0.11 - flinchRecoil);
+    const flinchRecoil = madness > 0.45 ? clickPulse * 0.15 : clickPulse * 0.03;
+    // The view is drawn inexorably toward the panel as madness climbs: you are not choosing this.
+    desiredPos.addScaledVector(this.scratchDir, madness * 0.19 - flinchRecoil);
 
     const lookPt = this.scratchTarget.copy(lookTarget);
     lookPt.z -= nx * 0.036;
@@ -441,15 +442,23 @@ export class FirstPersonController {
       const accel = Math.pow(u, 1.55);
       // Reach exact localZ = -88.56 (27.44 local units from z=-116 cap, matching GlitchWorld's -27.44m sleeve start 1:1!)
       const endWorldDist = -88.56 * Math.max(0.1, monitorScaleZ);
-      distOut = THREE.MathUtils.lerp(0.38, endWorldDist, accel);
+      // The pull stutters twice on the way down: something is reeling you in, not letting you fall.
+      distOut =
+        THREE.MathUtils.lerp(0.38, endWorldDist, accel) +
+        Math.sin(u * Math.PI * 2.0) * 0.16 +
+        Math.sin(u * Math.PI * 5.0) * 0.05 * Math.sin(u * Math.PI);
       const damp = 1.0 - THREE.MathUtils.smoothstep(u, 0.58, 1.0);
       const spiralEnv = Math.sin(u * Math.PI) * 0.095 * damp;
       sideOffset = Math.sin(u * 12.0) * spiralEnv;
       vertOffset = Math.cos(u * 10.0) * spiralEnv * 0.85;
       lookYawOffset = Math.sin(u * 8.0) * 0.035 * damp;
       lookPitchOffset = Math.cos(u * 7.0) * 0.028 * damp;
-      headRoll = THREE.MathUtils.lerp(Math.sin(u * 6.5) * 0.24, 0.12, THREE.MathUtils.smoothstep(u, 0.55, 1.0));
-      fov = THREE.MathUtils.lerp(90, 96, THREE.MathUtils.smoothstep(u, 0.0, 0.85));
+      // Two full barrel rolls down the throat, resolving exactly onto the handoff roll of 0.12.
+      headRoll =
+        THREE.MathUtils.lerp(Math.sin(u * 6.5) * 0.24, 0.12, THREE.MathUtils.smoothstep(u, 0.55, 1.0)) +
+        Math.sin(u * Math.PI * 3.0) * 0.30 * Math.sin(u * Math.PI);
+      // FOV over-inflates as the throat narrows, then lands on exactly 96 for the seam.
+      fov = 90.0 + 24.0 * Math.sin(u * Math.PI) + 6.0 * u;
     }
 
     const camPos = this.scratchPos
@@ -708,12 +717,18 @@ export class FirstPersonController {
       const velPitch = Math.asin(THREE.MathUtils.clamp(vy / vLen, -0.92, 0.92));
       const velYaw = Math.atan2(-vx, -vz);
 
-      const flareBlend = THREE.MathUtils.smoothstep(u, 0.52, 1.0);
-      const pitch = THREE.MathUtils.lerp(velPitch, -0.24, flareBlend);
-      const yaw = THREE.MathUtils.lerp(velYaw * 0.45, 0.0, flareBlend);
-      const roll = 0.03 - bankCurve * 0.13;
-      // C1-continuous FOV continuation from Phase 1 (90.0 -> 74.0, matching dfov/dt = -5.357 deg/s at u=0!)
-      const fov = 90.0 - 17.04 * u + 1.04 * u2;
+      const flareBlend = THREE.MathUtils.smoothstep(u, 0.50, 1.0);
+      // Gaze drifts up toward the sky monuments during the fall, then eases onto the causeway.
+      const monumentLook = Math.sin(THREE.MathUtils.clamp((u - 0.35) / 0.55, 0, 1) * Math.PI) * 0.22;
+      const pitch = THREE.MathUtils.lerp(velPitch, -0.16, flareBlend) + monumentLook;
+      const yaw = THREE.MathUtils.lerp(velYaw * 0.34, 0.0, flareBlend);
+      // Corkscrew barrel roll through the dive (value 0.03 exactly at u=0, so the mouth handoff
+      // stays C1-continuous) — the horizon physically tumbles while you fall.
+      const roll =
+        0.03 - bankCurve * 0.13 + Math.sin(u * Math.PI * 3.0) * 0.36 * Math.sin(u * Math.PI);
+      // FOV pumps wide open at the exit (speed nausea) then violently compresses before touchdown.
+      // Starts at exactly 90.0 to match the throat exit, ending at 52.0 for the impact squeeze.
+      const fov = 90.0 + 30.0 * Math.sin(u * Math.PI) - 38.0 * u3;
 
       this.camera.position.set(camX, camY, camZ);
       this.euler.set(pitch, yaw, roll, 'YXZ');
@@ -763,27 +778,40 @@ export class FirstPersonController {
     if (landT < 0.32) {
       const u = landT / 0.32;
       const ease = 1 - Math.pow(1 - u, 3);
-      eyeY = THREE.MathUtils.lerp(this.eyeHeight + 0.30, 0.56, ease);
-      pitch = THREE.MathUtils.lerp(-0.24, -0.52, ease);
-      roll = THREE.MathUtils.lerp(0.03, -0.14, ease);
-      yaw = THREE.MathUtils.lerp(0.0, 0.10, ease);
-      fov = THREE.MathUtils.lerp(74, 68, ease);
+      eyeY = THREE.MathUtils.lerp(this.eyeHeight + 0.30, 0.52, ease);
+      pitch = THREE.MathUtils.lerp(-0.24, -0.60, ease);
+      roll = THREE.MathUtils.lerp(0.03, -0.19, ease);
+      yaw = THREE.MathUtils.lerp(0.0, 0.12, ease);
+      fov = THREE.MathUtils.lerp(52, 60, ease);
     } else if (landT < 0.80) {
       const u = (landT - 0.32) / 0.48;
-      eyeY = THREE.MathUtils.lerp(0.56, 0.68, u);
-      pitch = THREE.MathUtils.lerp(-0.52, -0.36, u);
-      roll = THREE.MathUtils.lerp(-0.14, -0.08, u);
-      yaw = THREE.MathUtils.lerp(0.10, -0.06, Math.sin(u * Math.PI * 0.5));
-      fov = 68;
-    } else {
-      const u = (landT - 0.80) / (landDur - 0.80);
+      eyeY = THREE.MathUtils.lerp(0.52, 0.70, u);
+      pitch = THREE.MathUtils.lerp(-0.60, -0.36, u);
+      roll = THREE.MathUtils.lerp(-0.19, -0.08, u);
+      yaw = THREE.MathUtils.lerp(0.12, -0.06, Math.sin(u * Math.PI * 0.5));
+      fov = 60;
+    } else if (landT < 1.16) {
+      // Stand up fast, then let the head fall back to take in the sky: the awe beat.
+      const u = (landT - 0.80) / 0.36;
       const smooth = u * u * (3 - 2 * u);
-      eyeY = THREE.MathUtils.lerp(0.68, this.eyeHeight, smooth);
-      pitch = THREE.MathUtils.lerp(-0.36, 0.02, smooth);
-      roll = THREE.MathUtils.lerp(-0.08, 0.0, smooth);
-      yaw = THREE.MathUtils.lerp(-0.06, 0.0, smooth);
-      fov = THREE.MathUtils.lerp(68, 66, smooth);
+      eyeY = THREE.MathUtils.lerp(0.70, this.eyeHeight + 0.02, smooth);
+      pitch = THREE.MathUtils.lerp(-0.36, 0.46, smooth);
+      roll = THREE.MathUtils.lerp(-0.08, 0.030, smooth);
+      yaw = THREE.MathUtils.lerp(-0.06, 0.10, smooth);
+      fov = THREE.MathUtils.lerp(60, 78, smooth);
+    } else {
+      // Settle the gaze back down onto the causeway while the thunder rolls away.
+      const u = THREE.MathUtils.clamp((landT - 1.16) / Math.max(0.1, landDur - 1.16), 0, 1);
+      const smooth = u * u * (3 - 2 * u);
+      eyeY = THREE.MathUtils.lerp(this.eyeHeight + 0.02, this.eyeHeight, smooth);
+      pitch = THREE.MathUtils.lerp(0.46, 0.02, smooth);
+      roll = THREE.MathUtils.lerp(0.030, 0.0, smooth);
+      yaw = THREE.MathUtils.lerp(0.10, 0.0, smooth);
+      fov = THREE.MathUtils.lerp(78, 66, smooth);
     }
+
+    // No impact shake here on purpose: the touchdown is expressed through radial filters,
+    // slow motion and the body's physical crouch. Shaking the camera only reads as nausea.
 
     this.position.copy(spawnPos);
     this.camera.position.set(spawnPos.x, spawnPos.y + eyeY, spawnPos.z);

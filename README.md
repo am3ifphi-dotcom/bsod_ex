@@ -33,3 +33,14 @@ npm install
 npm run dev
 npm run build
 ```
+
+### アセット生成（ビルド済み・再生成は任意）
+
+自室の壁（漆喰）・床（寄せ木）・ラグ（手織りウール）のテクスチャは、外部依存なしの
+プロシージャルベイカーで書き出しています（PNG + ノーマルマップ、1024²）。
+壁と床はシームレスタイル、ラグは1枚絵デザインとして焼いています。
+
+```bash
+node scripts/generate-room-textures.mjs   # -> public/textures/room/*.png
+node scripts/generate-thunder-audio.mjs   # -> public/audio/thunder_*.wav
+```

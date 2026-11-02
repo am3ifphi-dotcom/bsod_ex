@@ -77,6 +77,7 @@ if (bedroom.bsodScreen.parasyteGroup.visible !== false) {
 }
 
 // exercise the runtime updates across a full escalation + aftermath
+const bsodAny = bedroom.bsodScreen as any;
 const camFwd = new THREE.Vector3(-0.9, -0.1, -0.4).normalize();
 let scrollPhase = 0;
 for (let i = 0; i < 300; i++) {
@@ -102,20 +103,20 @@ for (let i = 0; i < 300; i++) {
   if (i === 120 && bedroom.bsodScreen.throatGroup.visible) {
     throw new Error('The tunnel must not replace the digital face during inspection.');
   }
+  if (i === 120 && !bsodAny.holoBreachGroup.visible) {
+    throw new Error('3D holographic breach rig must extrude during high-madness inspection.');
+  }
   if (i === 250 && !bedroom.bsodScreen.throatGroup.visible) {
     throw new Error('The digital tunnel must open during suction.');
   }
   bedroom.update(1 / 60, i / 60, Math.min(1, i / 200), Math.min(0.5, i / 400), false, new THREE.Vector3(0.35, 0.017, 0.62), camFwd);
 }
-const bsodAny = bedroom.bsodScreen as any;
 if (
-  bsodAny.rimTeethMesh.count !== 52 ||
-  bsodAny.jawFlapsMesh.count !== 4 ||
-  Boolean(bsodAny.tongueMesh) ||
-  bsodAny.sinewMesh.count !== 32 ||
-  bsodAny.parasyteEyesMesh.count !== 11
+  bsodAny.holoCascadeMesh.count !== 36 ||
+  bsodAny.holoRingsMesh.count !== 8 ||
+  bsodAny.glassShards.count !== 56
 ) {
-  throw new Error('Unexpected 3D Parasyte BSOD mesh counts!');
+  throw new Error('Unexpected 3D holographic BSOD breach mesh counts!');
 }
 // Verify realistic rain materials + bedroom view-dependent anomalies + jumpable bed height!
 if (!bedroom.rainGlassMat || !bedroom.skylightRainMat || !bedroom.rainStreakMat || !bedroom.rainSplashMat || !bedroom.floorCausticMat) {
