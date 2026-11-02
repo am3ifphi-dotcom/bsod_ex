@@ -112,6 +112,9 @@ export class GlitchWorld {
   private readonly gyroRings: THREE.Mesh[] = [];
   private coreBeamMat!: THREE.ShaderMaterial;
   private corePlaqueMat!: THREE.MeshBasicMaterial;
+  private colossusFace?: THREE.Mesh;
+  private colossusFaceMat?: THREE.MeshBasicMaterial;
+  private colossusHaloMat?: THREE.ShaderMaterial;
   public coreSecretRevealed = false;
   private phantomMat!: THREE.ShaderMaterial;
   private phantomMesh!: THREE.InstancedMesh;
@@ -264,6 +267,9 @@ export class GlitchWorld {
     // 4. World Landmarks (Server Megaliths, Floating CRT Monitors, Giant Motherboards, Diegetic Clue Terminals)
     this.buildWorldLandmarks(rackGltf.scene, crtGltf.scene, moboGltf.scene, cablesGltf.scene);
 
+    // 4b. The thing on the horizon that has been watching the whole time.
+    this.buildSignalColossus();
+
     // 5. Floating UI Fragments & Rising Digital Ash
     this.buildFloatingAtmosphere();
 
@@ -342,9 +348,9 @@ export class GlitchWorld {
         void main() {
           vec3 dir = normalize(vWorldDir);
           float y = clamp(dir.y, -0.4, 1.0);
-          vec3 zenith = mix(vec3(0.0, 0.012, 0.062), vec3(0.035, 0.0, 0.015), max(uCollapse, uAnomaly * 0.45));
-          vec3 midBlue = mix(vec3(0.0, 0.115, 0.46), vec3(0.18, 0.02, 0.10), uAnomaly * 0.35);
-          vec3 horizon = mix(vec3(0.008, 0.24, 0.76), vec3(0.75, 0.16, 0.28), uAnomaly * 0.42);
+          vec3 zenith = mix(vec3(0.0, 0.0045, 0.026), vec3(0.018, 0.0, 0.010), max(uCollapse, uAnomaly * 0.45));
+          vec3 midBlue = mix(vec3(0.001, 0.030, 0.135), vec3(0.085, 0.008, 0.048), uAnomaly * 0.35);
+          vec3 horizon = mix(vec3(0.004, 0.062, 0.20), vec3(0.34, 0.06, 0.11), uAnomaly * 0.42);
 
           vec3 col = mix(horizon, midBlue, smoothstep(-0.02, 0.35, y));
           col = mix(col, zenith, smoothstep(0.32, 0.88, y));
@@ -363,7 +369,7 @@ export class GlitchWorld {
           float godRays = (0.55 + 0.45 * sin(rayTheta * 9.0 + uTime * 0.35) * cos(rayTheta * 17.0 - uTime * 0.28))
                         * exp(-sunAng * 3.0);
           vec3 rayCol = mix(vec3(0.28, 0.74, 1.0), vec3(1.0, 0.18, 0.28), max(uAnomaly * 0.75, uCollapse));
-          col += rayCol * godRays * (0.42 + uAnomaly * 0.52);
+          col += rayCol * godRays * (0.30 + uAnomaly * 0.55);
 
           // Almond-shaped Giant Watcher Eyelid, Serrated Parasyte Rim & Bloodshot Iris!
           vec2 eyeSpace = sunPlane / 0.115;
@@ -433,7 +439,7 @@ export class GlitchWorld {
                           * smoothstep(0.04, 0.24, y) * smoothstep(0.88, 0.30, y);
             vec3 auroraCalm = mix(vec3(0.04, 0.62, 0.96), vec3(0.26, 0.34, 1.0), smoothstep(0.12, 0.58, y));
             vec3 auroraPanic = vec3(1.0, 0.14, 0.34);
-            col += mix(auroraCalm, auroraPanic, max(uAnomaly * 0.85, uCollapse)) * curtain * (0.62 + uAnomaly * 0.55);
+            col += mix(auroraCalm, auroraPanic, max(uAnomaly * 0.85, uCollapse)) * curtain * (0.34 + uAnomaly * 0.55);
 
             // Sweeping radial solar-eclipse corona rays emanating from the Watching Sky-Eye
             vec2 eyeDelta = vec2(dir.x, dir.y - 0.33);
@@ -451,7 +457,7 @@ export class GlitchWorld {
             float band = cn1.r * 0.68 + cn2.g * 0.32;
             float horizonMask = smoothstep(0.48, 0.01, y) * smoothstep(-0.30, 0.02, y);
             float cloudAmt = smoothstep(0.36, 0.76, band) * horizonMask;
-            vec3 cloudCol = mix(vec3(0.025, 0.095, 0.23), vec3(0.16, 0.40, 0.78), smoothstep(0.0, 0.38, y));
+            vec3 cloudCol = mix(vec3(0.012, 0.040, 0.105), vec3(0.045, 0.125, 0.30), smoothstep(0.0, 0.38, y));
             cloudCol += mix(vec3(0.38, 0.74, 1.0), vec3(1.0, 0.25, 0.32), uAnomaly) * exp(-sunAng * 2.2) * 0.42;
             col = mix(col, cloudCol, clamp(cloudAmt * 0.74, 0.0, 0.74));
           }
@@ -565,7 +571,7 @@ export class GlitchWorld {
         uCollapseCenter: { value: this.collapseCenter },
         uCollapseActive: { value: 0 },
         uFogColor: { value: new THREE.Color(0x011330) },
-        uFogDensity: { value: 0.0056 },
+        uFogDensity: { value: 0.0105 },
       },
       vertexShader: /* glsl */ `
         varying vec3 vWorldPos;
@@ -665,11 +671,11 @@ export class GlitchWorld {
 
           float camDist = length(cameraPosition - vWorldPos);
           float heightMist = exp(-max(vWorldPos.y + 1.5, 0.0) * 0.022);
-          float airDensity = uFogDensity * (0.72 + heightMist * 1.25);
+          float airDensity = uFogDensity * (0.62 + heightMist * 1.65);
           float fogFactor = 1.0 - exp(-airDensity * airDensity * camDist * camDist);
           vec3 viewW = normalize(vWorldPos - cameraPosition);
           float sunScatter = pow(max(dot(viewW, normalize(vec3(0.0, 0.26, -0.96))), 0.0), 5.0);
-          vec3 aerialTint = mix(vec3(0.008, 0.078, 0.20), vec3(0.035, 0.21, 0.47), clamp((vWorldPos.y + 4.0) * 0.014, 0.0, 1.0));
+          vec3 aerialTint = mix(vec3(0.004, 0.030, 0.086), vec3(0.014, 0.085, 0.21), clamp((vWorldPos.y + 4.0) * 0.014, 0.0, 1.0));
           aerialTint += vec3(0.16, 0.42, 0.88) * sunScatter * 0.72;
           col = mix(col, aerialTint, clamp(fogFactor, 0.0, 0.95));
 
@@ -745,8 +751,8 @@ export class GlitchWorld {
           float camDist = length(cameraPosition - vWorldPos);
           vec3 viewW2 = normalize(vWorldPos - cameraPosition);
           float sunScatter2 = pow(max(dot(viewW2, normalize(vec3(0.0, 0.26, -0.96))), 0.0), 5.0);
-          float fog = 1.0 - exp(-0.0056 * 0.0056 * camDist * camDist * 1.35);
-          vec3 seaFog = mix(vec3(0.004, 0.070, 0.185), vec3(0.03, 0.20, 0.46), 0.5)
+          float fog = 1.0 - exp(-0.0092 * 0.0092 * camDist * camDist * 1.55);
+          vec3 seaFog = mix(vec3(0.002, 0.026, 0.078), vec3(0.012, 0.070, 0.18), 0.5)
                       + vec3(0.16, 0.42, 0.88) * sunScatter2 * 0.7;
           col = mix(col, seaFog, clamp(fog, 0.0, 0.96));
 
@@ -1048,8 +1054,8 @@ export class GlitchWorld {
           float ndl = clamp(dot(nrm, lightDir), 0.0, 1.0);
           float rim = pow(1.0 - abs(dot(nrm, normalize(cameraPosition - vWorldPos))), 2.3);
 
-          float fin = 0.72 + 0.28 * step(0.45, fract(vUv.x * 8.0));
-          vec3 col = vec3(0.005, 0.016, 0.055) * fin * (0.45 + 0.85 * ndl) + vec3(0.05, 0.28, 0.72) * rim * 0.52;
+          float fin = 0.62 + 0.38 * step(0.55, fract(vUv.x * 11.0)) * step(0.5, fract(vUv.y * 6.0));
+          vec3 col = vec3(0.003, 0.008, 0.028) * fin * (0.30 + 0.70 * ndl) + vec3(0.03, 0.16, 0.44) * rim * 0.30;
 
           if (abs(nrm.y) < 0.45) {
             vec2 winGrid = vec2(
@@ -1058,9 +1064,11 @@ export class GlitchWorld {
             );
             vec2 cid = floor(winGrid);
             vec2 f = fract(winGrid);
-            float inPane = step(0.20, f.x) * step(f.x, 0.80) * step(0.24, f.y) * step(f.y, 0.76);
+            float inPane = step(0.26, f.x) * step(f.x, 0.74) * step(0.30, f.y) * step(f.y, 0.70);
             float h = hash21(cid + floor(vSeed * 100.0));
-            float flicker = step(0.71, h) * (0.55 + 0.45 * sin(uTime * (1.5 + h * 4.5) + h * 20.0));
+            // Most windows are dead. The lit ones are far apart, and they flicker like
+            // a building whose tenants left a long time ago.
+            float flicker = step(0.885, h) * (0.35 + 0.65 * sin(uTime * (1.5 + h * 4.5) + h * 20.0));
 
             float vBus = smoothstep(0.45, 0.5, fract(vUv.x * 2.0)) * step(0.28, vSeed);
             float busPulse = 0.45 + 0.55 * sin(vWorldPos.y * 0.16 - uTime * 4.2 + vSeed * 12.0);
@@ -1070,9 +1078,9 @@ export class GlitchWorld {
             float beaconBlink = pow(0.5 + 0.5 * sin(uTime * 4.8 + vSeed * 31.0), 4.0);
 
             vec3 winCol = mix(vec3(0.18, 0.72, 1.0), vec3(1.0, 0.16, 0.26), step(0.90 - uAnomaly * 0.65, h));
-            col += winCol * inPane * flicker * 0.92;
-            col += mix(vec3(0.35, 0.82, 1.0), vec3(1.0, 0.22, 0.30), uAnomaly * 0.75) * vBus * busPulse * 0.68;
-            col += vec3(0.92, 0.98, 1.0) * elevator * 1.1;
+            col += winCol * inPane * flicker * 0.75;
+            col += mix(vec3(0.35, 0.82, 1.0), vec3(1.0, 0.22, 0.30), uAnomaly * 0.75) * vBus * busPulse * 0.42;
+            col += vec3(0.92, 0.98, 1.0) * elevator * 0.85;
             col += vec3(1.0, 0.10, 0.18) * beaconMask * (0.35 + 0.85 * beaconBlink);
           }
 
@@ -1083,16 +1091,16 @@ export class GlitchWorld {
           float edgeSeam = smoothstep(0.05, 0.0, min(vUv.x, 1.0 - vUv.x));
           float crownBand = smoothstep(0.87, 0.985, vUv.y) * smoothstep(1.0, 0.94, vUv.y);
           col += mix(vec3(0.26, 0.68, 1.0), vec3(1.0, 0.26, 0.32), uAnomaly * 0.8) * edgeSeam * 0.16;
-          col += vec3(0.52, 0.84, 1.0) * crownBand * 0.22;
+          col += vec3(0.52, 0.84, 1.0) * crownBand * 0.10;
           col *= 0.62 + 0.38 * smoothstep(-4.0, 46.0, vWorldPos.y);
 
           float camDist = length(cameraPosition - vWorldPos);
           float heightMist = exp(-max(vWorldPos.y + 1.5, 0.0) * 0.022);
-          float airDensity = uFogDensity * (0.72 + heightMist * 1.25);
+          float airDensity = uFogDensity * (0.62 + heightMist * 1.65);
           float fogFactor = 1.0 - exp(-airDensity * airDensity * camDist * camDist);
           vec3 viewW = normalize(vWorldPos - cameraPosition);
           float sunScatter = pow(max(dot(viewW, normalize(vec3(0.0, 0.26, -0.96))), 0.0), 5.0);
-          vec3 aerialTint = mix(vec3(0.008, 0.078, 0.20), vec3(0.035, 0.21, 0.47), clamp((vWorldPos.y + 4.0) * 0.014, 0.0, 1.0));
+          vec3 aerialTint = mix(vec3(0.004, 0.030, 0.086), vec3(0.014, 0.085, 0.21), clamp((vWorldPos.y + 4.0) * 0.014, 0.0, 1.0));
           aerialTint += vec3(0.16, 0.42, 0.88) * sunScatter * 0.72;
           col = mix(col, aerialTint, clamp(fogFactor, 0.0, 0.93));
           gl_FragColor = vec4(col, 1.0);
@@ -1264,7 +1272,7 @@ export class GlitchWorld {
           float camDist = length(cameraPosition - vWorldPos);
           float airDensity = 0.0056 * (0.72 + exp(-max(vWorldPos.y + 1.5, 0.0) * 0.022) * 1.25);
           float fogFactor = 1.0 - exp(-airDensity * airDensity * camDist * camDist);
-          vec3 aerialTint = mix(vec3(0.008, 0.078, 0.20), vec3(0.035, 0.21, 0.47), clamp((vWorldPos.y + 4.0) * 0.014, 0.0, 1.0));
+          vec3 aerialTint = mix(vec3(0.004, 0.030, 0.086), vec3(0.014, 0.085, 0.21), clamp((vWorldPos.y + 4.0) * 0.014, 0.0, 1.0));
           col = mix(col, aerialTint, clamp(fogFactor, 0.0, 0.93));
           gl_FragColor = vec4(col, 1.0);
         }
@@ -1790,17 +1798,44 @@ export class GlitchWorld {
     const canvas = document.createElement('canvas');
     canvas.width = 1024; canvas.height = 512;
     const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = 'rgba(0, 38, 103, 0.72)'; ctx.fillRect(0, 0, 1024, 512);
-    ctx.strokeStyle = 'rgba(148, 223, 255, 0.8)'; ctx.lineWidth = 3; ctx.strokeRect(4, 4, 1016, 504);
-    ctx.fillStyle = 'rgba(194, 237, 255, 0.8)'; ctx.fillRect(0, 0, 1024, 38);
-    ctx.fillStyle = '#00346e'; ctx.font = 'bold 20px monospace';
-    ctx.fillText('MEMORY_DUMP  //  DISPLAY BUFFER LOST', 22, 26);
-    ctx.fillStyle = '#e4f7ff'; ctx.font = '200 128px sans-serif'; ctx.fillText(':(', 54, 218);
-    ctx.font = '25px monospace';
-    ctx.fillText('AN UNEXPECTED REALITY FAULT HAS OCCURRED', 250, 148);
-    ctx.fillText('RECONSTRUCTING MEMORY  . . .  99%', 250, 199);
-    ctx.fillText('0x000000F4  /  0x0078D7  /  02:47', 54, 340);
-    ctx.fillStyle = 'rgba(174, 225, 255, 0.45)'; ctx.fillRect(54, 388, 680, 4);
+    // No header band, no button, no logo: this is a sheet of telemetry that outlived
+    // the machine that printed it. Only hairlines and small type.
+    ctx.clearRect(0, 0, 1024, 512);
+    ctx.strokeStyle = 'rgba(150, 224, 255, 0.55)'; ctx.lineWidth = 2; ctx.strokeRect(3, 3, 1018, 506);
+    ctx.strokeStyle = 'rgba(150, 224, 255, 0.18)'; ctx.lineWidth = 1; ctx.strokeRect(12, 12, 1000, 488);
+
+    ctx.fillStyle = 'rgba(206, 240, 255, 0.72)';
+    ctx.font = '18px Consolas, monospace';
+    ctx.fillText('MEMORY_0247.DMP  //  DISPLAY BUFFER LOST  //  02:47', 30, 46);
+
+    ctx.fillStyle = 'rgba(150, 224, 255, 0.30)'; ctx.fillRect(30, 60, 964, 1);
+
+    ctx.fillStyle = 'rgba(232, 250, 255, 0.80)';
+    ctx.font = '200 150px "Segoe UI", sans-serif';
+    ctx.fillText(':(', 40, 230);
+
+    ctx.fillStyle = 'rgba(206, 240, 255, 0.58)';
+    ctx.font = '20px Consolas, monospace';
+    ctx.fillText('AN UNEXPECTED REALITY FAULT HAS OCCURRED', 246, 140);
+    ctx.fillText('RECONSTRUCTING MEMORY . . . . . . . . 99%', 246, 176);
+    ctx.fillText('0x000000F4  /  0x0078D7  /  HOST: 02:47', 246, 212);
+    ctx.fillStyle = 'rgba(255, 118, 148, 0.52)';
+    ctx.fillText('OBSERVER STILL ATTACHED TO SHELL', 246, 248);
+
+    // One thin memory map across the lower half, like a seismograph that never stopped.
+    ctx.strokeStyle = 'rgba(150, 224, 255, 0.35)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let x = 30; x < 994; x += 6) {
+      const y = 400 + Math.sin(x * 0.031) * 22 * Math.sin(x * 0.007) + Math.sin(x * 0.19) * 5;
+      if (x === 30) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(150, 224, 255, 0.22)'; ctx.fillRect(30, 452, 964, 1);
+    ctx.fillStyle = 'rgba(206, 240, 255, 0.40)';
+    ctx.font = '16px Consolas, monospace';
+    for (let r = 0; r < 3; r++) ctx.fillText('FFFF ' + '0123456789ABCDEF'.slice(0, 22) + '  ...  ' + (r % 2 ? 'UNMAPPED' : 'SIGNAL'), 30 + r * 330, 486);
+
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     const windowMat = new THREE.ShaderMaterial({
@@ -1828,7 +1863,7 @@ export class GlitchWorld {
           vec4 signal = texture2D(uMap, vUv);
           float scan = 0.8 + 0.2 * sin(vUv.y * 480.0 - uTime * 9.0);
           float edge = smoothstep(0.0, 0.025, vUv.x) * smoothstep(0.0, 0.025, 1.0 - vUv.x);
-          gl_FragColor = vec4(signal.rgb * scan, signal.a * edge * 0.46);
+          gl_FragColor = vec4(signal.rgb * scan, signal.a * edge * 0.30);
         }
       `,
     });
@@ -1854,7 +1889,7 @@ export class GlitchWorld {
         uTime: { value: 0 },
         uAnomaly: { value: 0 },
         uFogColor: { value: new THREE.Color(0x011330) },
-        uFogDensity: { value: 0.0056 },
+        uFogDensity: { value: 0.0105 },
       },
       vertexShader: /* glsl */ `
         attribute vec2 aPhase;
@@ -1910,11 +1945,11 @@ export class GlitchWorld {
           // with warm forward-scatter toward the eclipsed sky-eye. This is what sells the depth.
           float camDist = length(cameraPosition - vWorldPos);
           float heightMist = exp(-max(vWorldPos.y + 1.5, 0.0) * 0.022);
-          float airDensity = uFogDensity * (0.72 + heightMist * 1.25);
+          float airDensity = uFogDensity * (0.62 + heightMist * 1.65);
           float fogFactor = 1.0 - exp(-airDensity * airDensity * camDist * camDist);
           vec3 viewW = normalize(vWorldPos - cameraPosition);
           float sunScatter = pow(max(dot(viewW, normalize(vec3(0.0, 0.26, -0.96))), 0.0), 5.0);
-          vec3 aerialTint = mix(vec3(0.008, 0.078, 0.20), vec3(0.035, 0.21, 0.47), clamp((vWorldPos.y + 4.0) * 0.014, 0.0, 1.0));
+          vec3 aerialTint = mix(vec3(0.004, 0.030, 0.086), vec3(0.014, 0.085, 0.21), clamp((vWorldPos.y + 4.0) * 0.014, 0.0, 1.0));
           aerialTint += vec3(0.16, 0.42, 0.88) * sunScatter * 0.72;
           col = mix(col, aerialTint, clamp(fogFactor, 0.0, 0.95));
           gl_FragColor = vec4(col, 1.0);
@@ -2056,29 +2091,42 @@ export class GlitchWorld {
     errCanvas.width = 512;
     errCanvas.height = 256;
     const ectx = errCanvas.getContext('2d')!;
-    ectx.fillStyle = '#005bb5';
+    // A single pane of a dialog that was dismissed a long time ago: the frame survives,
+    // the interface inside it does not.
+    ectx.clearRect(0, 0, 512, 256);
+    const paneGrad = ectx.createLinearGradient(0, 0, 512, 256);
+    paneGrad.addColorStop(0, 'rgba(2, 20, 48, 0.62)');
+    paneGrad.addColorStop(1, 'rgba(1, 8, 22, 0.30)');
+    ectx.fillStyle = paneGrad;
     ectx.fillRect(0, 0, 512, 256);
-    ectx.fillStyle = '#e8f4ff';
-    ectx.fillRect(0, 0, 512, 38);
-    ectx.fillStyle = '#003a7a';
-    ectx.font = 'bold 22px Consolas, monospace';
-    ectx.fillText('FATAL_EXCEPTION // 0x000000F4', 14, 27);
-    ectx.fillStyle = '#d92b3a';
-    ectx.fillRect(466, 5, 38, 28);
-    ectx.fillStyle = '#ffffff';
-    ectx.fillText('X', 478, 27);
-    ectx.strokeStyle = '#9ad8ff';
-    ectx.lineWidth = 5;
-    ectx.strokeRect(3, 3, 506, 250);
-    ectx.font = '300 68px "Segoe UI", sans-serif';
-    ectx.fillText(':(', 24, 124);
-    ectx.font = '20px Consolas, monospace';
-    ectx.fillText('CRITICAL_PROCESS_DIED', 126, 98);
-    ectx.fillText('MEM_SECTOR_CORRUPTED [99%]', 126, 132);
-    ectx.strokeStyle = '#ffffff';
-    ectx.lineWidth = 3;
-    ectx.strokeRect(176, 184, 160, 42);
-    ectx.fillText('[ ABORT ]', 202, 212);
+    ectx.strokeStyle = 'rgba(140, 210, 255, 0.34)';
+    ectx.lineWidth = 2;
+    ectx.strokeRect(2, 2, 508, 252);
+    ectx.fillStyle = 'rgba(140, 210, 255, 0.18)';
+    ectx.fillRect(2, 2, 508, 1);
+
+    ectx.fillStyle = 'rgba(210, 240, 255, 0.50)';
+    ectx.font = '15px Consolas, monospace';
+    ectx.fillText('FATAL_EXCEPTION // 0x000000F4', 18, 30);
+    ectx.fillStyle = 'rgba(255, 116, 146, 0.55)';
+    ectx.fillText('NO DISMISS HANDLER', 340, 30);
+
+    ectx.fillStyle = 'rgba(226, 248, 255, 0.62)';
+    ectx.font = '300 54px "Segoe UI", sans-serif';
+    ectx.fillText(':(', 18, 104);
+    ectx.fillStyle = 'rgba(198, 236, 255, 0.44)';
+    ectx.font = '15px Consolas, monospace';
+    ectx.fillText('CRITICAL_PROCESS_DIED', 96, 78);
+    ectx.fillText('MEM_SECTOR_CORRUPTED [99%]', 96, 100);
+
+    // The empty rectangle where the button used to be.
+    ectx.strokeStyle = 'rgba(140, 210, 255, 0.22)';
+    ectx.strokeRect(96, 126, 86, 26);
+    ectx.fillStyle = 'rgba(140, 210, 255, 0.14)'; ectx.fillRect(18, 178, 476, 1);
+    ectx.fillStyle = 'rgba(198, 236, 255, 0.28)';
+    ectx.font = '14px Consolas, monospace';
+    ectx.fillText('0x FFFF F803 0078 D700  . . .  UNMAPPED', 18, 206);
+
     const errTex = new THREE.CanvasTexture(errCanvas);
     errTex.colorSpace = THREE.SRGBColorSpace;
 
@@ -2585,6 +2633,176 @@ export class GlitchWorld {
     this.group.add(sanctuary);
   }
 
+  /**
+   * THE SIGNAL COLOSSUS
+   * A 260 m obsidian slab standing in the fog past the sanctuary, its face carrying the same
+   * ':(' the monitor showed — cut 90 m tall, backlit, and quietly tracking the player.
+   * This is the world's answer to "what is at the end of the causeway": not a destination
+   * you must reach, but a thing that is always already watching you from the horizon.
+   */
+  private buildSignalColossus(): void {
+    const colossus = new THREE.Group();
+    colossus.name = 'SignalColossus';
+    colossus.position.set(0, 0, -196);
+
+    const faceTex = (() => {
+      const c = document.createElement('canvas');
+      c.width = 1024;
+      c.height = 1024;
+      const ctx = c.getContext('2d')!;
+      ctx.clearRect(0, 0, 1024, 1024);
+
+      // Engraved, not printed: a bright cut with a soft inner bloom.
+      const drawGlyph = (glyph: string, x: number, y: number, size: number, alpha: number) => {
+        ctx.save();
+        ctx.font = `200 ${size}px "Segoe UI", "Helvetica Neue", sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = `rgba(140, 220, 255, ${alpha})`;
+        ctx.shadowBlur = size * 0.16;
+        ctx.fillStyle = `rgba(232, 248, 255, ${alpha})`;
+        ctx.fillText(glyph, x, y);
+        ctx.restore();
+      };
+      drawGlyph(':', 300, 520, 620, 0.95);
+      drawGlyph('(', 610, 505, 700, 0.95);
+
+      // A face made of the interface: hairline service seams across the stone.
+      ctx.strokeStyle = 'rgba(120, 200, 255, 0.16)';
+      ctx.lineWidth = 2;
+      for (let y = 0; y < 1024; y += 32) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(1024, y + Math.sin(y * 0.03) * 4);
+        ctx.stroke();
+      }
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.minFilter = THREE.LinearMipmapLinearFilter;
+      tex.generateMipmaps = true;
+      return tex;
+    })();
+
+    const slabMat = new THREE.MeshLambertMaterial({
+      color: 0x03060f,
+      emissive: 0x021226,
+      emissiveIntensity: 0.25,
+    });
+    // Stepped silhouette: three slabs of decreasing width, like a monolith split by its own weight.
+    const slabs: Array<[number, number, number, number, number]> = [
+      // [w, h, y, z, rotZ]
+      [96, 260, 130, 0, 0],
+      [70, 244, 126, -7, 0.012],
+      [40, 214, 118, -13, -0.02],
+    ];
+    for (const [w, h, y, z, rz] of slabs) {
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(w, h, 12), slabMat);
+      slab.position.set(0, y, z);
+      slab.rotation.z = rz;
+      colossus.add(slab);
+    }
+
+    // Fractured corners: the monument is not intact.
+    const brokenMat = new THREE.MeshLambertMaterial({
+      color: 0x04070f,
+      emissive: 0x03182f,
+      emissiveIntensity: 0.35,
+    });
+    const shardDummy = new THREE.Object3D();
+    const shardCount = 26;
+    const shardMesh = new THREE.InstancedMesh(
+      new THREE.BoxGeometry(1, 1, 1),
+      brokenMat,
+      shardCount
+    );
+    for (let i = 0; i < shardCount; i++) {
+      const a = (i / shardCount) * Math.PI * 2;
+      const rad = 44 + Math.random() * 74;
+      shardDummy.position.set(
+        Math.cos(a) * rad,
+        20 + Math.random() * 210,
+        -10 + Math.sin(a) * 26
+      );
+      shardDummy.scale.set(6 + Math.random() * 22, 4 + Math.random() * 34, 6 + Math.random() * 10);
+      shardDummy.rotation.set(Math.random() * 0.5, Math.random() * Math.PI, Math.random() * 0.6);
+      shardDummy.updateMatrix();
+      shardMesh.setMatrixAt(i, shardDummy.matrix);
+    }
+    shardMesh.frustumCulled = false;
+    colossus.add(shardMesh);
+
+    // The face itself, slightly in front of the stone and always faintly alive.
+    const faceMat = new THREE.MeshBasicMaterial({
+      map: faceTex,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      opacity: 0.72,
+    });
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(78, 78), faceMat);
+    face.position.set(0, 148, 6.9);
+    colossus.add(face);
+    this.colossusFace = face;
+    this.colossusFaceMat = faceMat;
+
+    // A halo of dead pixels orbiting the head.
+    const haloMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      uniforms: {
+        uTime: { value: 0 },
+        uAnomaly: { value: 0 },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec2 vUv;
+        uniform float uTime;
+        uniform float uAnomaly;
+        void main() {
+          vec2 p = (vUv - 0.5) * 2.0;
+          float r = length(p);
+          float ang = atan(p.y, p.x);
+          float ticks = step(0.72, fract(ang * 27.0 + uTime * 0.06));
+          float ring = smoothstep(0.045, 0.0, abs(r - 0.86));
+          float inner = smoothstep(0.02, 0.0, abs(r - 0.70)) * step(0.5, fract(ang * 9.0));
+          float alpha = (ring * ticks * 0.7 + inner * 0.35) * (0.35 + uAnomaly * 0.65);
+          vec3 col = mix(vec3(0.42, 0.80, 1.0), vec3(1.0, 0.24, 0.36), uAnomaly);
+          gl_FragColor = vec4(col, alpha);
+        }
+      `,
+    });
+    const halo = new THREE.Mesh(new THREE.PlaneGeometry(150, 150), haloMat);
+    halo.position.set(0, 150, 7.2);
+    colossus.add(halo);
+    this.colossusHaloMat = haloMat;
+
+    // Two 260 m ribbons of dead signal hanging off its shoulders.
+    const ribbonMat = new THREE.MeshBasicMaterial({
+      color: 0x1a5f9e,
+      transparent: true,
+      opacity: 0.22,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    for (const side of [-1, 1]) {
+      const ribbon = new THREE.Mesh(new THREE.PlaneGeometry(9, 240, 1, 24), ribbonMat);
+      ribbon.position.set(side * 52, 108, 3);
+      ribbon.rotation.z = side * 0.05;
+      colossus.add(ribbon);
+    }
+
+    this.group.add(colossus);
+  }
+
   private buildWorldLandmarks(
     rackTemplate: THREE.Object3D,
     crtTemplate: THREE.Object3D,
@@ -2757,13 +2975,14 @@ export class GlitchWorld {
           vec3 V = normalize(cameraPosition - vWorldPos);
           float ndl = clamp(dot(N, normalize(vec3(0.15, 0.65, -0.74))), 0.0, 1.0);
           float rim = pow(1.0 - abs(dot(N, V)), 2.2);
-          float channel = smoothstep(0.05, 0.0, abs(fract(vUv.x * 8.0) - 0.5));
+          float rung = step(0.62, fract(vUv.y * 9.0 - uTime * 0.35));
+          float channel = smoothstep(0.035, 0.0, abs(fract(vUv.x * 8.0) - 0.5)) * rung;
           float pulse = pow(0.5 + 0.5 * sin(vWorldPos.y * 0.85 - uTime * 3.8 + vWorldPos.z * 0.12), 4.0);
-          vec3 stone = vec3(0.008, 0.032, 0.095) * (0.45 + 0.75 * ndl) + vec3(0.10, 0.42, 0.90) * rim * 0.48;
+          vec3 stone = vec3(0.004, 0.016, 0.052) * (0.40 + 0.85 * ndl) + vec3(0.16, 0.62, 1.0) * pow(rim, 1.7) * 0.30;
           vec3 trace = mix(vec3(0.48, 0.90, 1.0), vec3(1.0, 0.22, 0.34), uAnomaly * 0.8);
-          vec3 col = stone + trace * channel * (0.24 + 0.68 * pulse);
+          vec3 col = stone + trace * channel * (0.16 + 0.55 * pulse);
           float camDist = length(cameraPosition - vWorldPos);
-          col = mix(col, vec3(0.015, 0.12, 0.32), clamp(1.0 - exp(-0.00005 * camDist * camDist), 0.0, 0.90));
+          col = mix(col, vec3(0.006, 0.048, 0.135), clamp(1.0 - exp(-0.00011 * camDist * camDist), 0.0, 0.92));
           gl_FragColor = vec4(col, 1.0);
         }
       `,
@@ -2923,26 +3142,48 @@ export class GlitchWorld {
     c.width = 768;
     c.height = 280;
     const ctx = c.getContext('2d')!;
-    ctx.fillStyle = 'rgba(2, 22, 54, 0.94)';
+
+    // Smoked glass, one hairline, small type. These are inspection plates bolted to the
+    // causeway, not billboards: nothing on them should read as an advertisement.
+    ctx.clearRect(0, 0, 768, 280);
+    const glass = ctx.createLinearGradient(0, 0, 0, 280);
+    glass.addColorStop(0, 'rgba(3, 16, 38, 0.90)');
+    glass.addColorStop(1, 'rgba(1, 6, 18, 0.80)');
+    ctx.fillStyle = glass;
     ctx.fillRect(0, 0, 768, 280);
-    ctx.fillStyle = 'rgba(24, 118, 220, 0.28)';
-    ctx.fillRect(10, 10, 748, 56);
-    ctx.strokeStyle = 'rgba(130, 212, 255, 0.92)';
-    ctx.lineWidth = 4;
-    ctx.strokeRect(8, 8, 752, 264);
 
-    ctx.fillStyle = '#8ad4ff';
-    ctx.font = 'bold 22px Consolas, monospace';
-    ctx.fillText(header, 32, 46);
+    ctx.strokeStyle = 'rgba(126, 198, 255, 0.34)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(3, 3, 762, 274);
+    ctx.fillStyle = 'rgba(126, 198, 255, 0.22)';
+    ctx.fillRect(3, 3, 762, 1);
 
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '24px "Segoe UI", "Yu Gothic UI", sans-serif';
-    ctx.fillText(line1, 32, 136);
-    ctx.fillText(line2, 32, 188);
+    // Corner ticks, like a plate that was machined onto the stone.
+    ctx.fillStyle = 'rgba(150, 220, 255, 0.55)';
+    for (const [x, y, sx, sy] of [[14, 14, 1, 1], [754, 14, -1, 1], [14, 266, 1, -1], [754, 266, -1, -1]] as const) {
+      ctx.fillRect(x, y, 16 * sx, 2 * sy);
+      ctx.fillRect(x, y, 2 * sx, 16 * sy);
+    }
 
-    ctx.fillStyle = 'rgba(122, 200, 255, 0.65)';
-    ctx.font = '16px Consolas, monospace';
-    ctx.fillText('STATUS: DIAGNOSTIC_TERMINAL_ONLINE // [0x0078D7]', 32, 246);
+    ctx.fillStyle = 'rgba(168, 222, 255, 0.62)';
+    ctx.font = '17px Consolas, monospace';
+    ctx.fillText(header, 34, 46);
+
+    ctx.fillStyle = 'rgba(126, 198, 255, 0.22)';
+    ctx.fillRect(34, 60, 700, 1);
+
+    ctx.fillStyle = 'rgba(238, 248, 255, 0.88)';
+    ctx.font = '23px "Yu Gothic UI", "Meiryo", sans-serif';
+    ctx.fillText(line1, 34, 116);
+    ctx.fillStyle = 'rgba(200, 228, 250, 0.62)';
+    ctx.font = '21px "Yu Gothic UI", "Meiryo", sans-serif';
+    ctx.fillText(line2, 34, 162);
+
+    ctx.fillStyle = 'rgba(126, 198, 255, 0.40)';
+    ctx.font = '15px Consolas, monospace';
+    ctx.fillText('SHELL: LISTENING  //  [C] TO OPEN', 34, 224);
+    ctx.fillStyle = 'rgba(255, 116, 146, 0.46)';
+    ctx.fillText('0x000000F4', 620, 224);
 
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
@@ -2975,7 +3216,7 @@ export class GlitchWorld {
 
     const sign = new THREE.Mesh(
       new THREE.PlaneGeometry(1.94, 0.71),
-      new THREE.MeshBasicMaterial({ map: tex })
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true })
     );
     sign.position.set(0, 1.42, 0.095);
     sign.rotation.x = -0.24;
@@ -3581,8 +3822,10 @@ export class GlitchWorld {
           float flick = 0.82 + 0.18 * sin(uTime * (2.0 + vSeed * 5.0) + vSeed * 40.0);
           if (uFlicker > 0.5) {
             vec3 core = mix(vec3(0.72, 0.94, 1.0), vec3(1.0, 0.34, 0.38), uAnomaly * 0.8);
-            float glow = smoothstep(0.5, 0.05, length(vUv - 0.5));
-            gl_FragColor = vec4(core * (1.4 + glow), 1.0);
+            // A suspended filament inside a dark housing: bright line, dark glass.
+            float filament = smoothstep(0.07, 0.02, abs(vUv.x - 0.5)) * smoothstep(0.2, 0.42, vUv.y) * smoothstep(0.85, 0.55, vUv.y);
+            float glass = smoothstep(0.5, 0.1, length((vUv - vec2(0.5, 0.52)) * vec2(1.6, 1.0))) * 0.22;
+            gl_FragColor = vec4(core * (0.35 + filament * 1.9 + glass), 1.0);
           } else {
             vec3 metal = vec3(0.020, 0.045, 0.095);
             vec3 viewDir = normalize(vWorldPos - cameraPosition);
@@ -4055,7 +4298,7 @@ export class GlitchWorld {
         uCollapseTime: { value: 0 },
         uCollapseCenter: { value: this.collapseCenter },
         uFogColor: { value: new THREE.Color(0x011330) },
-        uFogDensity: { value: 0.0056 },
+        uFogDensity: { value: 0.0105 },
       },
       vertexShader: /* glsl */ `
         attribute vec2 aCellCenter;
@@ -4260,11 +4503,11 @@ export class GlitchWorld {
           // with warm forward-scatter toward the eclipsed sky-eye. This is what sells the depth.
           float camDist = length(cameraPosition - vWorldPos);
           float heightMist = exp(-max(vWorldPos.y + 1.5, 0.0) * 0.022);
-          float airDensity = uFogDensity * (0.72 + heightMist * 1.25);
+          float airDensity = uFogDensity * (0.62 + heightMist * 1.65);
           float fogFactor = 1.0 - exp(-airDensity * airDensity * camDist * camDist);
           vec3 viewW = normalize(vWorldPos - cameraPosition);
           float sunScatter = pow(max(dot(viewW, normalize(vec3(0.0, 0.26, -0.96))), 0.0), 5.0);
-          vec3 aerialTint = mix(vec3(0.008, 0.078, 0.20), vec3(0.035, 0.21, 0.47), clamp((vWorldPos.y + 4.0) * 0.014, 0.0, 1.0));
+          vec3 aerialTint = mix(vec3(0.004, 0.030, 0.086), vec3(0.014, 0.085, 0.21), clamp((vWorldPos.y + 4.0) * 0.014, 0.0, 1.0));
           aerialTint += vec3(0.16, 0.42, 0.88) * sunScatter * 0.72;
           col = mix(col, aerialTint, clamp(fogFactor, 0.0, 0.96));
           gl_FragColor = vec4(col, 1.0);
@@ -4870,6 +5113,18 @@ export class GlitchWorld {
     this.dustMat.uniforms.uTime.value = elapsed;
     this.coreBeamMat.uniforms.uTime.value = elapsed;
     this.coreBeamMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+
+    if (this.colossusFaceMat) {
+      // The face never blinks, but it does breathe, and it dims when the world is quiet.
+      this.colossusFaceMat.opacity = 0.42 + Math.sin(elapsed * 0.6) * 0.06 + this.anomalyIntensity * 0.34;
+      if (this.colossusHaloMat) {
+        this.colossusHaloMat.uniforms.uTime.value = elapsed;
+        this.colossusHaloMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+      }
+      if (this.colossusFace) {
+        this.colossusFace.rotation.z = Math.sin(elapsed * 0.11) * 0.006 + this.anomalyIntensity * 0.012;
+      }
+    }
 
     // --- Aerial depth systems: mist banks drift, cloud decks roll, haze breathes.
     this.mistMat.uniforms.uTime.value = elapsed;

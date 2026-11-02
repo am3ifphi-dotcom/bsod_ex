@@ -159,7 +159,11 @@ export class BedroomScene {
           }
 
           if (mName === 'Walls') {
-            wallTemplateMat = cached as THREE.MeshLambertMaterial;
+            const wall = cached as THREE.MeshLambertMaterial;
+            // 02:47 grade: the plaster must not read as daylight. Keep the texture, drop the
+            // exposure and pull the tone cold so the monitor becomes the only true source.
+            wall.color.multiply(new THREE.Color(0.46, 0.52, 0.70));
+            wallTemplateMat = wall;
           }
           matCache.set(m, cached);
         }
@@ -1299,10 +1303,10 @@ export class BedroomScene {
 
   private buildNocturnalLighting(): void {
     // Rich nocturnal moonlight + bounce baked into 1 HemisphereLight (cuts PointLight count by 33%!)
-    this.hemiLight = new THREE.HemisphereLight(0x365694, 0x090d18, 0.86);
+    this.hemiLight = new THREE.HemisphereLight(0x1b2d52, 0x03050a, 0.15);
     this.group.add(this.hemiLight);
 
-    this.deskLampLight = new THREE.PointLight(0xffb469, 0.58, 2.6, 1.8);
+    this.deskLampLight = new THREE.PointLight(0xffb469, 0.38, 2.0, 2.0);
     this.deskLampLight.position.set(-1.68, 1.0, 1.18);
     this.group.add(this.deskLampLight);
 
@@ -1345,7 +1349,10 @@ export class BedroomScene {
           float along = smoothstep(1.95, 0.05, vWorldPos.x - (-1.72));
           float camDistFade = smoothstep(0.62, 1.25, length(cameraPosition - vec3(-1.72, 1.05, 0.735)));
           float scan = 0.92 + 0.08 * sin(vWorldPos.y * 38.0 - uTime * 7.0);
-          float alpha = edgeSoft * along * camDistFade * 0.095 * uIntensity * scan;
+          // The cone is only haze: it must never wash the desk, and it must dissolve when
+          // the player leans into the panel.
+          float nearFade = smoothstep(0.28, 1.05, length(vWorldPos - cameraPosition));
+          float alpha = edgeSoft * along * camDistFade * nearFade * 0.030 * uIntensity * scan;
           gl_FragColor = vec4(0.05, 0.44, 0.98, alpha);
         }
       `,
@@ -1436,7 +1443,7 @@ export class BedroomScene {
       origins[i * 4 + 3] = Math.random() * 0.45; // delay
 
       meta[i * 3 + 0] = 0.7 + Math.random() * 0.9; // speed
-      meta[i * 3 + 1] = 0.6 + Math.random() * 1.6; // scale
+      meta[i * 3 + 1] = 0.5 + Math.random() * 0.9; // scale
       meta[i * 3 + 2] = i % 5 === 0 ? 1.0 : 0.0; // bright flag
     }
     shardGeo.setAttribute('aOrigin', new THREE.InstancedBufferAttribute(origins, 4));
@@ -1457,6 +1464,8 @@ export class BedroomScene {
         uniform float uPull;
         uniform vec3 uPortal;
         varying float vBright;
+        varying vec3 vNrm;
+        varying vec3 vWorld;
         void main() {
           vBright = aMeta.z;
           float intensity = clamp((uInfect - 0.20) / 0.80, 0.0, 1.0);
@@ -1468,19 +1477,31 @@ export class BedroomScene {
           float ca = cos(a), sa = sin(a);
           vec3 lp = position * aMeta.y * shrink;
           vec3 rotP = vec3(lp.x * ca - lp.y * sa, lp.x * sa + lp.y * ca, lp.z);
+          // The normal has to spin with the shard, or every broad face reads as a lit edge.
+          vNrm = normalize(vec3(normal.x * ca - normal.y * sa, normal.x * sa + normal.y * ca, normal.z));
 
           // Spiral vortex orbit into the monitor mouth!
           vec3 worldCenter = mix(aOrigin.xyz, uPortal, localP * localP);
           worldCenter.y += sin(uTime * 4.0 + aOrigin.w * 30.0) * 0.16 * localP * (1.0 - localP);
           worldCenter.z += cos(uTime * 3.5 + aOrigin.x * 5.0) * 0.14 * localP * (1.0 - localP);
 
-          gl_Position = projectionMatrix * viewMatrix * vec4(worldCenter + rotP, 1.0);
+          vWorld = worldCenter + rotP;
+          gl_Position = projectionMatrix * viewMatrix * vec4(vWorld, 1.0);
         }
       `,
       fragmentShader: /* glsl */ `
         varying float vBright;
+        varying vec3 vNrm;
+        varying vec3 vWorld;
         void main() {
-          vec3 col = mix(vec3(0.0, 0.44, 0.86), vec3(0.84, 0.95, 1.0), vBright);
+          // Shards of a wall that was never a wall: dark glass with a cold edge, not a decal.
+          // Facing is measured against the real view ray, so a broad face stays black.
+          vec3 V = normalize(cameraPosition - vWorld);
+          float facing = abs(dot(normalize(vNrm), V));
+          float edge = pow(1.0 - facing, 2.2);
+          vec3 body = vec3(0.006, 0.020, 0.048);
+          vec3 rim = mix(vec3(0.08, 0.28, 0.52), vec3(0.58, 0.84, 1.0), vBright);
+          vec3 col = body + rim * (edge * 0.90 + 0.05);
           gl_FragColor = vec4(col, 1.0);
         }
       `,
@@ -1495,7 +1516,7 @@ export class BedroomScene {
   private buildAftermathRelics(): void {
     this.aftermathRelicGroup.visible = false;
 
-    const shardMat = new THREE.MeshBasicMaterial({ color: 0x52b8ff });
+    const shardMat = new THREE.MeshBasicMaterial({ color: 0x2f7db4 });
     const crystalPositions = [
       { pos: [-1.42, 0.766, 0.78], rot: [0.2, 0.6, 0.1], s: [0.065, 0.008, 0.045] },
       { pos: [-1.36, 0.765, 0.69], rot: [-0.1, 1.3, 0.2], s: [0.045, 0.007, 0.032] },
@@ -1632,9 +1653,12 @@ export class BedroomScene {
               float edgeBand = smoothstep(0.30, 0.0, abs(front)) * step(0.03, uInfect);
 
               vec3 gridF = abs(fract(wp * 6.0) - 0.5);
-              float gridLine = step(0.46, max(gridF.x, max(gridF.y, gridF.z)));
+              float gridLine = step(0.478, max(gridF.x, max(gridF.y, gridF.z)));
               float scanPulse = 0.86 + 0.14 * sin(wp.y * 42.0 - uTime * 16.0);
-              vec3 bsodCol = vec3(0.0, 0.175, 0.60) * scanPulse;
+              // The infection does not repaint the room a brighter blue: it *drains* it and
+              // leaves a thin cold grid on what is left, so the lamp still decides the walls.
+              vec3 infectedBase = vec3(0.004, 0.016, 0.048) + gl_FragColor.rgb * 0.48;
+              vec3 bsodCol = infectedBase + vec3(0.018, 0.070, 0.170) * scanPulse;
 
               vec2 wallCell = fract(vec2(uAxis, wp.y) * 2.4) - 0.5;
               float blink = step(0.12, fract(uTime * 0.65 + cellHash * 7.3));
@@ -1642,11 +1666,11 @@ export class BedroomScene {
               float wEyeR = smoothstep(0.08, 0.035, length(wallCell - vec2(0.12, 0.06)));
               float wallEyes = (wEyeL + wEyeR) * step(0.76, cellHash) * blink * smoothstep(0.32, 0.72, uInfect);
 
-              bsodCol = mix(bsodCol, vec3(0.85, 0.95, 1.0), gridLine * 0.55 + step(0.94, cellHash) * 0.4);
+              bsodCol = mix(bsodCol, vec3(0.44, 0.76, 0.98), gridLine * 0.24 + step(0.94, cellHash) * 0.18);
               bsodCol += vec3(1.0, 0.22, 0.30) * wallEyes * 1.35;
 
               gl_FragColor.rgb = mix(gl_FragColor.rgb, bsodCol, mask * 0.95);
-              gl_FragColor.rgb += vec3(0.44, 0.82, 1.0) * edgeBand * 0.92;
+              gl_FragColor.rgb += vec3(0.44, 0.82, 1.0) * edgeBand * 0.45;
             }
           }
           `
@@ -1762,7 +1786,7 @@ export class BedroomScene {
     if (aftermath) {
       this.deskLampLight.intensity = 0.06;
       this.deskLampBulbMat.color.setHex(0x28221e);
-      this.hemiLight.intensity = 0.56;
+      this.hemiLight.intensity = 0.12;
       // Bedside digital clock occasionally twitches from 02:48 to '  :)'!
       const smileClock = Math.sin(elapsed * 1.37) > 0.96;
       this.updateClockDisplay(smileClock ? '  :)' : '02:48', true);
@@ -1783,15 +1807,15 @@ export class BedroomScene {
       }
     } else if (infectLevel < 0.25) {
       const flicker = 1 - infectLevel * 1.4 * Math.abs(Math.sin(elapsed * 29.0));
-      this.deskLampLight.intensity = 0.58 * Math.max(0.1, flicker);
+      this.deskLampLight.intensity = 0.38 * Math.max(0.1, flicker);
       this.deskLampBulbMat.color.setHex(0xffcf87);
-      this.hemiLight.intensity = 0.72;
+      this.hemiLight.intensity = 0.15;
       this.updateClockDisplay('02:47', false);
     } else {
       const snapOff = infectLevel > 0.48 ? 0.0 : 0.28 * (Math.sin(elapsed * 52.0) > 0.2 ? 1 : 0);
       this.deskLampLight.intensity = snapOff;
       this.deskLampBulbMat.color.setHex(snapOff > 0.05 ? 0x88c8ff : 0x0b1628);
-      this.hemiLight.intensity = 0.72 + infectLevel * 0.45;
+      this.hemiLight.intensity = 0.15 + infectLevel * 0.55;
       this.updateClockDisplay(infectLevel > 0.6 ? '88:88' : '02:47', true);
       if (this.officeChair) {
         this.officeChair.rotation.y = -2.25 + Math.sin(elapsed * 34.0) * 0.04 * infectLevel;

@@ -105,7 +105,8 @@ export class ConsoleUI {
     this.appendLine('Microsoft(R) Kernel Crash Dump Shell [Version 10.0.19045.78D7]', 'dim');
     this.appendLine('ACTIVE DUMP   : C:\\Windows\\MEMORY_0247.DMP  //  HOST_VITALS: 152 BPM (MOTOR_LOCKED)', 'warn');
     this.appendLine('PARASYTE_HOOK : SMILE_ENTITY.SYS -> OPTIC_CHIASM_RING0 [ACTIVE]', 'err');
-    this.appendLine('診断: STATUS / HELP でダンプ状態を確認、または中央聖堂で特定した緊急割り込み命令を実行してください。', 'dim');
+    this.appendLine('INTERRUPT_VEC : W?KE_??  — 2 bytes lost. SHELL はどこからでも接続できます。', 'ok');
+    this.appendLine('診断: HELP / STATUS / PS / DUMP / SCAN。命令語が読めたら、そのまま入力してください。', 'dim');
   }
 
   private appendLine(text: string, cls: '' | 'dim' | 'err' | 'warn' | 'ok' = ''): void {
@@ -132,12 +133,10 @@ export class ConsoleUI {
     }
 
     if (this.coreUnlocked) {
-      this.appendLine('[SANCTUARY_LINK: SYNCED] 中央聖堂の碑板と同期完了 — 緊急割り込み命令を入力可能。', 'ok');
+      this.appendLine('[SHELL: LINKED] 聖堂の碑板と同期済み。命令語は完全に復元されています。', 'ok');
     } else {
-      this.appendLine(
-        `[CORE_SIGNAL: ${Math.max(1, Math.round(this.coreDistanceM))}m] 中央の光の柱（聖堂コア）へ近づくと、散乱した命令語が収束します。`,
-        'dim'
-      );
+      this.appendLine('[SHELL: LINKED] 遠隔シェル接続 — 地表のどこからでもコマンドは届きます。', 'ok');
+      this.appendLine('[INTERRUPT_VEC] W?KE_??  // 欠落バイトは 2。SCAN で照合できます。', 'warn');
     }
 
     this.audio.playOneShot('glitch_slice', { volume: 0.26, rate: 0.88, reverb: 0.45 });
@@ -188,11 +187,7 @@ export class ConsoleUI {
     const normalized = raw.toUpperCase().replace(/\s+/g, '_');
 
     if (normalized === 'WAKE_UP') {
-      if (!this.coreUnlocked) {
-        this.appendLine('[ACCESS DENIED] 信号が不完全です。光の柱に近づいてください。', 'warn');
-        this.audio.playOneShot('console_error', { volume: 0.4 });
-        return;
-      }
+      // The interruption vector is complete. It always was — the sanctuary only confirms it.
       this.locked = true;
       this.inputEl.disabled = true;
       this.appendLine('[CRITICAL INTERRUPT ACCEPTED] DIRECTIVE "WAKE_UP" VERIFIED!', 'ok');
@@ -223,11 +218,11 @@ export class ConsoleUI {
 
     if (normalized === 'HELP' || normalized === '?') {
       this.audio.playKeystroke();
-      this.appendLine('利用可能な診断コマンド: STATUS, PS, WHOAMI, DIR, DUMP, CLEAR, REBOOT', 'dim');
+      this.appendLine('利用可能な診断コマンド: STATUS, PS, WHOAMI, DIR, DUMP, SCAN, CLEAR', 'dim');
       this.appendLine(
         this.coreUnlocked
-          ? '※ 中央聖堂の上空に収束した7文字の強制覚醒命令をそのまま入力してください。'
-          : `※ 光の柱が立つ中央聖堂（残り約 ${Math.max(1, Math.round(this.coreDistanceM))}m）へ向かうと、覚醒命令が判明します。`,
+          ? '※ 碑板が示した 7 文字の強制覚醒命令を、そのまま入力してください。'
+          : '※ 強制覚醒命令は 7 文字。欠落したバイトは SCAN で照合できます。',
         'warn'
       );
       return;
@@ -246,13 +241,21 @@ export class ConsoleUI {
       return;
     }
 
+    if (normalized === 'SCAN' || normalized === 'GREP' || normalized === 'HINT') {
+      this.audio.playKeystroke();
+      this.appendLine('[SCAN] ダンプ全域から割り込みベクタを照合中 ...', 'dim');
+      this.appendLine('0xFFFFF803_0078D6F0 : 57 41 4B 45 5F 55 50  [W A K E _ U P]', 'ok');
+      this.appendLine('[SCAN] 7 bytes / 7 recovered. これは眠るための命令ではありません。', 'warn');
+      return;
+    }
+
     if (normalized === 'STATUS') {
       this.appendLine('HOST_BODY     : 自室のデスクチェアで硬直中（午前 02:47 停止）', 'warn');
       this.appendLine('DIGESTION     : 99.4% — 意識データが青い深淵に溶けかけています', 'err');
       this.appendLine(
         this.coreUnlocked
-          ? 'SANCTUARY_KEY : 収束完了！ 中央のプレートに浮かぶ命令語を入力してください。'
-          : `CORE_DISTANCE : 中央聖堂まで約 ${Math.max(1, Math.round(this.coreDistanceM))}m — 近づくと秘密の命令語が収束します。`,
+          ? 'INTERRUPT_VEC : WAKE_UP [復元済み] — 入力すれば割り込みが通ります。'
+          : 'INTERRUPT_VEC : W?KE_?? [2 bytes lost] — SCAN で照合してください。',
         this.coreUnlocked ? 'ok' : 'dim'
       );
       return;
@@ -300,13 +303,13 @@ export class ConsoleUI {
     this.audio.playOneShot('console_error', { volume: 0.58 });
     const eerieErrors = [
       `[SYNTAX_FAULT] '${raw}' は無効です。空の瞳孔が収縮し、ダンプ領域が軋んでいます。`,
-      `[ACCESS_DENIED] '${raw}' では目を覚ませません。光の柱が立つ中央聖堂の刻印を読み取ってください。`,
+      `[ACCESS_DENIED] '${raw}' では目を覚ませません。7 文字の強制割り込み命令を探してください。`,
       `[DIGESTION_WARN] 誤入力 '${raw}' が青画面に咀嚼されました。正しい覚醒命令が必要です。`,
     ];
     this.appendLine(eerieErrors[(this.wrongAttemptCount - 1) % eerieErrors.length], 'err');
     const taunts = [
       '[SMILE_ENTITY.SYS]: 指が震えているな。自室の椅子の背もたれに、もう誰か立っているぞ。',
-      '[SMILE_ENTITY.SYS]: 思い出せないのか？ 中央の祭壇の上を見ろ……いや、見るな。',
+      '[SMILE_ENTITY.SYS]: 思い出せないのか？ 空の巨大な顔を見ろ……いや、見るな。',
       '[SMILE_ENTITY.SYS]: あと少しで 100% 完了だ。お前の名前も記憶も綺麗な青になる。',
     ];
     this.scheduleParasyteHijack(taunts[(this.wrongAttemptCount - 1) % taunts.length]);

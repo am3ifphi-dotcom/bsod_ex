@@ -27,8 +27,18 @@ export type PostFXOptions = {
   sort?: number;
   roll?: number;
   ghost?: number;
+  /** Voronoi cell displacement — the world breaks into drifting rectangular proofs. */
+  shatter?: number;
   bloom?: number;
   sharpen?: number;
+  /** Film grain. 0 = digital-clean, 1 = analogue noise floor. */
+  grain?: number;
+  /** Anamorphic horizontal highlight streak bleed. */
+  streak?: number;
+  /** 0 = the bedroom (sodium / cold moon), 1 = the signal world (cyan / magenta). */
+  grade?: number;
+  /** Barrel lens curvature. Small values only. */
+  barrel?: number;
   transition?: { scene: THREE.Scene; camera: THREE.Camera; progress: number };
 };
 
@@ -95,6 +105,11 @@ export class PostFX {
         uSort: { value: 0 },
         uRoll: { value: 0 },
         uGhost: { value: 0 },
+        uShatter: { value: 0 },
+        uGrain: { value: 0.12 },
+        uStreak: { value: 0.0 },
+        uGrade: { value: 0 },
+        uBarrel: { value: 0 },
         tBloom: { value: null },
         uBloom: { value: 0.0 },
         uSharpen: { value: 0.28 },
@@ -125,6 +140,11 @@ export class PostFX {
         uniform float uSort;
         uniform float uRoll;
         uniform float uGhost;
+        uniform float uShatter;
+        uniform float uGrain;
+        uniform float uStreak;
+        uniform float uGrade;
+        uniform float uBarrel;
         uniform sampler2D tBloom;
         uniform float uBloom;
         uniform float uSharpen;
@@ -171,14 +191,23 @@ export class PostFX {
           float rad = length(aspectCentered);
           float r2 = dot(centered, centered);
 
-          // ---------------------------------------------------------------- 0. SPEED WARP
+          // ---------------------------------------------------------------- 0. LENS (barrel)
+          if (uBarrel > 0.0005) {
+            uv = 0.5 + centered * (1.0 + uBarrel * r2 * 1.35);
+            centered = uv - 0.5;
+            aspectCentered = centered * vec2(aspect, 1.0);
+            rad = length(aspectCentered);
+            r2 = dot(centered, centered);
+          }
+
+          // ---------------------------------------------------------------- 0b. SPEED WARP
           if (uWarp > 0.005) {
             uv = 0.5 + centered * (1.0 - uWarp * r2 * 0.78);
             centered = uv - 0.5;
             r2 = dot(centered, centered);
           }
 
-          float total = uDistort + uTear + uMash + uSort + uRoll + uGhost + uWarp + uChromatic;
+          float total = uDistort + uTear + uMash + uSort + uRoll + uGhost + uWarp + uChromatic + uShatter;
           vec2 refractOffset = vec2(0.0);
           float waveMask = 0.0;
           float seam = 0.0;
@@ -252,6 +281,25 @@ export class PostFX {
               float beam = exp(-pow((uv.y - rollY) * 11.0, 2.0));
               uv.y += beam * 0.075 * uRoll;
               seam += beam * uRoll * 0.9;
+            }
+
+            // ------------------------------------------------------------ 6. SHATTER (voronoi proof blocks)
+            // The rendered proof tears into rectangular cells that slide out of register —
+            // a compositor losing its tiles, not a filter wobbling.
+            if (uShatter > 0.012) {
+              float tick = floor(uTime * (7.0 + uShatter * 16.0));
+              vec2 cellSize = vec2(11.0, 7.0) - uShatter * vec2(2.0, 1.0);
+              vec2 cell = floor(uv * cellSize);
+              float pick = hash21(cell * 1.31 + tick * 0.71);
+              float on = step(0.54, pick);
+              vec2 off = vec2(
+                hash21(cell * 1.77 + tick * 1.13),
+                hash21(cell * 3.41 + tick * 0.37)
+              ) - 0.5;
+              uv += off * vec2(0.22, 0.07) * uShatter * on;
+              // Proof-line edges: the seam between two tiles that no longer agree.
+              vec2 tileEdge = abs(fract(uv * cellSize) - 0.5);
+              seam += (1.0 - smoothstep(0.0, 0.045, min(tileEdge.x, tileEdge.y))) * uShatter * on * 0.65;
             }
           }
 
@@ -345,46 +393,109 @@ export class PostFX {
             col += vec3(0.45, 0.85, 1.0) * ray * 0.26 * rimMask;
           }
 
-          // ---------------------------------------------------------------- ALWAYS-ON SUBTLE PLAYER OPTICAL FILTER
-          // Lifted highlights, crisp S-curve micro-contrast, nocturnal indigo toe, & fine optical weave
-          col = acesFilmic(col * 1.28);
+          // ---------------------------------------------------------------- FILM RESPONSE
+          // The bedroom is a tired CMOS sensor at 02:47; the signal world is a broadcast
+          // standard that has forgotten what colour was. Both get the same film curve.
+          float exposure = mix(1.24, 1.12, uGrade);
+          col = acesFilmic(col * exposure);
           col = pow(max(col, vec3(0.0)), vec3(1.0 / 2.2));
 
           float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
-          vec3 sCurve = smoothstep(vec3(-0.015), vec3(1.015), col);
-          col = mix(col, sCurve, 0.24);
 
-          // Highlight boost & luminous shoulder halation (even before bloom adds wide glow)
-          float hiMask = smoothstep(0.42, 0.92, luma);
-          col += mix(vec3(0.09, 0.15, 0.23), vec3(0.22, 0.26, 0.30), hiMask) * hiMask * 0.44;
+          // Micro-contrast: a soft S-curve, never a crunchy "sharpening" filter.
+          vec3 sCurve = smoothstep(vec3(-0.02), vec3(1.02), col);
+          col = mix(col, sCurve, mix(0.22, 0.30, uGrade));
 
-          // Subtle cold-teal / warm-magenta split-tone, breathing with the horror level
+          // Halation: the shoulder of the film blooms warmer than the body.
+          float hiMask = smoothstep(0.44, 0.94, luma);
+          vec3 haloCol = mix(vec3(0.10, 0.13, 0.17), vec3(0.06, 0.16, 0.24), uGrade);
+          col += haloCol * hiMask * hiMask * 0.55;
+
+          // Horror edge: crimson pressure pressing in from the frame's corners.
           if (uHorror > 0.01) {
             float darkPulse = 0.86 + 0.14 * sin(uTime * 5.0);
-            float edgeShadow = smoothstep(0.08, 0.42, r2) * uHorror * darkPulse;
-            col = mix(col, col * vec3(0.74, 0.26, 0.32), edgeShadow * 0.62);
+            float edgeShadow = smoothstep(0.06, 0.40, r2) * uHorror * darkPulse;
+            col = mix(col, col * vec3(0.78, 0.22, 0.28) + vec3(0.02, 0.0, 0.008), edgeShadow * 0.66);
           }
-          vec3 shadowTint = col * vec3(0.92, 0.97, 1.07) + vec3(0.002, 0.006, 0.016) * (1.0 - luma);
-          vec3 hiTint = col * vec3(1.02, 1.05, 1.10);
-          col = mix(shadowTint, hiTint, smoothstep(0.24, 0.76, luma));
 
-          // Clean screen-pixel anti-banding dither (ZERO low-res 540p snow or 1080p scanline Moiré in calm room!)
-          float glitchScanAmt = clamp((uTear + uMash + uRoll + uHorror * 0.35) * 0.65, 0.0, 1.0);
+          // ---------------------------------------------------------------- GRADE (two worlds, two stocks)
+          {
+            // Bedroom: sodium-vapour highlights, cold moonlight in the toe.
+            vec3 roomLo = col * vec3(0.84, 0.93, 1.14) + vec3(0.002, 0.005, 0.014) * (1.0 - luma);
+            vec3 roomHi = col * vec3(1.07, 1.01, 0.92) + vec3(0.020, 0.012, 0.004);
+            vec3 room = mix(roomLo, roomHi, smoothstep(0.16, 0.80, luma));
+
+            // Signal world: this place is mostly black. Surfaces are pulled down hard and
+            // only emitters and specular edges are allowed to hold value — that gap between
+            // a 0.08 wall and a 0.95 seam is the whole look.
+            vec3 sig = col;
+            float sigLum0 = dot(sig, vec3(0.2126, 0.7152, 0.0722));
+            sig *= mix(0.30, 1.0, smoothstep(0.03, 0.52, sigLum0));
+            // Ink toe: the darks go cold instead of grey.
+            sig += vec3(0.000, 0.004, 0.016) * (1.0 - smoothstep(0.0, 0.30, sigLum0));
+            // Cyan body / magenta shoulder, and one honest push of saturation.
+            vec3 sigLo = sig * vec3(0.52, 0.86, 1.30);
+            vec3 sigHi = sig * vec3(1.06, 1.00, 1.10) + vec3(0.030, 0.000, 0.040);
+            sig = mix(sigLo, sigHi, smoothstep(0.12, 0.72, sigLum0));
+            float sigLum = dot(sig, vec3(0.2126, 0.7152, 0.0722));
+            sig = mix(vec3(sigLum), sig, 1.0 + 0.34 * uGrade);
+            // Highlight shoulder: the brightest signals go white-hot before they bloom.
+            sig += vec3(0.86, 0.96, 1.06) * smoothstep(0.76, 1.0, sigLum) * 0.14;
+
+            col = mix(room, sig, uGrade);
+          }
+
+          // Clean screen-pixel anti-banding dither + telemetry scanlines during glitch events.
+          float glitchScanAmt = clamp((uTear + uMash + uRoll + uShatter + uHorror * 0.35) * 0.65, 0.0, 1.0);
           if (glitchScanAmt > 0.01) {
-            float microScan = 1.0 - (0.014 * glitchScanAmt) * (0.5 + 0.5 * sin(gl_FragCoord.y * 1.570796));
+            float microScan = 1.0 - (0.018 * glitchScanAmt) * (0.5 + 0.5 * sin(gl_FragCoord.y * 1.570796));
             col *= microScan;
           }
-          float ditherGrain = (hash21(gl_FragCoord.xy + fract(uTime * 19.7) * 131.0) - 0.5) * 0.0045;
+          float ditherGrain = (hash21(gl_FragCoord.xy + fract(uTime * 19.7) * 131.0) - 0.5) * 0.0042;
           col += ditherGrain;
 
-          // --- Bloom: 1/5-res anamorphic bright-pass glow so highlights & neon bloom cleanly
+          // ---------------------------------------------------------------- ANAMORPHIC STREAK + BLOOM
+          if (uStreak > 0.002) {
+            // Wide horizontal bleed pulled straight off the bright-pass buffer: a real
+            // anamorphic flare, cyan on the left and magenta on the right of each highlight.
+            vec3 streak = vec3(0.0);
+            float wsum = 0.0;
+            for (int i = 1; i <= 5; i++) {
+              float o = float(i) * 0.021 * (1.0 + uStreak * 0.6);
+              float w = 1.0 / float(i);
+              streak += texture2D(tBloom, clamp(vUv + vec2(o, 0.0), 0.002, 0.998)).rgb * w;
+              streak += texture2D(tBloom, clamp(vUv - vec2(o, 0.0), 0.002, 0.998)).rgb * w;
+              wsum += w * 2.0;
+            }
+            streak /= max(wsum, 0.001);
+            vec3 streakTint = mix(vec3(0.72, 0.94, 1.15), vec3(1.18, 0.86, 1.02), smoothstep(0.2, 0.8, vUv.x));
+            col += streak * streakTint * uStreak * 1.35;
+          }
           if (uBloom > 0.001) {
             vec3 glow = texture2D(tBloom, vUv).rgb;
-            col += glow * uBloom;
+            // Warmer, wider shoulder bloom instead of a uniform white lift.
+            vec3 glowTint = mix(vec3(0.94, 1.0, 1.06), vec3(0.86, 1.0, 1.22), uGrade);
+            col += glow * glowTint * uBloom;
           }
 
-          float vig = smoothstep(0.96, 0.18, r2 * (1.05 + uVignette));
-          col *= mix(1.0 - uVignette * 0.72, 1.0, vig);
+          // ---------------------------------------------------------------- FILM GRAIN
+          if (uGrain > 0.001) {
+            vec2 gp = gl_FragCoord.xy;
+            float g1 = hash21(gp + fract(uTime * 7.13) * 91.0);
+            float g2 = hash21(gp * 1.37 + fract(uTime * 3.77) * 53.0);
+            float lumG = dot(col, vec3(0.2126, 0.7152, 0.0722));
+            // Grain lives in the midtones, dies in the blacks and softens on the highlights.
+            float response = (1.0 - smoothstep(0.58, 1.0, lumG)) * (0.3 + 0.7 * smoothstep(0.0, 0.16, lumG));
+            col += ((g1 + g2) - 1.0) * uGrain * 0.09 * response;
+          }
+
+          // ---------------------------------------------------------------- VIGNETTE & FLASH
+          float vig = smoothstep(1.02, 0.14, r2 * (1.02 + uVignette));
+          col *= mix(1.0 - uVignette * 0.78, 1.0, vig);
+          // Chromatic corner falloff — real glass loses colour before it loses light.
+          float cornerChroma = (1.0 - vig) * 0.30;
+          col.r *= 1.0 - cornerChroma * (1.0 - vUv.x) * 0.22;
+          col.b *= 1.0 - cornerChroma * vUv.x * 0.22;
 
           // Restrained luminance flash
           col = mix(col, vec3(0.90, 0.97, 1.0), clamp(uFlash, 0.0, 1.0));
@@ -594,6 +705,11 @@ export class PostFX {
     u.uSort.value = opts.sort ?? 0;
     u.uRoll.value = opts.roll ?? 0;
     u.uGhost.value = opts.ghost ?? 0;
+    u.uShatter.value = opts.shatter ?? 0;
+    u.uGrain.value = opts.grain ?? 0.12;
+    u.uStreak.value = opts.streak ?? 0;
+    u.uGrade.value = opts.grade ?? 0;
+    u.uBarrel.value = opts.barrel ?? 0;
     u.uSharpen.value = opts.sharpen ?? 0.28;
 
     renderer.setRenderTarget(this.rt);

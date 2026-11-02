@@ -20,6 +20,7 @@ const JAW_FLAP_COUNT = 4;
 const SINEW_COUNT = 32;
 const PARASYTE_EYE_COUNT = 11;
 const GLASS_SHARD_COUNT = 48;
+const PEEL_GLYPH_COUNT = 190;
 
 function buildParasyteMandibleGeometry(): THREE.BufferGeometry {
   // High-resolution sculpted 3D Parasyte (寄生獣) quadrant jaw-and-gum mesh:
@@ -237,8 +238,17 @@ export class BsodScreen {
   private readonly faceCanvas: HTMLCanvasElement;
   private readonly faceTex: THREE.CanvasTexture;
 
+  // The alphabet the panel is made of: an 8x8 monospace glyph atlas used by the
+  // in-panel text rain and by the 3D glyphs that peel off the glass.
+  private readonly glyphCanvas: HTMLCanvasElement;
+  private readonly glyphTex: THREE.CanvasTexture;
+
   public readonly screenMesh: THREE.Mesh;
   public readonly screenMat: THREE.ShaderMaterial;
+
+  /** Glyphs escaping the liquid crystal, still lit by the panel's own light. */
+  private readonly peelMesh: THREE.InstancedMesh;
+  private readonly peelMat: THREE.ShaderMaterial;
 
   // 100% GPU-animated Zero-Gravity 3D Shattered LCD Glass Shards
   private readonly glassShards: THREE.InstancedMesh;
@@ -312,6 +322,114 @@ export class BsodScreen {
     this.faceTex.anisotropy = 8;
     this.faceTex.generateMipmaps = true;
     this.faceTex.needsUpdate = true;
+
+    // 2b. Glyph atlas: the panel is not an image, it is set type. Every glitch in the
+    //     rest of this act draws from this one alphabet.
+    this.glyphCanvas = document.createElement('canvas');
+    this.glyphCanvas.width = 1024;
+    this.glyphCanvas.height = 1024;
+    {
+      const gctx = this.glyphCanvas.getContext('2d')!;
+      gctx.clearRect(0, 0, 1024, 1024);
+      gctx.fillStyle = '#ffffff';
+      gctx.textAlign = 'center';
+      gctx.textBaseline = 'middle';
+      gctx.font = '300 96px "Consolas", "Courier New", monospace';
+      const charset = '0123456789ABCDEF:()./x-_|[]><?!0x%#*+=';
+      const cell = 128;
+      for (let i = 0; i < 64; i++) {
+        const ch = charset[i % charset.length];
+        const cx = (i % 8) * cell + cell * 0.5;
+        const cy = Math.floor(i / 8) * cell + cell * 0.54;
+        gctx.fillText(ch, cx, cy);
+      }
+    }
+    this.glyphTex = new THREE.CanvasTexture(this.glyphCanvas);
+    this.glyphTex.minFilter = THREE.LinearMipmapLinearFilter;
+    this.glyphTex.magFilter = THREE.LinearFilter;
+    this.glyphTex.generateMipmaps = true;
+    this.glyphTex.needsUpdate = true;
+
+    // 2c. Escaping glyphs (100% GPU animation, one draw call).
+    this.peelMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      uniforms: {
+        uGlyphTex: { value: this.glyphTex },
+        uTime: { value: 0 },
+        uPeel: { value: 0 },
+      },
+      vertexShader: /* glsl */ `
+        attribute vec4 aSeed4;
+        uniform float uTime;
+        uniform float uPeel;
+        varying vec2 vUv;
+        varying float vFade;
+        varying float vCell;
+        void main() {
+          vUv = uv;
+          vCell = aSeed4.z;
+          // Each glyph has its own peel threshold, so the panel does not lift as one sheet:
+          // it comes apart letter by letter, nearest-to-the-mouth first.
+          float threshold = 0.02 + aSeed4.z * 0.52;
+          float local = smoothstep(threshold, threshold + 0.30, uPeel);
+          float t = fract(uTime * (0.10 + aSeed4.w * 0.14) + aSeed4.z * 4.7);
+          float depth = local * (0.25 + aSeed4.z * 0.75) * (0.35 + t * 0.65);
+          vec3 base = vec3(aSeed4.x * 1.86, aSeed4.y * 0.96, 0.012);
+          float sway = sin(t * 6.283 + aSeed4.z * 19.0) * 0.055 * depth;
+          vec3 p = base;
+          p.z += depth * 1.45;
+          p.x += sway;
+          p.y += (t - 0.5) * 0.42 * depth - depth * 0.10;
+          float sc = (0.042 + aSeed4.z * 0.062) * smoothstep(0.0, 0.10, uPeel);
+          sc *= 1.0 - smoothstep(0.86, 1.0, uPeel) * 0.55;
+          float rot = (t - 0.5) * 2.4 * depth * (aSeed4.w > 0.75 ? -1.0 : 1.0);
+          float cr = cos(rot), sr = sin(rot);
+          vec2 qp = position.xy * sc;
+          p.xy += vec2(qp.x * cr - qp.y * sr, qp.x * sr + qp.y * cr);
+          p.z += abs(qp.x) * 0.2;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+          vFade = local * (1.0 - smoothstep(0.42, 0.95, t)) * (1.0 - smoothstep(0.80, 1.0, uPeel) * 0.7);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec2 vUv;
+        varying float vFade;
+        varying float vCell;
+        uniform sampler2D uGlyphTex;
+        void main() {
+          if (vFade < 0.004) discard;
+          float idx = floor(vCell * 63.999);
+          vec2 cell = vec2(mod(idx, 8.0), floor(idx / 8.0));
+          vec2 gUv = (cell + clamp(vUv, 0.04, 0.96)) / 8.0;
+          float ink = texture2D(uGlyphTex, gUv).a;
+          if (ink < 0.02) discard;
+          vec3 col = mix(vec3(0.52, 0.86, 1.0), vec3(1.0, 0.92, 1.0), vCell);
+          gl_FragColor = vec4(col * (0.85 + ink * 0.9), ink * vFade * 0.92);
+        }
+      `,
+    });
+    const peelSeeds = new Float32Array(PEEL_GLYPH_COUNT * 4);
+    for (let i = 0; i < PEEL_GLYPH_COUNT; i++) {
+      peelSeeds[i * 4 + 0] = Math.random() * 2 - 1;
+      peelSeeds[i * 4 + 1] = Math.random() * 2 - 1;
+      peelSeeds[i * 4 + 2] = Math.random();
+      peelSeeds[i * 4 + 3] = Math.random();
+    }
+    const peelGeo = new THREE.PlaneGeometry(1, 1);
+    peelGeo.setAttribute('aSeed4', new THREE.InstancedBufferAttribute(peelSeeds, 4));
+    this.peelMesh = new THREE.InstancedMesh(peelGeo, this.peelMat, PEEL_GLYPH_COUNT);
+    for (let i = 0; i < PEEL_GLYPH_COUNT; i++) {
+      this.peelMesh.setMatrixAt(i, new THREE.Matrix4());
+    }
+    this.peelMesh.instanceMatrix.needsUpdate = true;
+    this.peelMesh.frustumCulled = false;
+    this.peelMesh.renderOrder = 6;
+    this.peelMesh.visible = false;
+    this.root.add(this.peelMesh);
 
     // 3. Invisible low-poly raycast plane (2 triangles = 0.001ms raycast!)
     const hitGeo = new THREE.PlaneGeometry(BsodScreen.LOCAL_W, BsodScreen.LOCAL_H, 1, 1);
@@ -852,6 +970,8 @@ export class BsodScreen {
       uniforms: {
         uBodyTex: { value: this.stageTextures[0] },
         uFaceTex: { value: this.faceTex },
+        uGlyphTex: { value: this.glyphTex },
+        uPeel: { value: 0 },
         uNoiseTex: { value: noiseTex },
         uTime: { value: 0 },
         uHover: { value: 0 },
@@ -976,6 +1096,8 @@ export class BsodScreen {
         varying vec3 vWorldNormal;
         uniform sampler2D uBodyTex;
         uniform sampler2D uFaceTex;
+        uniform sampler2D uGlyphTex;
+        uniform float uPeel;
         uniform sampler2D uNoiseTex;
         uniform float uTime;
         uniform float uHover;
@@ -1125,7 +1247,12 @@ export class BsodScreen {
           float circleDist = length(vec2(md.x / circRadX, md.y / halfLen)) / mawWobble;
           float mDist = mix(slitDist, circleDist, smoothstep(0.06, 0.30, openNc));
 
-          float mEdge = exp(-pow((mDist - 1.04) * 28.0, 2.0));
+          // The hole is not an ellipse: the panel gives way along an irregular fracture line.
+          vec4 edgeNoiseA = texture2D(uNoiseTex, uv * vec2(3.2, 1.8) + vec2(0.0, uTime * 0.04));
+          vec4 edgeNoiseB = texture2D(uNoiseTex, uv * vec2(7.5, 4.2) - vec2(uTime * 0.03, 0.0));
+          float edgeNoise = (edgeNoiseA.r - 0.5) * 0.10 + (edgeNoiseB.g - 0.5) * 0.05;
+          float mDistJag = mDist + edgeNoise * smoothstep(0.05, 0.35, openNc);
+          float mEdge = exp(-pow((mDistJag - 1.035) * 34.0, 2.0));
           float mStress = smoothstep(2.0, 1.0, mDist);
 
           // Discard cleanly inside mDist < 1.03 so the 3D sculpted Parasyte jaws & gum-socketed teeth emerge from behind!
@@ -1161,12 +1288,61 @@ export class BsodScreen {
           bodyUv = clamp(bodyUv, 0.001, 0.999);
 
           float chr = uMadness * 0.0038 + uClickPulse * 0.009 + mStress * openN * 0.007 + impWave * 0.011;
+
+          // ---------------------------------------------------------------- 2b. INTERFACE PEEL
+          // The panel stops being a surface: service strips slide toward the edges and go black,
+          // and there is nothing behind them. The screen is a sheet being pulled away.
+          float peelBand = floor(uv.y * 34.0);
+          float peelRnd = hash21(vec2(peelBand, floor(uTime * 7.0)));
+          float peelOn = smoothstep(0.50, 0.86, peelRnd) * uPeel;
+          bodyUv.x += peelOn * (uv.x < 0.5 ? -1.0 : 1.0) * (0.008 + uPeel * 0.055);
+          bodyUv.y += peelOn * 0.004;
+          bodyUv = clamp(bodyUv, 0.001, 0.999);
+
           vec3 panel;
           panel.r = texture2D(uBodyTex, clamp(bodyUv + vec2(chr, 0.0), 0.001, 0.999)).r;
           panel.g = texture2D(uBodyTex, bodyUv).g;
           panel.b = texture2D(uBodyTex, clamp(bodyUv - vec2(chr, 0.0), 0.001, 0.999)).b;
 
-          vec3 col = mix(vec3(0.0, 0.4706, 0.8392), panel, clamp(length(panel) * 1.6, 0.0, 1.0));
+          vec3 col = mix(vec3(0.0, 0.1500, 0.3600), panel, clamp(length(panel) * 1.6, 0.0, 1.0));
+
+          // The glass is a surface, not a lantern: the *type* is what emits. Everything the
+          // OS printed as background falls to the bottom of the range, so the wound stays
+          // the darkest thing in the frame and the room is lit by the lamp.
+          float panelLuma = dot(col, vec3(0.2126, 0.7152, 0.0722));
+          float typeOnly = smoothstep(0.26, 0.78, panelLuma);
+          col *= mix(0.16, 1.0, typeOnly);
+
+          float peelErase = step(0.80, peelRnd) * uPeel;
+          col = mix(col, vec3(0.001, 0.004, 0.012), clamp(peelErase * 0.85, 0.0, 0.85));
+          col += vec3(0.34, 0.74, 1.0) * smoothstep(0.95, 1.0, peelRnd) * uPeel * 0.30;
+
+          // ---------------------------------------------------------------- 2c. TEXT RAIN
+          // Once the panel has been *read*, it answers in type: columns of the same alphabet
+          // the OS is made of begin to fall inside the glass.
+          float rainGate = smoothstep(0.29, 0.72, uMadness) * (1.0 - smoothstep(0.30, 0.92, uSuction));
+          if (uAftermath < 0.5 && rainGate > 0.004) {
+            float cols = 52.0;
+            float colId = floor(uv.x * cols);
+            float colRnd = hash21(vec2(colId, 7.13));
+            float speed = 0.22 + colRnd * 0.62;
+            float rows = 20.0 + floor(colRnd * 10.0);
+            float yScroll = fract(uv.y * (0.42 + colRnd * 0.5) + uTime * speed + colRnd * 9.0);
+            float rowId = floor(yScroll * rows);
+            float cellRnd = hash21(vec2(colId + 0.5, rowId));
+            vec2 gf = vec2(fract(uv.x * cols), fract(yScroll * rows));
+            float idx = floor(cellRnd * 63.999);
+            vec2 cellUv = vec2(mod(idx, 8.0), floor(idx / 8.0));
+            float ink = texture2D(uGlyphTex, (cellUv + clamp(gf, 0.06, 0.94)) / 8.0).a;
+            float columnOn = step(0.70, hash21(vec2(colId, 3.77)));
+            float bright = 0.35 + 0.65 * hash21(vec2(colId, rowId + 11.0));
+            float rainAmt = ink * columnOn * rainGate * bright * (0.55 + 0.45 * sin(uTime * 2.4 + colRnd * 20.0));
+            vec3 rainCol = mix(vec3(0.30, 0.62, 0.92), vec3(0.92, 0.22, 0.36), smoothstep(0.55, 0.95, uMadness));
+            // The rain thickens where the panel is furthest from the wound, and never
+            // paints over the mouth itself.
+            rainAmt *= smoothstep(1.02, 1.55, mDist);
+            col = mix(col, rainCol, clamp(rainAmt * 0.34, 0.0, 0.55));
+          }
 
           if (uAftermath < 0.5) {
             // ---------------------------------------------------------------- 3. SUB-LCD 3D VISAGE RELIEF & SHATTERED GLASS
@@ -1186,6 +1362,39 @@ export class BsodScreen {
             col = mix(col, vec3(0.002, 0.015, 0.065), voidShape * digitalFace * 0.84);
             float signalBand = step(0.94 - uMadness * 0.08, blockNoise) * digitalFace;
             col += vec3(0.08, 0.35, 0.8) * signalBand * 0.3;
+
+            // ---------------------------------------------------------------- 3b. INTERIOR DEPTH
+            // Aperture parallax: the wound is not a hole in a plane, it is an opening onto
+            // stacked copies of this same interface. Radius 1/rn behaves like distance, so
+            // the rings recede forever, and the centre is the only light down there.
+            float interior = smoothstep(1.03, 0.86, mDist) * smoothstep(0.02, 0.22, openNc);
+            if (interior > 0.003) {
+              float rn = max(mDist, 0.045);
+              float depthZ = 1.0 / rn;
+              float ringPhase = depthZ * 2.35 - uTime * 3.4 + mawWobble * 2.6;
+              float ring = pow(0.5 + 0.5 * sin(ringPhase), 14.0);
+              float ringFine = pow(0.5 + 0.5 * sin(depthZ * 7.0 - uTime * 6.1), 22.0);
+              float spokes = pow(0.5 + 0.5 * sin(polarAng * 24.0 + sin(depthZ * 0.6) * 1.7), 18.0);
+              // Data falling down the shaft: short bright dashes on the walls.
+              float lanes = floor(polarAng * 18.0);
+              float laneOn = step(0.62, hash21(vec2(lanes, floor(depthZ * 2.0 + uTime * 1.4))));
+              // Absolute darkness is the point: this is the inside of a display, and there
+              // is no light back here except the signal the OS is still pushing out.
+              vec3 deepCol = vec3(0.0004, 0.0016, 0.006);
+              deepCol += vec3(0.05, 0.28, 0.62) * ring * 0.20 * smoothstep(1.02, 0.30, mDist);
+              deepCol += vec3(0.30, 0.66, 1.0) * ringFine * 0.10;
+              deepCol += vec3(0.10, 0.34, 0.72) * spokes * 0.05 * smoothstep(0.95, 0.35, mDist);
+              deepCol += vec3(0.22, 0.58, 1.0) * laneOn * 0.07 * smoothstep(0.9, 0.2, mDist);
+              // The end of the shaft: a small, cold, very far light.
+              deepCol += vec3(0.34, 0.72, 1.0) * exp(-mDist * 17.0) * 0.42;
+              deepCol += vec3(0.72, 0.92, 1.0) * exp(-mDist * 42.0) * 0.30;
+              // The fractured lip: a hot hairline only, no glow.
+              float lip = smoothstep(1.030, 1.008, mDistJag) * smoothstep(0.984, 1.008, mDistJag);
+              deepCol += vec3(0.46, 0.80, 1.0) * lip * 0.40;
+              col = mix(col, deepCol, clamp(interior, 0.0, 1.0));
+              // The panel darkens as it approaches the wound, so the mouth is the darkest thing in the shot.
+              col *= 1.0 - smoothstep(2.6, 1.05, mDist) * 0.35 * smoothstep(0.02, 0.25, openNc);
+            }
 
             if (uMadness > 0.04) {
               // Razor-sharp shattered-LCD glass fractures radiating from the splitting face
@@ -1266,7 +1475,10 @@ export class BsodScreen {
             }
             float faceInk = clamp(eyesInk + mouthInk, 0.0, 1.0);
             col = mix(col, vec3(0.10, 0.85, 1.0), echoInk * 0.65);
-            col = mix(col, vec3(1.0), faceInk);
+            // The face is printed on the glass, so it dies with the glass: where the aperture
+            // has already given way there is no type left, only the hole.
+            float faceSurvive = smoothstep(0.94, 1.10, mDist);
+            col = mix(col, vec3(0.74, 0.92, 1.0) * (0.62 + 0.38 * smoothstep(1.05, 1.9, mDist)), faceInk * faceSurvive);
 
             if (eyesInk > 0.05 && (uHover > 0.05 || uMadness > 0.02 || stage0Betrayal > 0.5)) {
               float dDotA = length((fLocal - (colonLocal + vec2(0.0, eyeOff)) - cursorPullF * 1.35) * vec2(1.45, 0.90));
@@ -1281,9 +1493,9 @@ export class BsodScreen {
               float collarShadow = smoothstep(1.42, 1.03, mDist) * tearOpen;
               col *= mix(1.0, 0.42, collarShadow * 0.82);
 
-              float jaggedGlassRim = exp(-pow((mDist - 1.055 + (noiseB.r - 0.5) * 0.035) * 34.0, 2.0)) * tearOpen;
-              col = mix(col, vec3(0.004, 0.012, 0.032), clamp(mEdge * 0.88, 0.0, 0.92));
-              col += vec3(0.55, 0.86, 1.0) * jaggedGlassRim * 0.58;
+              float jaggedGlassRim = exp(-pow((mDistJag - 1.055 + (edgeNoiseB.r - 0.5) * 0.022) * 78.0, 2.0)) * tearOpen;
+              col = mix(col, vec3(0.002, 0.006, 0.018), clamp(mEdge * 0.92, 0.0, 0.95));
+              col += vec3(0.36, 0.74, 1.0) * jaggedGlassRim * 0.20;
             }
           } else {
             float scar = smoothstep(0.004, 0.0, abs((uv.y - 0.52) + (uv.x - 0.48) * 0.62 + sin(uv.x * 26.0) * 0.012))
@@ -2284,7 +2496,7 @@ export class BsodScreen {
 
           float ang = aGlassSeed.x * 6.2831853 + sin(uTime * 0.45 + idx) * 0.15;
           float ringR = (0.16 + uJawOpen * (0.34 + seed * 0.44)) * faceScale;
-          float driftOut = uJawOpen * (0.08 + seed * 0.68) + uClickPulse * 0.10 - uSuction * 3.2;
+          float driftOut = uJawOpen * (0.015 + seed * 0.115) + uClickPulse * 0.02 - uSuction * 3.2;
 
           float sc = smoothstep(0.01, 0.22, uJawOpen) * (0.42 + seed * 1.15);
           vec3 lp = vec3(position.x * sc * (0.65 + mod(idx, 3.0) * 0.4), position.y * sc * (1.1 + mod(idx, 2.0) * 0.55), position.z);
@@ -2316,8 +2528,9 @@ export class BsodScreen {
           vec3 N = normalize(vNrm);
           float fresnel = pow(1.0 - abs(dot(N, V)), 2.2);
           float spec = pow(max(dot(reflect(-V, N), normalize(vec3(0.3, 0.6, 0.8))), 0.0), 36.0);
-          vec3 col = mix(vec3(0.02, 0.34, 0.80), vec3(0.90, 0.98, 1.0), fresnel * 0.85 + spec);
-          gl_FragColor = vec4(col, clamp(0.36 + fresnel * 0.54 + spec * 0.42, 0.0, 0.95));
+          // Razor glass: almost nothing face-on, a cold line where the edge catches light.
+          vec3 col = mix(vec3(0.010, 0.052, 0.150), vec3(0.62, 0.86, 1.0), fresnel * 0.80 + spec * 0.9);
+          gl_FragColor = vec4(col, clamp(0.10 + fresnel * 0.42 + spec * 0.34, 0.0, 0.72));
         }
       `,
     });
@@ -2602,324 +2815,324 @@ export class BsodScreen {
       return tex;
     };
 
-    if (aftermath) {
-      ctx.fillStyle = '#051326';
-      ctx.fillRect(0, 0, W, H);
+    const mono = '"Consolas", "Courier New", monospace';
+    const fontStack = '"Segoe UI", "Yu Gothic UI", "Meiryo", sans-serif';
+    const leftX = 232;
+    const qrY = 738;
+    const qrSize = 178;
+    const infoX = leftX + qrSize + 38;
 
-      ctx.fillStyle = 'rgba(120, 190, 255, 0.03)';
-      for (let y = 0; y < H; y += 4) {
-        ctx.fillRect(0, y, W, 2);
-      }
-      const vg = ctx.createRadialGradient(W * 0.5, H * 0.48, H * 0.1, W * 0.5, H * 0.5, H * 0.78);
-      vg.addColorStop(0, 'rgba(0, 0, 0, 0)');
-      vg.addColorStop(1, 'rgba(0, 0, 0, 0.68)');
+    /** Shared panel finish: fine phosphor scanlines + a lens vignette so the screen reads as glass. */
+    const finishPanel = (): void => {
+      ctx.save();
+      ctx.globalAlpha = 0.05;
+      ctx.fillStyle = '#000000';
+      for (let y = 0; y < H; y += 3) ctx.fillRect(0, y, W, 1);
+      ctx.restore();
+      const vg = ctx.createRadialGradient(W * 0.42, H * 0.44, H * 0.18, W * 0.5, H * 0.5, H * 0.98);
+      vg.addColorStop(0, 'rgba(0,0,0,0)');
+      vg.addColorStop(1, 'rgba(0,0,0,0.40)');
       ctx.fillStyle = vg;
       ctx.fillRect(0, 0, W, H);
+    };
 
-      // Subtle ghostly reflection of a seated silhouette + faint ':)' watermark burned into phosphor!
+    /** A line of type that has started to fall down the panel at different rates. */
+    const dripText = (text: string, x: number, y0: number, rows: number, alpha: number): void => {
       ctx.save();
-      ctx.fillStyle = 'rgba(130, 205, 255, 0.08)';
-      ctx.font = '300 245px "Segoe UI", "Yu Gothic UI", sans-serif';
-      ctx.fillText(':)', 224, 372);
+      ctx.font = `300 47px ${fontStack}`;
+      for (let i = 0; i < rows; i++) {
+        const a = alpha * Math.pow(1 - i / rows, 2.4);
+        if (a < 0.002) continue;
+        ctx.fillStyle = `rgba(255, 255, 255, ${a.toFixed(3)})`;
+        const dy = y0 + i * (7 + (i % 3) * 2) + Math.sin(i * 0.9 + x) * 2;
+        const dx = Math.sin(i * 0.61) * i * 0.4;
+        ctx.fillText(text, x + dx, dy);
+      }
+      ctx.restore();
+    };
+
+    if (aftermath) {
+      // ---------------------------------------------------------------- SESSION RESTORED
+      ctx.fillStyle = '#04121f';
+      ctx.fillRect(0, 0, W, H);
+
+      const glow = ctx.createRadialGradient(W * 0.1, H * 0.16, 8, W * 0.18, H * 0.3, H * 0.95);
+      glow.addColorStop(0, 'rgba(74, 172, 255, 0.22)');
+      glow.addColorStop(0.42, 'rgba(10, 60, 120, 0.11)');
+      glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, W, H);
+
+      // The smile burned itself into the phosphor.
+      ctx.save();
+      ctx.font = `200 330px ${fontStack}`;
+      ctx.fillStyle = 'rgba(120, 200, 255, 0.10)';
+      ctx.fillText(':(', 118, 424);
       ctx.restore();
 
-      ctx.fillStyle = '#74b9ff';
-      ctx.font = '600 31px Consolas, "Yu Gothic UI", monospace';
-      ctx.fillText('KERNEL CRASH DUMP  //  SESSION RESTORED (02:48:00)', 180, 232);
+      ctx.fillStyle = 'rgba(198, 230, 255, 0.88)';
+      ctx.font = `600 30px ${mono}`;
+      ctx.fillText('SESSION RESTORED  //  02:48:00', leftX, 300);
+      ctx.fillStyle = 'rgba(150, 200, 240, 0.46)';
+      ctx.fillRect(leftX, 328, 760, 2);
 
-      ctx.strokeStyle = 'rgba(120, 190, 255, 0.28)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(180, 264);
-      ctx.lineTo(W - 180, 264);
-      ctx.stroke();
+      ctx.fillStyle = 'rgba(208, 232, 255, 0.78)';
+      ctx.font = `300 25px ${mono}`;
+      ctx.fillText('DUMP_IMAGE        : MEMORY_0247.DMP  [VERIFIED / PARTIAL]', leftX, 388);
+      ctx.fillText('INTERRUPT_VECTOR  : WAKE_UP  [RING0 UNHOOKED]', leftX, 428);
+      ctx.fillText('RESIDUAL_HANDLES  : 01  OPTIC_NERVE_CACHE', leftX, 468);
+      ctx.fillStyle = 'rgba(255, 116, 146, 0.75)';
+      ctx.fillText('SYSTEM NOTE       : 背後の椅子が 3.4 度、回転しています。確認しないでください。', leftX, 532);
+      ctx.fillStyle = 'rgba(150, 200, 245, 0.44)';
+      ctx.font = `300 23px ${fontStack}`;
+      ctx.fillText('画面に触れると、ダンプは再マウントされます。', leftX, 648);
 
-      ctx.fillStyle = 'rgba(218, 236, 255, 0.86)';
-      ctx.font = '300 25px Consolas, "Yu Gothic UI", monospace';
-      ctx.fillText('DUMP_IMAGE     : C:\\Windows\\MEMORY_0247.DMP (VERIFIED)', 180, 318);
-      ctx.fillText('INTERRUPT_VEC  : WAKE_UP [RING0 UNHOOKED]', 180, 364);
+      ctx.save();
+      ctx.globalAlpha = 0.16;
+      this.drawQrCode(ctx, leftX, qrY, qrSize, 6);
+      ctx.restore();
 
-      ctx.fillStyle = '#ff6b88';
-      ctx.font = '600 25px Consolas, "Yu Gothic UI", monospace';
-      ctx.fillText('RESIDUAL_HANDLE: OPTIC_NERVE_CACHE -> 1 HANDLE STILL OPEN', 180, 418);
-      ctx.fillStyle = 'rgba(255, 145, 168, 0.58)';
-      ctx.font = '300 22px Consolas, "Yu Gothic UI", monospace';
-      ctx.fillText('NOTE           : 背後の椅子がわずかに回転しています。確認しないでください。', 180, 466);
-
-      ctx.fillStyle = 'rgba(140, 198, 255, 0.62)';
-      ctx.font = '300 23px "Segoe UI", "Yu Gothic UI", sans-serif';
-      ctx.fillText('画面をクリックすると MEMORY_0247.DMP を再マウントします', 180, 868);
-
+      finishPanel();
       return finalizeTex();
     }
 
-    // Authentic Windows 10/11 Cerulean Blue (#0078D7), bruising colder & deeper at late stages
-    ctx.fillStyle = stage >= 5 ? '#00336e' : stage >= 4 ? '#00498f' : '#0078d7';
+    // Deeper, colder blue as the signal loses its footing.
+    const baseCol = stage >= 4 ? '#00060f' : stage >= 3 ? '#001a3f' : stage >= 2 ? '#0057b0' : stage >= 1 ? '#0074d1' : '#0078d7';
+    ctx.fillStyle = baseCol;
     ctx.fillRect(0, 0, W, H);
 
-    const leftX = 232;
-    const fontStack = '"Segoe UI", "Yu Gothic UI", "Meiryo", sans-serif';
+    // Panel-wide gentle tonal drift: the top-left is always a little hotter.
+    if (stage >= 1) {
+      const heat = ctx.createLinearGradient(0, 0, W, H);
+      heat.addColorStop(0, 'rgba(120, 200, 255, 0.06)');
+      heat.addColorStop(0.55, 'rgba(0, 0, 0, 0)');
+      heat.addColorStop(1, 'rgba(0, 0, 0, 0.16)');
+      ctx.fillStyle = heat;
+      ctx.fillRect(0, 0, W, H);
+    }
 
-    // Subtle clinical kernel memory telemetry creeping down the right margin from Stage 1+
+    // A restrained memory marginalia column (never a wall of fake telemetry).
     if (stage >= 1) {
       ctx.save();
-      ctx.font = '19px Consolas, monospace';
-      ctx.fillStyle = `rgba(195, 234, 255, ${0.045 + stage * 0.036})`;
-      const tags = [
-        'SACCADE_CAPTURE',
-        'C3_MOTOR_INHIBIT',
-        'GLYPH_DEFORM',
-        'CURSOR_TRACK',
-        'CHIASM_DMA_LOCK',
-        'SIGNAL_BREACH',
-      ];
-      for (let r = 0; r < 18; r++) {
+      ctx.font = `19px ${mono}`;
+      ctx.fillStyle = `rgba(195, 234, 255, ${0.035 + stage * 0.022})`;
+      const tags = ['OBSERVE', 'OPTIC_DMA', 'HOST_LINK', 'GLYPH', 'SACCADE', 'SHELL'];
+      for (let r = 0; r < 12; r++) {
         const addr = (0xf8000247 + r * 0x18 + stage * 0x100).toString(16).toUpperCase();
-        const tag = tags[(r + stage) % tags.length];
-        ctx.fillText(
-          `FFFF${addr}: 00 78 D7 F4  3A 29 0${stage}  [${tag}]`,
-          W - 820,
-          86 + r * 54
-        );
+        ctx.fillText(`FFFF${addr}: 00 78 D7 F4  [${tags[(r + stage) % tags.length]}]`, W - 560, 74 + r * 52);
       }
       ctx.restore();
     }
 
-    ctx.fillStyle = '#ffffff';
-    ctx.textBaseline = 'alphabetic';
-    ctx.font = `300 47px ${fontStack}`;
-
     if (stage === 0) {
+      // ---------------------------------------------------------------- AUTHENTIC STOP SCREEN
+      ctx.fillStyle = '#ffffff';
+      ctx.textBaseline = 'alphabetic';
+      ctx.font = `300 47px ${fontStack}`;
       ctx.fillText('問題が発生したため、PC を再起動する必要があります。', leftX, 492);
       ctx.fillText('エラー情報を収集しています。自動的に再起動します。', leftX, 558);
       ctx.fillText('99% 完了', leftX, 668);
+
+      this.drawQrCode(ctx, leftX, qrY, qrSize, 0);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `300 25px ${fontStack}`;
+      ctx.fillText('この問題と可能な解決方法の詳細については、https://www.windows.com/stopcode を参照してください', infoX, qrY + 38);
+      ctx.fillText('サポート担当者に連絡する場合は、次の情報を伝えてください:', infoX, qrY + 108);
+      ctx.fillText('停止コード: CRITICAL_PROCESS_DIED', infoX, qrY + 148);
     } else if (stage === 1) {
+      // ---------------------------------------------------------------- IT ANSWERED
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `300 47px ${fontStack}`;
       ctx.fillText('問題が発生したため、PC を再起動する必要があります。', leftX, 492);
-      ctx.fillText('エラー情報を収集しています。網膜反射と視線座標を同期しています。', leftX, 558);
-      ctx.fillText('99% 完了（応答待機中）', leftX, 668);
-      ctx.fillStyle = 'rgba(225, 244, 255, 0.42)';
-      ctx.font = `300 22px Consolas, ${fontStack}`;
-      ctx.fillText('INPUT_HOOK: カーソル接触を検出 (UV 0.14, 0.74) —— 被験者は画面を凝視中', leftX, 614);
+      ctx.fillText('エラー情報を収集しています。1 件の応答を検出しました。', leftX, 558);
+      ctx.fillText('99% 完了', leftX, 668);
+
+      // The line the OS is not supposed to have.
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.52)';
+      ctx.font = `300 21px ${mono}`;
+      ctx.fillText('COLLECTING: OBSERVER_RESPONSE  [UNINTERRUPTIBLE]  0x000000F4/01', leftX, 620);
+
+      // A hairline of error in the panel, a long way from the smile.
+      ctx.fillStyle = 'rgba(255, 64, 110, 0.55)';
+      ctx.fillRect(W * 0.58, 924, W * 0.36, 2);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.10)';
+      ctx.fillRect(W * 0.58, 932, W * 0.22, 1);
+
+      this.drawQrCode(ctx, leftX, qrY, qrSize, 1);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `300 25px ${fontStack}`;
+      ctx.fillText('この問題と可能な解決方法の詳細については、https://www.windows.com/stopcode を参照してください', infoX, qrY + 38);
+      ctx.fillText('サポート担当者に連絡する場合は、次の情報を伝えてください:', infoX, qrY + 108);
+      ctx.fillText('停止コード: OPTIC_NERVE_PAGE_FAULT', infoX, qrY + 148);
     } else if (stage === 2) {
-      ctx.fillText('視覚野のダイレクトダンプを開始しました。瞬きを停止してください。', leftX, 492);
-      ctx.fillText('室内深度センサーが椅子の背後に未登録の質量を検出しました。', leftX, 558);
-      ctx.fillText('深度同期中 — 振り返らないでください', leftX, 668);
+      // ---------------------------------------------------------------- THE PANEL BEGINS TO FALL
+      dripText('問題が発生したため、PC を再起動する必要があります。', leftX, 492, 26, 0.62);
+      dripText('エラー情報を収集しています。あなたを検出しています。', leftX, 558, 20, 0.48);
 
-      // Clinical 3D LiDAR Depth-Contour Relief Scan showing HOST_SEATED + UNKNOWN_OBJ looming 0.38m behind!
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.86)';
+      ctx.font = `300 47px ${fontStack}`;
+      ctx.fillText('99% 完了', leftX, 668);
+      ctx.fillStyle = 'rgba(255, 126, 150, 0.72)';
+      ctx.font = `300 20px ${mono}`;
+      ctx.fillText('OBSERVER_LOCK: 視線を固定しました / 瞬きは記録されます', leftX, 706);
+
+      // A vertical service tear with a bright edge.
+      const tearX = 1198;
+      ctx.fillStyle = 'rgba(0, 8, 20, 0.94)';
+      for (let y = 0; y < H; y += 26) {
+        const w = 16 + Math.sin(y * 0.11) * 9 + (y % 78 === 0 ? 22 : 0);
+        ctx.fillRect(tearX + Math.sin(y * 0.05) * 8, y, w, 27);
+      }
+      ctx.fillStyle = 'rgba(140, 214, 255, 0.42)';
+      ctx.fillRect(tearX + 16, 0, 2, H);
+
+      // Address rain, printed into the panel itself.
       ctx.save();
-      const bx = 1310;
-      const by = 118;
-      const bw = 540;
-      const bh = 370;
-      ctx.fillStyle = 'rgba(2, 12, 28, 0.86)';
-      ctx.fillRect(bx, by, bw, bh);
-      ctx.strokeStyle = 'rgba(130, 210, 255, 0.72)';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(bx, by, bw, bh);
-
-      ctx.fillStyle = '#9ad8ff';
-      ctx.font = '600 18px Consolas, monospace';
-      ctx.fillText('IR_LIDAR_0 // 02:47:19 [DEPTH_SLICE]', bx + 16, by + 26);
-
-      // 56-slice 3D LiDAR elevation contour raster (replaces crude circle+box shapes with realistic sensor relief!)
-      const slices = 56;
-      for (let s = 0; s < slices; s++) {
-        const vNorm = s / (slices - 1);
-        const baseLineY = by + 44 + vNorm * 258;
-
-        // Background entity depth field (tall organic cranial/shoulder/torso relief standing at u = 0.59)
-        const dHeadBack = Math.hypot((vNorm - 0.23) * 1.45, 0);
-        const dTorsoBack = Math.abs(vNorm - 0.64);
-        const hasBack = dHeadBack < 0.16 || (vNorm > 0.31 && dTorsoBack < 0.38);
-
-        ctx.beginPath();
-        let anyAnom = false;
-        for (let ix = 0; ix <= 90; ix++) {
-          const uNorm = ix / 90;
-          const pxX = bx + 14 + uNorm * (bw - 28);
-
-          // Seated foreground host (head centered at (0.39, 0.48), shoulders at (0.39, 0.78))
-          const hHostHead =
-            Math.exp(-(((uNorm - 0.39) / 0.068) ** 2 + ((vNorm - 0.48) / 0.105) ** 2)) * 16.0;
-          const hHostNeck =
-            Math.exp(-(((uNorm - 0.39) / 0.036) ** 2 + ((vNorm - 0.61) / 0.055) ** 2)) * 9.0;
-          const hHostTorso =
-            Math.exp(-(((uNorm - 0.39) / 0.145) ** 2 + ((vNorm - 0.84) / 0.22) ** 2)) * 14.0;
-          const hostZ = hHostHead + hHostNeck + hHostTorso;
-
-          // Looming tall entity standing directly behind the chair (tilted head at (0.59, 0.22), wide shoulders)
-          const tiltU = uNorm - (0.59 + (vNorm - 0.22) * 0.06);
-          const hEntHead =
-            Math.exp(-((tiltU / 0.064) ** 2 + ((vNorm - 0.22) / 0.10) ** 2)) * 15.0;
-          const hEntShoulders =
-            Math.exp(-(((uNorm - 0.59) / 0.155) ** 2 + ((vNorm - 0.62) / 0.34) ** 2)) * 13.0;
-          const entZ = hEntHead + hEntShoulders;
-          if (entZ > 3.5) anyAnom = true;
-
-          const microNoise = Math.sin(ix * 1.9 + s * 2.7) * 0.55;
-          const pyY = baseLineY - Math.max(hostZ, entZ * 0.88) + microNoise;
-          if (ix === 0) ctx.moveTo(pxX, pyY);
-          else ctx.lineTo(pxX, pyY);
+      ctx.font = `18px ${mono}`;
+      for (let c = 0; c < 14; c++) {
+        const colX = 1290 + c * 48;
+        const colAlpha = 0.05 + ((c * 37) % 20) * 0.006;
+        ctx.fillStyle = `rgba(196, 236, 255, ${colAlpha.toFixed(3)})`;
+        for (let r = 0; r < 26; r++) {
+          const hex = (((c * 131 + r * 977) % 4096) >>> 0).toString(16).toUpperCase().padStart(3, '0');
+          ctx.fillText(`${c % 2 === 0 ? ':' : ')'}${hex}`, colX, 60 + r * 40);
         }
-        ctx.strokeStyle =
-          hasBack && anyAnom && s % 2 === 0
-            ? 'rgba(255, 86, 118, 0.52)'
-            : 'rgba(120, 212, 255, 0.38)';
-        ctx.lineWidth = 1.25;
-        ctx.stroke();
+      }
+      ctx.restore();
+
+      this.drawQrCode(ctx, leftX, qrY, qrSize, 2);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.font = `300 25px ${fontStack}`;
+      ctx.fillText('視覚野ダンプの転送先: dump://0x0078d7/optic_chiasm — 切断は許可されていません', infoX, qrY + 38);
+      ctx.fillText('生体テレメトリは次の停止コードへバインドされました:', infoX, qrY + 108);
+      ctx.fillText('停止コード: UNREGISTERED_OBSERVER_BEHIND_HOST', infoX, qrY + 148);
+    } else if (stage === 3) {
+      // ---------------------------------------------------------------- RUPTURE: THE UI IS PULLED APART
+      // The interface is no longer a screen: it is a sheet that has been torn. Five wide
+      // service bands hold what is left of the stop screen, each one slid a few pixels out
+      // of register, and everything right of the tear simply is not there.
+      const bandCount = 6;
+      const bandSnips = [
+        '問題が発生したため、PC を再起動する必要があります。',
+        'エラー情報を収集しています。対象は応答しません。',
+        '99% 完了  :(',
+        '0x000000F4  CRITICAL_PROCESS_DIED',
+        '瞬きは記録されました。視線は固定されました。',
+        '停止コード: MOTOR_CORTEX_UNMOUNTED',
+      ];
+      for (let b = 0; b < bandCount; b++) {
+        const y0 = 60 + b * 152;
+        const shear = -10 - b * 4.5;
+        const slide = b % 2 === 0 ? -14 - b * 9 : 22 + b * 6;
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(-40 + slide, y0);
+        ctx.lineTo(1246, y0 + shear);
+        ctx.lineTo(1246, y0 + shear + 104);
+        ctx.lineTo(-40 + slide, y0 + 118);
+        ctx.closePath();
+        ctx.clip();
+        ctx.fillStyle = b % 2 === 0 ? 'rgba(0, 60, 132, 0.55)' : 'rgba(0, 34, 82, 0.72)';
+        ctx.fillRect(-60, y0 - 30, 1360, 170);
+        ctx.fillStyle = 'rgba(226, 246, 255, 0.34)';
+        ctx.font = `300 38px ${b === 3 ? mono : fontStack}`;
+        ctx.fillText(bandSnips[b], -30 + slide, y0 + 72 + shear * 0.3);
+        ctx.fillStyle = 'rgba(140, 210, 255, 0.14)';
+        ctx.fillRect(-60, y0 + 112, 1360, 2);
+        ctx.restore();
       }
 
-      // Target reticle & vector callout on the looming anomaly behind the chair
-      const tx = bx + 14 + 0.59 * (bw - 28);
-      const ty = by + 44 + 0.20 * 258;
-      ctx.strokeStyle = 'rgba(255, 98, 128, 0.82)';
-      ctx.lineWidth = 1.6;
-      ctx.strokeRect(tx - 34, ty - 28, 68, 64);
+      // The entire right of the interface has been pulled away.
+      ctx.fillStyle = '#00050e';
       ctx.beginPath();
-      ctx.moveTo(bx + 228, by + 168);
-      ctx.lineTo(tx - 34, ty + 18);
+      ctx.moveTo(1212, 0);
+      ctx.lineTo(W, 0);
+      ctx.lineTo(W, H);
+      ctx.lineTo(986, H);
+      ctx.lineTo(1256, 676);
+      ctx.closePath();
+      ctx.fill();
+
+      // The bare edge where the sheet was torn: one hot hairline, one cold bleed.
+      ctx.strokeStyle = 'rgba(150, 226, 255, 0.66)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(1212, 0);
+      ctx.lineTo(1256, 676);
+      ctx.lineTo(986, H);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(120, 190, 255, 0.16)';
+      ctx.lineWidth = 22;
       ctx.stroke();
 
-      ctx.fillStyle = 'rgba(4, 14, 30, 0.84)';
-      ctx.fillRect(bx + 12, by + 300, bw - 24, 58);
-      ctx.fillStyle = '#8fd4ff';
-      ctx.font = '600 17px Consolas, "Yu Gothic UI", monospace';
-      ctx.fillText('HOST_SEATED : Z=0.58m  HR=132bpm', bx + 20, by + 322);
-      ctx.fillStyle = '#ff7b96';
-      ctx.fillText('ANOMALY_01  : Z=0.96m [椅子の背後 0.38m]', bx + 20, by + 347);
-      ctx.restore();
-    } else if (stage === 3) {
-      ctx.fillText('脊髄運動路 (C3-C5) をアンマウントしました。離席要求は拒否されました。', leftX, 492);
-      ctx.fillText('表示データが自己複製しています。画面から目を離さないでください。', leftX, 558);
-      ctx.fillText('運動権委譲: 完了', leftX, 668);
-
-      // Cascading corrupted Windows Kernel Exception Dialog Boxes!
+      // A last address, printed huge and almost invisible on the dark side.
       ctx.save();
-      for (let d = 0; d < 3; d++) {
-        const dx = 1170 + d * 42;
-        const dy = 116 + d * 54;
-        const dw = 610;
-        const dh = 232;
-        ctx.fillStyle = 'rgba(6, 18, 40, 0.90)';
-        ctx.fillRect(dx + 8, dy + 8, dw, dh);
-        ctx.fillStyle = '#e9f2fb';
-        ctx.fillRect(dx, dy, dw, dh);
-        ctx.fillStyle = d === 2 ? '#8c0d29' : '#004e98';
-        ctx.fillRect(dx, dy, dw, 40);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = `600 20px Consolas, ${fontStack}`;
-        ctx.fillText('wininit.exe - 運動神経の強制切断 (0xC0000247)', dx + 16, dy + 27);
-
-        ctx.fillStyle = '#0e1726';
-        ctx.font = `400 21px ${fontStack}`;
-        ctx.fillText('指および頸椎の制御権を SMILE_ENTITY.SYS へ移行します。', dx + 24, dy + 88);
-        ctx.fillText('あなたが今クリックしているのは自分の意志ですか？', dx + 24, dy + 124);
-
-        // Two identical inescapable buttons: [ 委譲する ]  [ 委譲する ]
-        for (let b = 0; b < 2; b++) {
-          const bx = dx + 260 + b * 162;
-          const by = dy + 164;
-          ctx.strokeStyle = '#004e98';
-          ctx.lineWidth = 2;
-          ctx.strokeRect(bx, by, 144, 42);
-          ctx.fillStyle = '#0e1726';
-          ctx.font = `600 20px ${fontStack}`;
-          ctx.fillText('委譲する(Y)', bx + 18, by + 28);
-        }
-      }
+      ctx.translate(1188, 902);
+      ctx.rotate(-0.09);
+      ctx.fillStyle = 'rgba(176, 224, 255, 0.13)';
+      ctx.font = `200 190px ${mono}`;
+      ctx.fillText('0x000000F4', 0, 0);
       ctx.restore();
+
+      ctx.fillStyle = 'rgba(255, 104, 134, 0.60)';
+      ctx.font = `300 21px ${mono}`;
+      ctx.fillText('TRANSFER 99.4%  //  HOST RESPONSE: NONE', 60, 1014);
+      ctx.fillStyle = 'rgba(190, 232, 255, 0.34)';
+      ctx.fillText(':( — 0x0078D7 — :( — 0x0078D7 — :( — 0x0078D7 — :( — 0x0078D7 — :(', 60, 1050);
+
     } else {
-      // Stage 4 & 5: Cold Clinical Host Sensory Unmount Autopsy + Ghostly Vertical ':)' Columns!
+      // ---------------------------------------------------------------- THROUGH THE WOUND
+      // Almost nothing is left: a dead panel, a faint lattice of addresses clinging to the
+      // edges, and the wound itself — everything the shader needs to build a mouth out of.
+      ctx.fillStyle = '#00050d';
+      ctx.fillRect(0, 0, W, H);
+
+      // Cold signal glow rising from the wound in the lower left.
+      const portal = ctx.createRadialGradient(W * 0.46, H * 0.52, 20, W * 0.46, H * 0.52, H * 1.25);
+      portal.addColorStop(0, 'rgba(70, 150, 235, 0.13)');
+      portal.addColorStop(0.30, 'rgba(10, 44, 96, 0.10)');
+      portal.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = portal;
+      ctx.fillRect(0, 0, W, H);
+
+      // Type clings to the perimeter, dimming toward the centre so the mouth owns the frame.
       ctx.save();
-      ctx.font = '300 28px Consolas, monospace';
-      for (let colIdx = 0; colIdx < 16; colIdx++) {
-        ctx.fillStyle = colIdx % 4 === 0 ? 'rgba(255, 90, 122, 0.20)' : 'rgba(185, 228, 255, 0.10)';
-        for (let r = 0; r < 14; r++) {
-          ctx.fillText((colIdx + r) % 3 === 0 ? ':)' : ':(', 86 + colIdx * 122, 64 + r * 74);
+      ctx.font = `300 24px ${mono}`;
+      for (let c = 0; c < 26; c++) {
+        const cx = 20 + c * 80;
+        for (let r = 0; r < 17; r++) {
+          const cy = 66 + r * 52;
+          const nx = cx / W - 0.5;
+          const ny = cy / H - 0.5;
+          const edge = Math.min(1.0, Math.sqrt(nx * nx + ny * ny) * 2.3);
+          const a = 0.015 + edge * edge * 0.085 * (0.5 + 0.5 * Math.sin(c * 1.7 + r * 2.3 + stage));
+          if (a < 0.006) continue;
+          ctx.fillStyle = `rgba(150, 212, 255, ${a.toFixed(3)})`;
+          const tokens = [':', '(', '0x', 'F4', '99', 'D7'];
+          ctx.fillText(tokens[(c * 3 + r) % tokens.length] + (((c * 941 + r * 337) % 4096) >>> 0).toString(16), cx, cy);
         }
       }
-
-      // Clinical black diagnostic overlay frame on right side (avoids clogging center mouth at (0.48, 0.48)!)
-      const px = 1180;
-      const py = 128;
-      const pw = 690;
-      const ph = 430;
-      ctx.fillStyle = 'rgba(4, 10, 24, 0.86)';
-      ctx.fillRect(px, py, pw, ph);
-      ctx.strokeStyle = 'rgba(255, 92, 124, 0.72)';
-      ctx.lineWidth = 2.5;
-      ctx.strokeRect(px, py, pw, ph);
-
-      ctx.fillStyle = '#ff6b88';
-      ctx.font = `700 24px Consolas, ${fontStack}`;
-      ctx.fillText(
-        stage >= 5
-          ? 'OPTIC_CHIASM_BREACH // 意識領域の転送を実行中'
-          : 'HOST_SENSORY_TABLE // 生体デバイス切り離し状況',
-        px + 24,
-        py + 44
-      );
-
-      const rows = [
-        ['BLINK_REFLEX (瞬き反射)', 'UNMOUNTED'],
-        ['VOCAL_CORD_MOTOR (声帯)', 'UNMOUNTED'],
-        ['CERVICAL_SPINE (頸椎回旋)', 'LOCKED_0DEG'],
-        ['DISPLAY_STATE (表示異常)', stage >= 5 ? 'TRANSFERRING' : 'DESYNCED'],
-        ['CONSCIOUSNESS_DEST', 'RING0://0x0078D7'],
-      ];
-      ctx.font = `400 22px Consolas, ${fontStack}`;
-      rows.forEach(([k, v], idx) => {
-        const ry = py + 106 + idx * 60;
-        ctx.fillStyle = 'rgba(214, 236, 255, 0.88)';
-        ctx.fillText(k, px + 24, ry);
-        ctx.fillStyle = idx >= 3 ? '#ff6b88' : '#8ad4ff';
-        ctx.fillText(`[ ${v} ]`, px + 418, ry);
-      });
       ctx.restore();
+
+      // Hairline frame of a window that no longer has anything to draw.
+      ctx.strokeStyle = 'rgba(120, 200, 255, 0.16)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(24, 24, W - 48, H - 48);
+      ctx.fillStyle = 'rgba(255, 96, 128, 0.42)';
+      ctx.font = `300 20px ${mono}`;
+      ctx.fillText('DISPLAY_BUFFER: EMPTY  //  CONSCIOUSNESS: 99.4% TRANSFERRED', 56, H - 62);
+      ctx.fillStyle = 'rgba(150, 210, 255, 0.22)';
+      ctx.font = `300 20px ${mono}`;
+      ctx.fillText('ADDRESS 0x0078D7 UNMAPPED — DO NOT RESUME', 56, H - 32);
     }
 
-    // Authentic QR Code + Support / Stop Code section at bottom
-    const qrY = 738;
-    const qrSize = 178;
-    this.drawQrCode(ctx, leftX, qrY, qrSize, stage);
-
-    const infoX = leftX + qrSize + 38;
-    ctx.fillStyle = '#ffffff';
-    ctx.font = `300 25px ${fontStack}`;
-    ctx.fillText(
-      stage < 3
-        ? 'この問題と可能な解決方法の詳細については、https://www.windows.com/stopcode を参照してください'
-        : '視覚野ダンプの転送先アドレス: dump://0x0078d7/optic_chiasm — 切断は許可されていません',
-      infoX,
-      qrY + 38
-    );
-
-    ctx.font = `300 22px ${fontStack}`;
-    ctx.fillText(
-      stage < 2
-        ? 'サポート担当者に連絡する場合は、次の情報を伝えてください:'
-        : '生体テレメトリは次の停止コードへバインドされました:',
-      infoX,
-      qrY + 108
-    );
-
-    const stopCodes = [
-      'CRITICAL_PROCESS_DIED',
-      'OPTIC_NERVE_PAGE_FAULT',
-      'UNREGISTERED_OBSERVER_BEHIND_HOST',
-      'MOTOR_CORTEX_UNMOUNTED',
-      'DISPLAY_GLYPH_CORRUPTION',
-      'CONSCIOUSNESS_TRANSFER_COMMIT',
-    ];
-    const code = stopCodes[Math.min(stage, stopCodes.length - 1)];
-    ctx.fillText(`停止コード: ${code}`, infoX, qrY + 148);
-
+    finishPanel();
     return finalizeTex();
   }
 
   /** Returns all pre-baked textures so WebGLRenderer can upload them upfront during loading! */
   public getAllTextures(): THREE.Texture[] {
-    return [...this.stageTextures, this.aftermathTex, this.faceTex, this.cardTex];
+    return [...this.stageTextures, this.aftermathTex, this.faceTex, this.cardTex, this.glyphTex];
   }
 
   /** Enables all sub-groups for 1 offscreen warmup frame so every VAO & shader compiles at boot! */
@@ -2987,6 +3200,19 @@ export class BsodScreen {
     u.uAftermath.value = state.aftermath ? 1.0 : 0.0;
     u.uColonDotOff.value = this.colonDotOff;
 
+    // Interface peel: strips of the panel lift away, and the type physically leaves the glass.
+    const peelAmt = state.aftermath
+      ? 0
+      : THREE.MathUtils.clamp(
+          THREE.MathUtils.smoothstep(state.madness, 0.40, 0.95) + state.suctionProgress * 0.85,
+          0,
+          1
+        );
+    u.uPeel.value = peelAmt;
+    this.peelMat.uniforms.uTime.value = elapsed;
+    this.peelMat.uniforms.uPeel.value = peelAmt;
+    this.peelMesh.visible = peelAmt > 0.008 && !this.insideTunnelMode;
+
     // Monitor light intensifies dynamically during escalation
     if (state.aftermath) {
       this.monitorLight.color.setHex(0x1358a8);
@@ -2997,8 +3223,14 @@ export class BsodScreen {
           ? Math.sin(elapsed * 47.0) * 0.45 * state.madness + clickPulse * 2.4
           : Math.sin(elapsed * 3.2) * 0.03;
       this.monitorLight.color.setHex(0x0078d7);
-      this.monitorLight.intensity = Math.max(0.45, 2.35 + state.madness * 4.4 + flicker);
-      this.monitorLight.distance = 6.5 + state.madness * 5.2;
+      // Tight falloff: the panel lights the desk and the face, and nothing else. A monitor
+      // cannot illuminate a whole room, and pretending it can is what made the shots read flat.
+      // A 27-inch panel is a lamp for the desk, not for the room: keep its throw short
+      // and weak enough that the desk lamp still owns the walls.
+      // The further the wound opens, the *less* light the panel emits: the glass is dying.
+      this.monitorLight.intensity = Math.max(0.08, 0.30 - state.madness * 0.16 + flicker * 0.05);
+      this.monitorLight.distance = 2.4 + state.madness * 0.6;
+      this.monitorLight.decay = 2.4;
     }
 
     // 100% GPU-driven 3D Parasyte rig, tunnel & glass shard uniform updates (ZERO CPU matrix loops!)

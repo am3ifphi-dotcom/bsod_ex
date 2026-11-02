@@ -8,7 +8,7 @@ import { ConsoleUI } from './ui/ConsoleUI';
 import { PostFX } from './post/PostFX';
 import { tunnelHandoff } from './utils/TunnelHandoff';
 
-type GlitchKind = 'bend' | 'tear' | 'mash' | 'sort' | 'roll' | 'ghost';
+type GlitchKind = 'bend' | 'tear' | 'mash' | 'sort' | 'roll' | 'ghost' | 'shatter';
 
 interface GlitchEvent {
   kind: GlitchKind;
@@ -437,15 +437,12 @@ class BsodExperienceApp {
 
       if (this.paused) return;
 
-      if (e.code === 'KeyC' && this.phase === 'ROAM_GLITCH') {
+      if (e.code === 'KeyC' && (this.phase === 'ROAM_GLITCH' || this.phase === 'GLITCH_ARRIVAL_CUTSCENE')) {
         e.preventDefault();
         this.player.clearKeys();
         this.audio.playOneShot('ui_hover', { volume: 0.45, rate: 1.15 });
-        const distCore = Math.hypot(
-          this.player.position.x - this.glitchWorld.corePosition.x,
-          this.player.position.z - this.glitchWorld.corePosition.z
-        );
-        this.consoleUI.open(this.glitchWorld.coreSecretRevealed, distCore);
+        // The shell answers the host from anywhere on the surface: no pilgrimage required.
+        this.consoleUI.open(this.glitchWorld.coreSecretRevealed, 0);
         return;
       }
 
@@ -898,6 +895,22 @@ class BsodExperienceApp {
           reverb: 0.55,
         });
         break;
+      case 'shatter':
+        // Glass under load: the high tick of an LCD giving, not a jump-scare.
+        this.audio.playOneShot('glitch_slice', {
+          volume: 0.12 + lvl * 0.20,
+          rate: 0.68 + Math.random() * 0.14,
+          duration: 0.55,
+          releaseSec: 0.25,
+          reverb: 0.48,
+        });
+        this.audio.playOneShot('monitor_glitch', {
+          volume: 0.08 + lvl * 0.12,
+          rate: 0.82,
+          duration: 0.6,
+          releaseSec: 0.3,
+        });
+        break;
     }
   }
 
@@ -910,8 +923,8 @@ class BsodExperienceApp {
     const pool: GlitchKind[] = options?.tearOnly
       ? ['tear', 'tear', 'bend']
       : in3dWorld
-        ? ['bend', 'tear', 'sort', 'roll', 'ghost', 'tear', 'bend']
-        : ['bend', 'tear', 'mash', 'sort', 'roll', 'ghost', 'tear', 'mash'];
+        ? ['bend', 'tear', 'sort', 'roll', 'ghost', 'shatter', 'tear', 'bend', 'shatter']
+        : ['bend', 'tear', 'mash', 'sort', 'roll', 'ghost', 'shatter', 'tear', 'mash'];
     const kind = pool[Math.floor(Math.random() * pool.length)];
     const durations: Record<GlitchKind, [number, number]> = {
       bend: [0.8, 1.15],
@@ -920,6 +933,7 @@ class BsodExperienceApp {
       sort: [0.45, 0.8],
       roll: [0.5, 0.85],
       ghost: [0.9, 1.5],
+      shatter: [0.22, 0.46],
     };
     const [d0, d1] = durations[kind];
     this.triggerGlitch(kind, peak, d0 + Math.random() * (d1 - d0));
@@ -1537,6 +1551,7 @@ class BsodExperienceApp {
     let sortAmt = 0.0;
     let rollAmt = 0.0;
     let ghostAmt = 0.0;
+    let shatterAmt = 0.0;
     let newestBend = -1;
     for (const ev of this.glitchEvents) {
       const p = THREE.MathUtils.clamp(ev.age / ev.dur, 0, 1);
@@ -1566,6 +1581,9 @@ class BsodExperienceApp {
         case 'ghost':
           ghostAmt = Math.max(ghostAmt, v);
           break;
+        case 'shatter':
+          shatterAmt = Math.max(shatterAmt, v);
+          break;
       }
     }
 
@@ -1579,17 +1597,30 @@ class BsodExperienceApp {
 
     let sharpenAmt = 0.34;
 
+    // --- Two photographic stocks, one camera.
+    // 0 = the bedroom (sodium practicals, moonlight in the toe, 800 ISO grain)
+    // 1 = the signal world (crushed ink, cyan body, magenta shoulder, heavier grain)
+    let gradeAmt = 0;
+    let grainAmt = 0.085;
+    let streakAmt = 0.10;
+    let barrelAmt = 0.018;
+
     if (this.phase === 'ROAM_BEDROOM' || this.phase === 'AFTERMATH_ROAM' || this.phase === 'TITLE') {
-      vigAmt = 0.32;
-      bloomAmt = 0.56;
+      vigAmt = 0.42;
+      bloomAmt = 0.34;
       sharpenAmt = 0.38;
+      grainAmt = 0.075;
+      streakAmt = 0.09;
     } else if (this.phase === 'INSPECT_PC') {
       chromaAmt = Math.max(chromaAmt, this.madness * 0.22);
-      vigAmt = 0.34 + this.madness * 0.24;
+      vigAmt = 0.42 + this.madness * 0.26;
       warpAmt = Math.max(0, (this.madness - 0.55) * 0.28);
       horrorAmt = Math.max(horrorAmt, this.madness * 0.45);
-      bloomAmt = 0.60 + this.madness * 0.55;
+      bloomAmt = 0.20 + this.madness * 0.16;
       sharpenAmt = 0.36;
+      grainAmt = 0.08 + this.madness * 0.10;
+      // The lens starts drifting toward the signal world as the panel takes over.
+      gradeAmt = THREE.MathUtils.smoothstep(this.madness, 0.35, 0.95) * 0.35;
     } else if (this.phase === 'SUCTION_CUTSCENE') {
       const tunnelRush = THREE.MathUtils.smoothstep(this.suctionTimer, 2.1, 6.2);
       const handoffClean = 1.0 - THREE.MathUtils.smoothstep(this.suctionTimer, 5.4, 7.1);
@@ -1602,6 +1633,9 @@ class BsodExperienceApp {
       ghostAmt = Math.max(ghostAmt, tunnelRush * 0.12 * handoffClean);
       bloomAmt = 0.78 + tunnelRush * 0.28;
       sharpenAmt = 0.18;
+      gradeAmt = 0.35 + tunnelRush * 0.65;
+      grainAmt = 0.13;
+      barrelAmt = 0.035;
     } else if (this.phase === 'GLITCH_ARRIVAL_CUTSCENE') {
       // Continue the visual treatment from the overlapping tunnel shot into the flight.
       const diveFrac = THREE.MathUtils.clamp(1.0 - this.glitchArrivalTimer / 4.30, 0, 1);
@@ -1611,6 +1645,10 @@ class BsodExperienceApp {
       warpAmt = diveFrac * 0.38;
       bloomAmt = 0.84 + diveFrac * 0.22;
       sharpenAmt = 0.32;
+      gradeAmt = 1;
+      grainAmt = 0.11;
+      streakAmt = 0.26;
+      barrelAmt = 0.04;
     } else if (this.phase === 'ROAM_GLITCH') {
       // Full-screen razor-sharp view across the entire 3D world (zero mosaic filter!)
       distortAmt = Math.max(distortAmt, this.glitchWorld.anomalyIntensity * 0.65);
@@ -1620,6 +1658,10 @@ class BsodExperienceApp {
       horrorAmt = Math.max(horrorAmt, this.glitchWorld.anomalyIntensity * 0.28);
       bloomAmt = 0.84 + this.glitchWorld.anomalyIntensity * 0.42;
       sharpenAmt = 0.34;
+      gradeAmt = 1;
+      grainAmt = 0.10;
+      streakAmt = 0.22 + this.glitchWorld.anomalyIntensity * 0.18;
+      barrelAmt = 0.026;
     } else if (this.phase === 'COLLAPSE_CUTSCENE') {
       const fallFactor = THREE.MathUtils.clamp((this.collapseTimer - 3.8) / 4.8, 0, 1);
       distortAmt = Math.max(distortAmt, 0.24 + fallFactor * 0.38);
@@ -1631,6 +1673,10 @@ class BsodExperienceApp {
       ghostAmt = Math.max(ghostAmt, fallFactor * 0.12);
       bloomAmt = 0.82 + fallFactor * 0.34;
       sharpenAmt = 0.24;
+      gradeAmt = 1;
+      grainAmt = 0.14;
+      streakAmt = 0.30;
+      barrelAmt = 0.03 + fallFactor * 0.05;
     }
 
     this.postFX.render(this.renderer, this.getActiveScene(), this.camera, this.elapsed, {
@@ -1646,8 +1692,13 @@ class BsodExperienceApp {
       sort: sortAmt,
       roll: rollAmt,
       ghost: ghostAmt,
+      shatter: shatterAmt,
       bloom: this.autoBloomEnabled ? bloomAmt : 0,
       sharpen: sharpenAmt,
+      grain: grainAmt,
+      streak: streakAmt,
+      grade: gradeAmt,
+      barrel: barrelAmt,
       transition: this.phase === 'SUCTION_CUTSCENE' && this.suctionTimer > this.suctionDuration - this.handoffDuration
         ? {
             scene: this.glitchWorld.scene,
@@ -2091,10 +2142,10 @@ class BsodExperienceApp {
           this.opticStrain = 0;
           this.periodicWarpCooldown = 6.5;
           this.crosshairEl.classList.remove('hidden');
-          this.setObjective('光の柱を目指す');
-          this.worldHintEl.textContent = '[C] コンソール';
+          this.setObjective('[C] カーネルシェルを開く');
+          this.worldHintEl.textContent = '[C] CONSOLE  [SPACE] JUMP';
           this.worldHintEl.classList.remove('hidden');
-          this.showSubtitle('橋の向こうに、光が見える。', 5200);
+          this.showSubtitle('どこにいても、シェルは応答する。', 5200);
         }
         break;
       }
@@ -2173,9 +2224,9 @@ class BsodExperienceApp {
 
         if (!wasRevealed && this.glitchWorld.coreSecretRevealed) {
           this.audio.playOneShot('ghost_cantata', { volume: 0.48, reverb: 0.55 });
-          this.setObjective('[C] コンソールで命令を実行する');
-          this.worldHintEl.textContent = '[C] コンソール';
-          this.showSubtitle('命令が読める。コンソールに入力しよう。', 5200);
+          this.setObjective('[C] 命令語を入力する');
+          this.worldHintEl.textContent = '[C] CONSOLE';
+          this.showSubtitle('碑板が、7 文字を返した。', 5200);
         }
 
         const nearCoreFactor = THREE.MathUtils.clamp(1 - distCore / 50, 0, 1);
@@ -2334,6 +2385,11 @@ class BsodExperienceApp {
 }
 
 const app = new BsodExperienceApp();
+if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) {
+  // Dev-only handles so tooling can inspect and drive the experience without touching gameplay.
+  (window as unknown as { __bsod?: BsodExperienceApp; __THREE?: typeof THREE }).__bsod = app;
+  (window as unknown as { __bsod?: BsodExperienceApp; __THREE?: typeof THREE }).__THREE = THREE;
+}
 app.init().catch((err) => {
   console.error('Initialization failed:', err);
   const st = document.getElementById('loading-status');

@@ -239,8 +239,9 @@ console.log('Digital face, toothless suction and zero-recompile stencil toggle v
 
 // Does the body canvas carry the expected cerulean fill?
 const ctx2 = body.getContext('2d');
-const img2 = ctx2.getImageData(4, 4, 1, 1).data;
-console.log('\nbody corner pixel RGBA =', [...img2]);
-if (img2[2] < 150 || img2[3] < 250) {
-  throw new Error(`Unexpected body corner pixel RGBA: ${[...img2].join(',')}`);
+// The panel is vignetted by design, so probe the open field right of the stop-code block.
+const probe = ctx2.getImageData(Math.floor(body.width * 0.88), Math.floor(body.height * 0.32), 1, 1).data;
+console.log('\nbody field pixel RGBA =', [...probe]);
+if (probe[2] < 140 || probe[3] < 250 || probe[0] > 90) {
+  throw new Error(`Unexpected body field pixel RGBA: ${[...probe].join(',')}`);
 }
