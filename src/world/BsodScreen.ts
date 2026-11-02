@@ -744,6 +744,15 @@ export class BsodScreen {
           return smoothstep(0.508, 0.492, val);
         }
 
+        // Parenthesis-only ink (green channel). flip=1 mirrors the mouth around its own
+        // centre, turning '(' into ')' for the one-frame stage-0 smile.
+        float mouthInkAt(vec2 puv, float flip) {
+          if (puv.x < 0.015 || puv.x > 0.985 || puv.y < 0.015 || puv.y > 0.985) return 0.0;
+          vec2 q = mix(puv, vec2(2.0 * uParenC.x - puv.x, puv.y), flip);
+          float val = texture2D(uFaceTex, q).g;
+          return smoothstep(0.508, 0.492, val);
+        }
+
         void main() {
           vec2 uv = vUv;
           float aspect = 1.90566;
@@ -839,18 +848,26 @@ export class BsodScreen {
             cos(uTime * 0.77 + 0.4) * 0.4 + cos(uTime * 0.41 + 2.1) * 0.3
           ) * uMadness * 0.05 + tremor;
 
+          // Stage-0 betrayal: after a few idle seconds the face FLIPS to a smile for a frame.
+          float betray = step(2.6, uTime) * (1.0 - smoothstep(0.04, 0.08, uMadness))
+                       * step(0.965 - 0.02 * uHover, hash11(floor(uTime * 14.0) * 5.77));
+
           // Colon dots track the cursor slightly (it notices you)
           vec2 cursorPull = clamp((uCursorUv - faceC) * vec2(aspect, 1.0), vec2(-0.30, -0.30), vec2(0.30, 0.30)) * 0.045 * (uHover * 0.5 + uMadness);
 
           float sep = uMadness * 0.030 + uClickPulse * 0.055;
-          vec2 puvMain = vec2(0.5) + fLocal + drift;
-          vec2 puvCy = vec2(0.5) + fLocal + drift + vec2(sep, 0.0);
-          vec2 puvMg = vec2(0.5) + fLocal + drift - vec2(sep, 0.0);
+          vec2 puvMain = vec2(0.5) + fLocal + drift + cursorPull;
+          vec2 puvCy = vec2(0.5) + fLocal + drift + cursorPull + vec2(sep, 0.0);
+          vec2 puvMg = vec2(0.5) + fLocal + drift + cursorPull - vec2(sep, 0.0);
           // Ghost copy: an echo at a fixed offset that grows with madness
           float ghostW = smoothstep(0.20, 0.55, uMadness);
           vec2 puvGhost = vec2(0.5) + fLocal + vec2((hash11(colIdx) - 0.5) * 0.16 * uMadness, -0.10 * uMadness) + vec2(0.0, -0.02);
 
           float inkMain = faceInkAt(puvMain);
+          // The one-frame stage-0 smile: swap the mouth for its mirror ('(' -> ')').
+          float mouthN = mouthInkAt(puvMain, 0.0);
+          float mouthS = mouthInkAt(puvMain, 1.0);
+          inkMain = mix(inkMain, inkMain - mouthN + mouthS, betray);
           float inkCy = faceInkAt(puvCy) * smoothstep(0.06, 0.30, uMadness + uClickPulse);
           float inkMg = faceInkAt(puvMg) * smoothstep(0.06, 0.30, uMadness + uClickPulse);
           float inkGhost = faceInkAt(puvGhost) * ghostW;
