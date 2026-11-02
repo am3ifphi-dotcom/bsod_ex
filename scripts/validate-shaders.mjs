@@ -5,11 +5,20 @@ const files = process.argv.slice(2);
 let failed = 0;
 for (const f of files) {
   const src = fs.readFileSync(f, 'utf8');
+
+  // Shared GLSL helper blocks (e.g. `const HASH = \`...\``) may be interpolated
+  // into several shaders. Resolve them before compiling so the linter validates
+  // exactly the source the GPU will see.
+  const helpers = new Map();
+  const helperRe = /const\s+(\w+)\s*=\s*`([\s\S]*?)`;/g;
+  let h;
+  while ((h = helperRe.exec(src))) helpers.set(h[1], h[2]);
+
   const re = /\/\* glsl \*\/ `([\s\S]*?)`/g;
   let m, i = 0;
   while ((m = re.exec(src))) {
     i++;
-    let body = m[1];
+    let body = m[1].replace(/\$\{(\w+)\}/g, (_all, name) => helpers.get(name) ?? '');
     // three.js chunk-injected variants (`#include <...>`) can't be validated standalone.
     if (/#include\s*</.test(body)) continue;
     // three.js injects `transformed` via its morph/skinning chunks in onBeforeCompile variants.

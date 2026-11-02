@@ -49,7 +49,20 @@ w.buildAtmosphericDepth();
 w.buildCausewayDetailAndMonoliths();
 w.buildHostEffigyAndPhantoms();
 w.buildCollapseAndAbyss(tex, tex);
+w.buildOmissionArchitecture();
 console.log('all builders OK, group children =', w.group.children.length);
+
+// The new silhouette: cancelled cathedrals, omission field, page strata,
+// data veins and the glyph storm that REPLACED the explanatory signboards.
+for (const name of [
+  'OmissionArchitecture', 'SeveredCathedrals', 'SeveredTraces',
+  'OmissionField', 'MemoryPageStrata', 'VeinTerminusParticles', 'GlyphStorm',
+]) {
+  if (!w.group.getObjectByName(name)) throw new Error(`Missing omission structure: ${name}`);
+}
+const signCount = w.group.children.filter((o: any) => /DiagnosticLectern|LogSign/i.test(o.name || '')).length;
+if (signCount > 0) throw new Error('Old explanatory signboards are still in the world.');
+console.log('omission architecture present, signboards retired');
 
 // exercise the update loop, including anomaly bursts and collapse
 const pos = new THREE.Vector3(0, 5, 20);

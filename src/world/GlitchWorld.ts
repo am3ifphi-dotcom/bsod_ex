@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { toFastLambert } from './BedroomScene';
 import { getSharedNoiseTexture } from '../utils/ProceduralNoise';
+import { OmissionArchitecture } from './OmissionArchitecture';
 
 const FLOATING_SHARD_COUNT = 120;
 const ABYSS_DEBRIS_COUNT = 96;
@@ -56,6 +57,9 @@ export class GlitchWorld {
   public readonly spawnPosition = new THREE.Vector3(0, 0, 20);
   public readonly skyPortalPos = new THREE.Vector3(0, 46, 86);
   public readonly skyPortalQuat = new THREE.Quaternion();
+
+  /** "Existence cancelled mid-draw" megastructures, omission field, page strata, glyph storm. */
+  private readonly omission = new OmissionArchitecture();
 
   private skySleeveMesh!: THREE.Mesh;
   private skySleeveBackCap!: THREE.Mesh;
@@ -261,7 +265,9 @@ export class GlitchWorld {
     // 3. Central Sanctuary (Colossal Cray-1 Supercomputer + Server Obelisks + WAKE_UP Secret)
     this.buildCentralSanctuary(crayGltf.scene, rackGltf.scene, cablesGltf.scene);
 
-    // 4. World Landmarks (Server Megaliths, Floating CRT Monitors, Giant Motherboards, Diegetic Clue Terminals)
+    // 4. World Landmarks (Server Megaliths, Floating CRT Monitors, Giant Motherboards)
+    //    The two "explanation placards" that used to stand here are gone: world
+    //    information now drifts through the glyph storm instead of being posted.
     this.buildWorldLandmarks(rackGltf.scene, crtGltf.scene, moboGltf.scene, cablesGltf.scene);
 
     // 5. Floating UI Fragments & Rising Digital Ash
@@ -279,6 +285,17 @@ export class GlitchWorld {
 
     // 6. Act 4 True Voronoi Jigsaw Fracture & 245m Abyssal Freefall Shaft
     this.buildCollapseAndAbyss(concreteDiff, concreteDisp);
+
+    // 7. The world's new silhouette: buildings whose rendering was cancelled
+    //    halfway, an omission field, stacked stop-screen pages, data veins and
+    //    a storm of glyph fragments. Replaces the old explanatory signboards.
+    this.buildOmissionArchitecture();
+  }
+
+  /** Callable independently by the headless smoke test. */
+  private buildOmissionArchitecture(): void {
+    this.omission.build((x, z) => this.getTerrainHeight(x, z));
+    if (!this.omission.group.parent) this.group.add(this.omission.group);
   }
 
   private buildSkyAndLighting(): void {
@@ -2556,18 +2573,21 @@ export class GlitchWorld {
     pctx.lineWidth = 6;
     pctx.strokeRect(8, 8, 1008, 368);
 
+    // A register, not an instruction placard. The player already knows the
+    // directive; standing here only confirms that the machine wrote it six times.
     pctx.fillStyle = '#82cdff';
     pctx.font = '25px Consolas, monospace';
     pctx.fillText('KERNEL_CORE_REGISTER // 0x0078D7 [HOST_SESSION: 02:47]', 44, 66);
 
     pctx.fillStyle = '#ffffff';
     pctx.font = 'bold 54px Consolas, monospace';
-    pctx.fillText('EMERGENCY INTERRUPT : WAKE_UP', 44, 166);
+    pctx.fillText('WRITE_COUNT : 6', 44, 166);
 
     pctx.fillStyle = '#d4ecff';
-    pctx.font = '28px "Segoe UI", "Yu Gothic UI", sans-serif';
-    pctx.fillText('[ C ] でカーネルコンソールを開き WAKE_UP を実行せよ。', 44, 254);
-    pctx.fillText('※ 意識が完全にダンプ固定される前に強制割り込みをかけろ', 44, 304);
+    pctx.font = '26px Consolas, monospace';
+    pctx.fillText('LAST_WRITE  : 02:47:19', 44, 254);
+    pctx.fillText('DIRECTIVE   : WAKE_UP [NOT GATED]', 44, 304);
+    pctx.fillText('1 HANDLE STILL OPEN', 44, 350);
 
     const plaqueTex = new THREE.CanvasTexture(plaqueCanvas);
     plaqueTex.colorSpace = THREE.SRGBColorSpace;
@@ -2809,21 +2829,6 @@ export class GlitchWorld {
     // 5. East (+18.5, -8) & West (-18.5, -28) Sculpted Wing Reliquary Pavilions + Jumpable Stepped Vantage Terraces!
     this.buildWingPavilionAndJumpTerraces();
 
-    this.createDiegeticLogSign(
-      new THREE.Vector3(-2.8, this.getTerrainHeight(-2.8, 9) + 1.45, 9),
-      0.38,
-      'MEMORY_0247.DMP // 意識隔離領域',
-      'あなたの身体はまだ部屋の椅子に座ったまま、顎に咥えられています。',
-      '視線を動かすと変質する石碑や影を抜け、最奥の中央聖域核を目指せ。'
-    );
-
-    this.createDiegeticLogSign(
-      new THREE.Vector3(3.1, this.getTerrainHeight(3.1, -18) + 1.45, -18),
-      -0.38,
-      'OPTIC_HAZARD // 天球の紅い凝視と跳躍段丘',
-      '空の瞳が紅く脈動する間は直視せず、大聖堂アーチの影へ退避せよ。',
-      '東西の支道には [ SPACE ] 跳躍で登れる記憶観測段丘が存在する。'
-    );
   }
 
   /**
@@ -2910,78 +2915,6 @@ export class GlitchWorld {
     }
     stepMesh.instanceMatrix.needsUpdate = true;
     this.group.add(stepMesh);
-  }
-
-  private createDiegeticLogSign(
-    pos: THREE.Vector3,
-    rotY: number,
-    header: string,
-    line1: string,
-    line2: string
-  ): void {
-    const c = document.createElement('canvas');
-    c.width = 768;
-    c.height = 280;
-    const ctx = c.getContext('2d')!;
-    ctx.fillStyle = 'rgba(2, 22, 54, 0.94)';
-    ctx.fillRect(0, 0, 768, 280);
-    ctx.fillStyle = 'rgba(24, 118, 220, 0.28)';
-    ctx.fillRect(10, 10, 748, 56);
-    ctx.strokeStyle = 'rgba(130, 212, 255, 0.92)';
-    ctx.lineWidth = 4;
-    ctx.strokeRect(8, 8, 752, 264);
-
-    ctx.fillStyle = '#8ad4ff';
-    ctx.font = 'bold 22px Consolas, monospace';
-    ctx.fillText(header, 32, 46);
-
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '24px "Segoe UI", "Yu Gothic UI", sans-serif';
-    ctx.fillText(line1, 32, 136);
-    ctx.fillText(line2, 32, 188);
-
-    ctx.fillStyle = 'rgba(122, 200, 255, 0.65)';
-    ctx.font = '16px Consolas, monospace';
-    ctx.fillText('STATUS: DIAGNOSTIC_TERMINAL_ONLINE // [0x0078D7]', 32, 246);
-
-    const tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
-
-    // Sculpted Brutalist Obsidian Diagnostic Lectern (replaces thin 5cm stick post!)
-    const consoleGroup = new THREE.Group();
-    consoleGroup.position.set(pos.x, pos.y - 1.45, pos.z);
-    consoleGroup.rotation.y = rotY;
-
-    const obsidianMat = new THREE.MeshLambertMaterial({
-      color: 0x050e22,
-      emissive: 0x041d42,
-      emissiveIntensity: 0.65,
-    });
-    const trimMat = new THREE.MeshBasicMaterial({ color: 0x5cc2ff });
-
-    const plinth = new THREE.Mesh(this.makeChamferedColumnGeometry(8, 0.35, 2), obsidianMat);
-    plinth.position.set(0, 0.68, -0.08);
-    plinth.scale.set(0.88, 1.36, 0.56);
-    consoleGroup.add(plinth);
-
-    const baseGlow = new THREE.Mesh(new THREE.BoxGeometry(1.04, 0.05, 0.72), trimMat);
-    baseGlow.position.set(0, 0.03, -0.08);
-    consoleGroup.add(baseGlow);
-
-    const hood = new THREE.Mesh(new THREE.BoxGeometry(2.08, 0.84, 0.14), obsidianMat);
-    hood.position.set(0, 1.42, 0.02);
-    hood.rotation.x = -0.24;
-    consoleGroup.add(hood);
-
-    const sign = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.94, 0.71),
-      new THREE.MeshBasicMaterial({ map: tex })
-    );
-    sign.position.set(0, 1.42, 0.095);
-    sign.rotation.x = -0.24;
-    consoleGroup.add(sign);
-
-    this.group.add(consoleGroup);
   }
 
   private buildFloatingAtmosphere(): void {
@@ -4664,6 +4597,12 @@ export class GlitchWorld {
   /** Enables deferred collapse geometry for 1 offscreen warmup frame at boot so collapse never stutters! */
   public setWarmupVisibility(active: boolean): void {
     this.collapseGroup.visible = active;
+    this.omission.setWarmupVisibility(active);
+  }
+
+  /** Extra canvases that should be uploaded to the GPU before the first frame. */
+  public getExtraTextures(): THREE.Texture[] {
+    return this.omission.getAllTextures();
   }
 
   public startCollapseAt(playerPos: THREE.Vector3): void {
@@ -4809,6 +4748,9 @@ export class GlitchWorld {
       this.phantomMat.uniforms.uAnomaly.value = this.anomalyIntensity;
       this.phantomMat.uniforms.uPlayerPos.value.copy(playerPos);
     }
+
+    // 2b. Omission architecture: all time/anomaly uniforms in one pass.
+    this.omission.update(elapsed, this.anomalyIntensity, playerPos);
 
     // 3. 100% GPU Floating BSOD Shards (0.0ms CPU!)
     this.floatingShardMat.uniforms.uTime.value = elapsed;

@@ -7,9 +7,15 @@
     "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 0.0.0.0 --port 5173",
-    "check:shaders": "node scripts/validate-shaders.mjs src/post/PostFX.ts src/world/BsodScreen.ts src/world/BedroomScene.ts src/world/GlitchWorld.ts",
-    "verify": "npm run check:shaders && npm run build",
-    "test:canvas": "tsx scripts/inspect-bsod-canvas.mts"
+    "check:shaders": "node scripts/validate-shaders.mjs src/post/PostFX.ts src/world/BsodScreen.ts src/world/BedroomScene.ts src/world/GlitchWorld.ts src/world/OmissionArchitecture.ts",
+    "verify": "npm run check:shaders && npm run build && npm test",
+    "test": "npm run test:canvas && npm run test:bedroom && npm run test:world && npm run test:console && npm run test:arrival && npm run test:handoff",
+    "test:canvas": "tsx scripts/inspect-bsod-canvas.mts",
+    "test:bedroom": "tsx scripts/smoke-bedroom.mts",
+    "test:world": "tsx scripts/smoke-world.mts",
+    "test:console": "tsx scripts/test-console.mts",
+    "test:arrival": "tsx scripts/test-arrival-clearance.mts",
+    "test:handoff": "tsx scripts/test-handoff.mts"
   },
   "dependencies": {
     "three": "^0.186.1"

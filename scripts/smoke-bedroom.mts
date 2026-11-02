@@ -33,16 +33,14 @@ function fakeScene(matName: string): any {
   );
   mesh.name = 'BSOD_SCREEN_NODE';
   g.add(mesh);
-  const wall = new THREE.Mesh(
+  g.add(new THREE.Mesh(
     new THREE.BoxGeometry(2, 2, 2),
     new THREE.MeshStandardMaterial({ name: 'Walls', color: 0x555555 })
-  );
-  g.add(wall);
-  const floor = new THREE.Mesh(
+  ));
+  g.add(new THREE.Mesh(
     new THREE.BoxGeometry(2, 2, 2),
     new THREE.MeshStandardMaterial({ name: 'Floor', color: 0x444444 })
-  );
-  g.add(floor);
+  ));
   return { scene: g };
 }
 
@@ -61,9 +59,9 @@ bedroom.group.traverse((o: any) => {
 });
 console.log('meshes:', meshes, '| instanced:', instanced);
 
-// Verify 3D Parasyte BSOD anatomy: cleanly hidden at Stage 0, active during madness, hidden in aftermath!
+const bsod: any = bedroom.bsodScreen;
 bedroom.setAftermathMode(false);
-bedroom.bsodScreen.update(1 / 60, 0, {
+bsod.update(1 / 60, 0, {
   hoverFace: false,
   cursorUv: new THREE.Vector2(0.5, 0.5),
   clickCount: 0,
@@ -72,57 +70,51 @@ bedroom.bsodScreen.update(1 / 60, 0, {
   suctionProgress: 0,
   aftermath: false,
 }, 0);
-if (bedroom.bsodScreen.parasyteGroup.visible !== false) {
-  throw new Error('parasyteGroup must be hidden at clean Stage-0 BSOD!');
+if (bsod.parasyteGroup.visible || bsod.throatTeeth.visible || bsod.throatGroup.visible) {
+  throw new Error('Stage 0 must be a perfectly still, undecorated stop screen.');
 }
 
-// exercise the runtime updates across a full escalation + aftermath
+// Drive a full timeline: six near-identical stages -> transfer -> aftermath.
 const camFwd = new THREE.Vector3(-0.9, -0.1, -0.4).normalize();
 let scrollPhase = 0;
-for (let i = 0; i < 300; i++) {
+for (let i = 0; i < 360; i++) {
   scrollPhase += (1 / 60) * 18.0;
-  bedroom.bsodScreen.update(
+  const stage = Math.min(5, Math.floor(i / 55));
+  const suction = Math.max(0, (i - 290) / 70);
+  bsod.update(
     1 / 60,
     i / 60,
     {
       hoverFace: true,
-      cursorUv: new THREE.Vector2(0.3, 0.6),
-      clickCount: Math.min(6, Math.floor(i / 40)),
-      madness: Math.min(1, i / 200),
-      jawOpen: Math.min(1, i / 220),
-      suctionProgress: Math.max(0, (i - 200) / 100),
+      cursorUv: new THREE.Vector2(0.144, 0.742),
+      clickCount: stage,
+      madness: stage / 12,
+      jawOpen: stage >= 5 ? 1 : 0,
+      suctionProgress: suction,
       aftermath: false,
     },
-    0.4,
+    0.2,
     scrollPhase
   );
-  if (bedroom.bsodScreen.parasyteGroup.visible || bedroom.bsodScreen.throatTeeth.visible) {
-    throw new Error('Anatomical meshes must remain hidden during digital face escalation and suction.');
+  if (bsod.parasyteGroup.visible || bsod.throatTeeth.visible) {
+    throw new Error('Anatomical meshes must never be displayed.');
   }
-  if (i === 120 && bedroom.bsodScreen.throatGroup.visible) {
-    throw new Error('The tunnel must not replace the digital face during inspection.');
+  if (suction < 0.02 && bsod.throatGroup.visible) {
+    throw new Error('The page conduit must not open during inspection.');
   }
-  if (i === 250 && !bedroom.bsodScreen.throatGroup.visible) {
-    throw new Error('The digital tunnel must open during suction.');
+  if (suction > 0.1 && !bsod.throatGroup.visible) {
+    throw new Error('The page conduit must open during the transfer.');
   }
-  bedroom.update(1 / 60, i / 60, Math.min(1, i / 200), Math.min(0.5, i / 400), false, new THREE.Vector3(0.35, 0.017, 0.62), camFwd);
+  // The room no longer peels apart into a vortex of shards, at any intensity.
+  bedroom.update(1 / 60, i / 60, Math.min(1, i / 260), 0.3, false, new THREE.Vector3(0.35, 0.017, 0.62), camFwd);
+  if (bedroom.peelShards.visible) {
+    throw new Error('Walls must stay intact — the room is a display surface, not torn wallpaper.');
+  }
 }
-const bsodAny = bedroom.bsodScreen as any;
-if (
-  bsodAny.rimTeethMesh.count !== 52 ||
-  bsodAny.jawFlapsMesh.count !== 4 ||
-  Boolean(bsodAny.tongueMesh) ||
-  bsodAny.sinewMesh.count !== 32 ||
-  bsodAny.parasyteEyesMesh.count !== 11
-) {
-  throw new Error('Unexpected 3D Parasyte BSOD mesh counts!');
-}
-// Verify realistic rain materials + bedroom view-dependent anomalies + jumpable bed height!
-if (!bedroom.rainGlassMat || !bedroom.skylightRainMat || !bedroom.rainStreakMat || !bedroom.rainSplashMat || !bedroom.floorCausticMat) {
-  throw new Error('Missing realistic bedroom rain shader materials!');
-}
-if (!bedroom.lenticularMat || !bedroom.mirrorAnomalyMat) {
-  throw new Error('Missing bedroom view-dependent shader materials!');
+
+// Bedroom detail systems still intact.
+for (const key of ['rainGlassMat', 'skylightRainMat', 'rainStreakMat', 'rainSplashMat', 'floorCausticMat', 'lenticularMat', 'mirrorAnomalyMat']) {
+  if (!bedroom[key]) throw new Error(`Missing bedroom detail material: ${key}`);
 }
 if (bedroom.getFloorHeight(0.35, 0.62, 0.017) > 0.05) {
   throw new Error('Unexpected spawn floor height in bedroom!');
@@ -130,8 +122,9 @@ if (bedroom.getFloorHeight(0.35, 0.62, 0.017) > 0.05) {
 if (bedroom.getFloorHeight(-0.45, -1.35, 0.60) < 0.50) {
   throw new Error('Bed platform should be jumpable when player is airborne above bed height!');
 }
+
 bedroom.setAftermathMode(true);
-bedroom.bsodScreen.update(1 / 60, 5, {
+bsod.update(1 / 60, 6, {
   hoverFace: false,
   cursorUv: new THREE.Vector2(0.5, 0.5),
   clickCount: 0,
@@ -140,21 +133,19 @@ bedroom.bsodScreen.update(1 / 60, 5, {
   suctionProgress: 0,
   aftermath: true,
 }, 0);
-if (bsodAny.parasyteGroup.visible !== false) {
-  throw new Error('parasyteGroup must be hidden in aftermath!');
+if (bsod.parasyteGroup.visible || bsod.throatGroup.visible || bsod.throatTeeth.visible) {
+  throw new Error('The aftermath panel must be dark and still.');
 }
-bedroom.update(1 / 60, 5, 0, 0, true, new THREE.Vector3(1.2, 0.017, -1.0));
+bedroom.update(1 / 60, 6, 0, 0, true, new THREE.Vector3(1.2, 0.017, -1.0));
 
-// floor surface lookup + collision sanity
 const p = new THREE.Vector3(0.35, 0.017, 0.62);
 bedroom.resolvePlayerCollision(p, 0.26);
 console.log('surface at spawn:', bedroom.getFloorSurface(0.35, 0.62), '| resolved pos:', p.toArray().map((n: number) => +n.toFixed(2)));
 
-// no NaN in any transform
 let bad = 0;
 bedroom.group.traverse((o: any) => {
   const e = o.matrixWorld.elements;
   for (let i = 0; i < e.length; i++) if (!Number.isFinite(e[i])) bad++;
 });
-console.log('non-finite matrix values:', bad);
-console.log('SMOKE TEST PASSED');
+if (bad > 0) throw new Error(`${bad} non-finite matrix values in bedroom.`);
+console.log('BEDROOM SMOKE TEST PASSED — still screen, intact room, no anatomy.');

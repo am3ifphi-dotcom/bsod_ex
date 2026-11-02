@@ -1617,36 +1617,29 @@ export class BedroomScene {
             gl_FragColor.rgb += vec3(0.05, 0.26, 0.62) * vBsodMonGlint;
 
             if (uInfect > 0.002) {
-              vec4 nFine = texture2D(uNoiseTex, vec2(uAxis * 1.45, wp.y * 1.45 + wp.z * 0.35));
+              // THE ROOM WAS A DISPLAY SURFACE ALL ALONG.
+              // No veins, no eyes, no peeling wallpaper, no vortex of debris.
+              // The room keeps its own photograph and simply acquires the panel's
+              // raster: thin horizontal rules, one slipped row, a blue rise from
+              // the floor. That is far more unsettling than a wall growing teeth.
               float dMon = distance(wp, uPortalPos);
-              vec3 q = floor(wp * 12.0);
-              float cellHash = fract(sin(dot(q, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
-              float waveRadius = uInfect * 6.8;
-              float front = waveRadius - dMon + (nCoarse.r - 0.5) * 0.95;
+              float front = uInfect * 7.4 - dMon + (nCoarse.r - 0.5) * 0.6;
+              float reveal = smoothstep(-1.2, 0.5, front) * smoothstep(0.02, 0.34, uInfect);
 
-              float veinFront = smoothstep(-1.35, 0.15, front) * smoothstep(0.02, 0.18, uInfect);
-              float veinLine = smoothstep(0.085, 0.0, nFine.a) * veinFront;
-              gl_FragColor.rgb += vec3(0.18, 0.72, 1.0) * veinLine * (0.65 + 0.55 * sin(uTime * 10.0 - dMon * 4.0));
+              float raster = 0.5 + 0.5 * sin(wp.y * 205.0 - uTime * 1.4);
+              float rowHash = fract(sin(floor(wp.y * 26.0) * 12.9898 + floor(uTime * 2.0) * 7.13) * 43758.5453);
+              float rowSlip = step(0.982, rowHash);
+              float blueRise = smoothstep(2.3, 0.0, wp.y) * reveal;
 
-              float mask = smoothstep(-0.16, 0.22, front) * smoothstep(0.02, 0.25, uInfect);
-              float edgeBand = smoothstep(0.30, 0.0, abs(front)) * step(0.03, uInfect);
-
-              vec3 gridF = abs(fract(wp * 6.0) - 0.5);
-              float gridLine = step(0.46, max(gridF.x, max(gridF.y, gridF.z)));
-              float scanPulse = 0.86 + 0.14 * sin(wp.y * 42.0 - uTime * 16.0);
-              vec3 bsodCol = vec3(0.0, 0.175, 0.60) * scanPulse;
-
-              vec2 wallCell = fract(vec2(uAxis, wp.y) * 2.4) - 0.5;
-              float blink = step(0.12, fract(uTime * 0.65 + cellHash * 7.3));
-              float wEyeL = smoothstep(0.08, 0.035, length(wallCell - vec2(-0.12, 0.06)));
-              float wEyeR = smoothstep(0.08, 0.035, length(wallCell - vec2(0.12, 0.06)));
-              float wallEyes = (wEyeL + wEyeR) * step(0.76, cellHash) * blink * smoothstep(0.32, 0.72, uInfect);
-
-              bsodCol = mix(bsodCol, vec3(0.85, 0.95, 1.0), gridLine * 0.55 + step(0.94, cellHash) * 0.4);
-              bsodCol += vec3(1.0, 0.22, 0.30) * wallEyes * 1.35;
-
-              gl_FragColor.rgb = mix(gl_FragColor.rgb, bsodCol, mask * 0.95);
-              gl_FragColor.rgb += vec3(0.44, 0.82, 1.0) * edgeBand * 0.92;
+              vec3 displayBlue = vec3(0.0, 0.29, 0.76);
+              gl_FragColor.rgb = mix(
+                gl_FragColor.rgb,
+                gl_FragColor.rgb * 0.58 + displayBlue * 0.42,
+                reveal * 0.62
+              );
+              gl_FragColor.rgb *= 1.0 - raster * 0.085 * reveal;
+              gl_FragColor.rgb += vec3(0.30, 0.72, 1.0) * rowSlip * reveal * 0.14;
+              gl_FragColor.rgb += vec3(0.02, 0.10, 0.26) * blueRise * 0.35;
             }
           }
           `
@@ -1763,9 +1756,9 @@ export class BedroomScene {
       this.deskLampLight.intensity = 0.06;
       this.deskLampBulbMat.color.setHex(0x28221e);
       this.hemiLight.intensity = 0.56;
-      // Bedside digital clock occasionally twitches from 02:48 to '  :)'!
-      const smileClock = Math.sin(elapsed * 1.37) > 0.96;
-      this.updateClockDisplay(smileClock ? '  :)' : '02:48', true);
+      // The clock sometimes simply drops a digit. No winking, no smiley.
+      const digitDrop = Math.sin(elapsed * 0.71) > 0.985;
+      this.updateClockDisplay(digitDrop ? '02:4 ' : '02:48', true);
       if (this.officeChair) {
         // Uncanny aftermath detail: the empty office chair slowly swivels on its own to keep facing you!
         if (playerPos) {
@@ -1798,12 +1791,8 @@ export class BedroomScene {
       }
     }
 
-    const showPeel = infectLevel > 0.21;
-    this.peelShards.visible = showPeel;
-    if (showPeel) {
-      this.peelShardMat.uniforms.uTime.value = elapsed;
-      this.peelShardMat.uniforms.uInfect.value = infectLevel;
-      this.peelShardMat.uniforms.uPull.value = pullLevel;
-    }
+    // Retired: walls being physically torn into a vortex of shards read as cheap
+    // CGI. The room stays intact — it was the screen all along.
+    this.peelShards.visible = false;
   }
 }

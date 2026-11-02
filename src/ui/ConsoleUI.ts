@@ -1,5 +1,21 @@
 import { AudioManager } from '../audio/AudioManager';
 
+/**
+ * ============================================================================
+ *  KERNEL RECOVERY CONSOLE — available from the very first frame of the world
+ * ============================================================================
+ *
+ *  Old design gated WAKE_UP behind a physical trip to the central tower: the
+ *  command was literally refused with "信号が不完全です。光の柱に近づいてください"
+ *  until a proximity flag flipped. That is a fetch quest, not horror.
+ *
+ *  New design: the directive is printed in the boot banner, before the player
+ *  has taken a single step. Everything is executable from anywhere. The tower
+ *  is now optional context — reaching it adds one extra archive line, never
+ *  permission. The tension moves from "what do I type?" to "do I really want
+ *  to type the thing I already know?"
+ * ============================================================================
+ */
 export class ConsoleUI {
   private readonly modalEl: HTMLElement;
   private readonly logEl: HTMLElement;
@@ -10,7 +26,7 @@ export class ConsoleUI {
   public isOpen = false;
   private locked = false;
   private wrongAttemptCount = 0;
-  private coreUnlocked = false;
+  private coreVisited = false;
   private coreDistanceM = 76;
   private hijackTimeout: number | null = null;
   private successTimeouts: number[] = [];
@@ -35,9 +51,7 @@ export class ConsoleUI {
     });
 
     this.modalEl.addEventListener('mousedown', (e) => {
-      if (e.target === this.modalEl && !this.locked) {
-        this.close(true);
-      }
+      if (e.target === this.modalEl && !this.locked) this.close(true);
     });
 
     this.inputEl.addEventListener('keydown', (e) => {
@@ -61,9 +75,7 @@ export class ConsoleUI {
         this.audio.playKeystroke();
         return;
       }
-      if (e.key.length === 1 || e.key === 'Backspace') {
-        this.audio.playKeystroke();
-      }
+      if (e.key.length === 1 || e.key === 'Backspace') this.audio.playKeystroke();
     });
 
     this.formEl.addEventListener('submit', (e) => {
@@ -75,16 +87,17 @@ export class ConsoleUI {
     });
   }
 
-  public setWorldState(coreRevealed: boolean, distToCore: number): void {
-    this.coreUnlocked = coreRevealed;
+  /** distToCore is informational only. coreVisited unlocks *lore*, never commands. */
+  public setWorldState(distToCore: number, coreVisited = false): void {
     this.coreDistanceM = distToCore;
+    this.coreVisited = coreVisited;
   }
 
   public reset(): void {
     this.locked = false;
     this.isOpen = false;
     this.wrongAttemptCount = 0;
-    this.coreUnlocked = false;
+    this.coreVisited = false;
     this.cmdHistory.length = 0;
     this.historyIdx = -1;
     this.successTimeouts.forEach((id) => window.clearTimeout(id));
@@ -103,9 +116,10 @@ export class ConsoleUI {
 
   private printBootBanner(): void {
     this.appendLine('Microsoft(R) Kernel Crash Dump Shell [Version 10.0.19045.78D7]', 'dim');
-    this.appendLine('ACTIVE DUMP   : C:\\Windows\\MEMORY_0247.DMP  //  HOST_VITALS: 152 BPM (MOTOR_LOCKED)', 'warn');
-    this.appendLine('PARASYTE_HOOK : SMILE_ENTITY.SYS -> OPTIC_CHIASM_RING0 [ACTIVE]', 'err');
-    this.appendLine('診断: STATUS / HELP でダンプ状態を確認、または中央聖堂で特定した緊急割り込み命令を実行してください。', 'dim');
+    this.appendLine('ACTIVE DUMP  : C:\\Windows\\MEMORY_0247.DMP  //  HOST_VITALS: 152 BPM', 'warn');
+    this.appendLine('DIRECTIVE    : WAKE_UP  [AVAILABLE — ANY NODE, ANY DEPTH]', 'ok');
+    this.appendLine('NOTICE       : 実行後、このダンプは閉じられます。', 'dim');
+    this.appendLine('STATUS / HELP / LOOK / DUMP で状態を確認できます。入力はどこからでも有効です。', 'dim');
   }
 
   private appendLine(text: string, cls: '' | 'dim' | 'err' | 'warn' | 'ok' = ''): void {
@@ -116,9 +130,8 @@ export class ConsoleUI {
     this.logEl.scrollTop = this.logEl.scrollHeight;
   }
 
-  public open(coreRevealed?: boolean, distToCore?: number): void {
+  public open(distToCore?: number): void {
     if (this.isOpen || this.locked) return;
-    if (typeof coreRevealed === 'boolean') this.coreUnlocked = coreRevealed;
     if (typeof distToCore === 'number') this.coreDistanceM = distToCore;
 
     this.isOpen = true;
@@ -127,45 +140,31 @@ export class ConsoleUI {
     this.inputEl.disabled = false;
     this.inputEl.value = '';
 
-    if (document.pointerLockElement) {
-      document.exitPointerLock();
+    if (document.pointerLockElement) document.exitPointerLock();
+
+    this.appendLine(
+      `[NODE: ${Math.max(1, Math.round(this.coreDistanceM))}m FROM ORIGIN] リンク確立 — 全コマンドがこの端末で有効です。`,
+      'dim'
+    );
+    if (this.coreVisited && !this.logEl.textContent?.includes('ARCHIVE_FRAGMENT')) {
+      this.appendLine('[ARCHIVE_FRAGMENT] 演算核に到達済み: このダンプは 02:47 に 1 回だけ書き込まれた。', 'ok');
     }
 
-    if (this.coreUnlocked) {
-      this.appendLine('[SANCTUARY_LINK: SYNCED] 中央聖堂の碑板と同期完了 — 緊急割り込み命令を入力可能。', 'ok');
-    } else {
-      this.appendLine(
-        `[CORE_SIGNAL: ${Math.max(1, Math.round(this.coreDistanceM))}m] 中央の光の柱（聖堂コア）へ近づくと、散乱した命令語が収束します。`,
-        'dim'
-      );
-    }
-
-    this.audio.playOneShot('glitch_slice', { volume: 0.26, rate: 0.88, reverb: 0.45 });
-    this.audio.playOneShot('monitor_glitch', {
-      volume: 0.16,
-      rate: 0.7,
-      duration: 0.7,
-      releaseSec: 0.3,
-    });
-
-    requestAnimationFrame(() => {
-      this.inputEl.focus();
-    });
+    this.audio.playOneShot('glitch_slice', { volume: 0.20, rate: 0.88, reverb: 0.45 });
+    requestAnimationFrame(() => this.inputEl.focus());
   }
 
   public close(notifyController: boolean): void {
     if (!this.isOpen) return;
     this.isOpen = false;
     this.inputEl.blur();
-    this.audio.playOneShot('ui_hover', { volume: 0.22, rate: 0.8 });
+    this.audio.playOneShot('ui_hover', { volume: 0.18, rate: 0.8 });
     this.modalEl.classList.add('hidden');
     this.modalEl.setAttribute('aria-hidden', 'true');
-    if (notifyController) {
-      this.onCloseRequest?.();
-    }
+    if (notifyController) this.onCloseRequest?.();
   }
 
-  private scheduleParasyteHijack(msg: string): void {
+  private scheduleMachineNote(msg: string): void {
     if (this.hijackTimeout !== null) window.clearTimeout(this.hijackTimeout);
     this.hijackTimeout = window.setTimeout(() => {
       if (this.locked) return;
@@ -177,41 +176,32 @@ export class ConsoleUI {
   private handleCommand(raw: string): void {
     if (!raw) {
       this.appendLine('DUMP:\\CORE> _', 'dim');
-      this.appendLine('[WARN] 命令語が入力されていません。空の天球の瞳がこちらを覗き込んでいます。', 'warn');
       return;
     }
 
     this.cmdHistory.push(raw);
     this.historyIdx = this.cmdHistory.length;
-
     this.appendLine(`DUMP:\\CORE> ${raw}`);
     const normalized = raw.toUpperCase().replace(/\s+/g, '_');
 
     if (normalized === 'WAKE_UP') {
-      if (!this.coreUnlocked) {
-        this.appendLine('[ACCESS DENIED] 信号が不完全です。光の柱に近づいてください。', 'warn');
-        this.audio.playOneShot('console_error', { volume: 0.4 });
-        return;
-      }
+      // NO GATE. No distance check, no "signal incomplete", no fetch quest.
       this.locked = true;
       this.inputEl.disabled = true;
-      this.appendLine('[CRITICAL INTERRUPT ACCEPTED] DIRECTIVE "WAKE_UP" VERIFIED!', 'ok');
-      this.audio.playOneShot('reality_rift', { volume: 0.75, reverb: 0.45 });
+      this.appendLine('[CRITICAL INTERRUPT ACCEPTED] DIRECTIVE "WAKE_UP" VERIFIED', 'ok');
+      this.audio.playOneShot('reality_rift', { volume: 0.58, reverb: 0.5 });
 
       this.successTimeouts.push(window.setTimeout(() => {
-        this.appendLine('[SMILE_ENTITY.SYS]: 待テ……画面ノ外ニ出ルナ！！', 'err');
-        this.audio.playKeystroke();
-      }, 150));
-
+        this.appendLine('[0x0078D7 -> 0x000000] UNMOUNTING DISPLAY_BUFFER ... SEVERED', 'ok');
+      }, 180));
       this.successTimeouts.push(window.setTimeout(() => {
-        this.appendLine('[0x0078D7 -> 0x000000] UNMOUNTING PARASYTE_CHIASM_HOOK ... SEVERED', 'ok');
-        this.appendLine('[WARNING] VIRTUAL CORTEX INTEGRITY 0% — SHATTERING DUMP SECTOR!', 'warn');
-      }, 330));
-
+        this.appendLine('[NOTICE] 1 HANDLE STILL OPEN', 'warn');
+        this.appendLine('[WARNING] DUMP SECTOR INTEGRITY 0% — SHATTERING', 'err');
+      }, 360));
       this.successTimeouts.push(window.setTimeout(() => {
         this.close(false);
         this.onWakeUpCommand?.();
-      }, 560));
+      }, 620));
       return;
     }
 
@@ -223,93 +213,103 @@ export class ConsoleUI {
 
     if (normalized === 'HELP' || normalized === '?') {
       this.audio.playKeystroke();
-      this.appendLine('利用可能な診断コマンド: STATUS, PS, WHOAMI, DIR, DUMP, CLEAR, REBOOT', 'dim');
-      this.appendLine(
-        this.coreUnlocked
-          ? '※ 中央聖堂の上空に収束した7文字の強制覚醒命令をそのまま入力してください。'
-          : `※ 光の柱が立つ中央聖堂（残り約 ${Math.max(1, Math.round(this.coreDistanceM))}m）へ向かうと、覚醒命令が判明します。`,
-        'warn'
-      );
+      this.appendLine('COMMANDS: STATUS, LOOK, SIGNAL, DUMP, PS, DIR, WHOAMI, CLEAR, WAKE_UP', 'dim');
+      this.appendLine('WAKE_UP は位置に関係なく実行できます。探索は任意です。', 'ok');
+      return;
+    }
+
+    if (normalized === 'LOOK' || normalized === 'WHERE' || normalized === 'SCAN') {
+      this.appendLine(`ORIGIN_VECTOR : ${Math.max(1, Math.round(this.coreDistanceM))}m — 演算核は参照点にすぎません`, 'dim');
+      this.appendLine('GEOMETRY     : 未描画の大聖堂 / 無限ページ層 / 欠落フィールド / データ血管', 'dim');
+      this.appendLine('OMISSION     : 12.4% の構造がこのフレームに存在しません', 'warn');
+      return;
+    }
+
+    if (normalized === 'SIGNAL' || normalized === 'TRACE' || normalized === 'PING') {
+      this.appendLine('0xFFFFF803_0078D700 : 3A 29 20 49 54 5F 57 41 53 5F 41 4C 57 41 59 53', 'err');
+      this.appendLine('[decode] ":) IT_WAS_ALWAYS_ON"', 'err');
+      this.appendLine('CARRIER      : 02:47:19 — 送信元はこの端末自身', 'dim');
+      this.scheduleMachineNote('[dump] 送信者と受信者のハンドルが同一です。');
       return;
     }
 
     if (normalized === 'PS' || normalized === 'TASKLIST') {
       this.appendLine('PID 0x0004  SYSTEM_IDLE_ABYSS        CPU: 01.2%', 'dim');
       this.appendLine('PID 0x0247  HOST_CONSCIOUSNESS.EXE   CPU: 12.4% [SWALLOWED]', 'warn');
-      this.appendLine('PID 0x0666  SMILE_ENTITY.SYS         CPU: 86.4% [DIGESTING_MEMORIES]', 'err');
+      this.appendLine('PID 0x0666  DISPLAY_BUFFER.SYS        CPU: 86.4% [WRITING]', 'err');
       return;
     }
 
-    if (normalized === 'DUMP' || normalized === 'MEM' || normalized === 'TRACE') {
-      this.appendLine('0xFFFFF803_0078D700 : 3A 28 20 49 54 5F 48 41 53 5F 54 45 45 54 48  [":( IT_HAS_TEETH"]', 'err');
-      this.appendLine('0xFFFFF803_0078D710 : CORE_SANCTUARY_COORDS = (0.0, -56.0)', 'dim');
+    if (normalized === 'DUMP' || normalized === 'MEM') {
+      this.appendLine('0xFFFFF803_0078D700 : 3A 28 20 49 54 5F 48 41 53 5F 54 45 45 54 48', 'err');
+      this.appendLine('0xFFFFF803_0078D710 : WRITE_COUNT = 6  /  LAST_WRITE = 02:47:19', 'dim');
+      this.appendLine('0xFFFFF803_0078D718 : WAKE_UP [RING0 / NOT GATED]', 'ok');
       return;
     }
 
     if (normalized === 'STATUS') {
-      this.appendLine('HOST_BODY     : 自室のデスクチェアで硬直中（午前 02:47 停止）', 'warn');
-      this.appendLine('DIGESTION     : 99.4% — 意識データが青い深淵に溶けかけています', 'err');
+      this.appendLine('HOST_BODY     : 自室のデスクチェアで硬直中（02:47 停止）', 'warn');
+      this.appendLine('DIGESTION     : 99.4% — 「99% 完了」はまだ完了していません', 'err');
+      this.appendLine('DIRECTIVE     : WAKE_UP [AVAILABLE — ANY NODE]', 'ok');
       this.appendLine(
-        this.coreUnlocked
-          ? 'SANCTUARY_KEY : 収束完了！ 中央のプレートに浮かぶ命令語を入力してください。'
-          : `CORE_DISTANCE : 中央聖堂まで約 ${Math.max(1, Math.round(this.coreDistanceM))}m — 近づくと秘密の命令語が収束します。`,
-        this.coreUnlocked ? 'ok' : 'dim'
+        this.coreVisited
+          ? 'ARCHIVE       : 演算核を確認済み（追加情報あり）'
+          : 'ARCHIVE       : 未確認 — 確認は必須ではありません',
+        'dim'
       );
       return;
     }
 
     if (normalized === 'WHOAMI') {
       this.appendLine('nt authority\\swallowed_observer (PID: 0x0247)', 'warn');
-      this.scheduleParasyteHijack('[SMILE_ENTITY.SYS]: 「お前」はもう半分、この画面の中だ。');
+      this.scheduleMachineNote('[dump] このハンドルは 02:47:19 に開かれ、まだ閉じられていません。');
       return;
     }
 
     if (normalized === 'DIR' || normalized === 'LS') {
       this.appendLine('02/47/2026  <DIR>  BEDROOM_BACKUP.CORRUPT', 'dim');
-      this.appendLine('02/47/2026  <SYS>  SMILE_ENTITY.SYS [JAWS_LOCKED]', 'err');
-      this.appendLine('02/47/2026  <KEY>  CORE_SANCTUARY.WAKE_DIRECTIVE', 'warn');
+      this.appendLine('02/47/2026  <SYS>  DISPLAY_BUFFER.SYS [JAWS_REMOVED]', 'err');
+      this.appendLine('02/47/2026  <KEY>  WAKE_UP.DIRECTIVE  [NO LOCK]', 'ok');
       return;
     }
 
     if (
-      normalized === 'EXIT' ||
-      normalized === 'QUIT' ||
-      normalized === 'REBOOT' ||
-      normalized === 'RESTART' ||
-      normalized === 'SHUTDOWN'
+      normalized === 'EXIT' || normalized === 'QUIT' || normalized === 'REBOOT' ||
+      normalized === 'RESTART' || normalized === 'SHUTDOWN'
     ) {
       this.wrongAttemptCount++;
-      this.audio.playOneShot('console_error', { volume: 0.6 });
+      this.audio.playOneShot('console_error', { volume: 0.48 });
       this.appendLine(
-        `[STOP 0x000000F4] '${raw}' は拒否されました。標準の電源・終了割り込みは表示システムに乗っ取られています。`,
+        `[STOP 0x000000F4] '${raw}' は拒否されました。標準の電源割り込みは表示バッファに吸収されています。`,
         'err'
       );
-      this.scheduleParasyteHijack('[SMILE_ENTITY.SYS]: 再起動？ 何度電源を切っても、黒い画面の奥に私の目が見えるぞ。');
+      this.appendLine('WAKE_UP のみがこのダンプを閉じます。', 'dim');
       this.onWrongCommand?.(raw);
       return;
     }
 
     if (raw === ':(' || raw === ':)') {
-      this.audio.playOneShot('pain_glitch', { volume: 0.55, reverb: 0.4 });
-      this.appendLine(':(  :(  :(  口ノ中デ鳴イテイル  :(  :(  :(', 'err');
+      this.audio.playOneShot('pain_glitch', { volume: 0.34, reverb: 0.4 });
+      this.appendLine('0x3A 0x28  ->  0x3A 0x29   [1 GLYPH REWRITTEN]', 'err');
+      this.appendLine('WRITE_COUNT = 7', 'dim');
       this.onWrongCommand?.(raw);
       return;
     }
 
     this.wrongAttemptCount++;
-    this.audio.playOneShot('console_error', { volume: 0.58 });
-    const eerieErrors = [
-      `[SYNTAX_FAULT] '${raw}' は無効です。空の瞳孔が収縮し、ダンプ領域が軋んでいます。`,
-      `[ACCESS_DENIED] '${raw}' では目を覚ませません。光の柱が立つ中央聖堂の刻印を読み取ってください。`,
-      `[DIGESTION_WARN] 誤入力 '${raw}' が青画面に咀嚼されました。正しい覚醒命令が必要です。`,
+    this.audio.playOneShot('console_error', { volume: 0.46 });
+    const errors = [
+      `[SYNTAX_FAULT] '${raw}' は無効です。ダンプは変更されませんでした。`,
+      `[NO_SUCH_HANDLE] '${raw}' に対応するレコードがありません。`,
+      `[WRITE_PROTECTED] '${raw}' は読み取り専用領域を指しています。`,
     ];
-    this.appendLine(eerieErrors[(this.wrongAttemptCount - 1) % eerieErrors.length], 'err');
-    const taunts = [
-      '[SMILE_ENTITY.SYS]: 指が震えているな。自室の椅子の背もたれに、もう誰か立っているぞ。',
-      '[SMILE_ENTITY.SYS]: 思い出せないのか？ 中央の祭壇の上を見ろ……いや、見るな。',
-      '[SMILE_ENTITY.SYS]: あと少しで 100% 完了だ。お前の名前も記憶も綺麗な青になる。',
+    this.appendLine(errors[(this.wrongAttemptCount - 1) % errors.length], 'err');
+    const notes = [
+      '[dump] このシェルには WAKE_UP 以外に終了手段が登録されていません。',
+      '[dump] 画面はまだ 99% です。',
+      '[dump] 位置情報は権限に影響しません。',
     ];
-    this.scheduleParasyteHijack(taunts[(this.wrongAttemptCount - 1) % taunts.length]);
+    this.scheduleMachineNote(notes[(this.wrongAttemptCount - 1) % notes.length]);
     this.onWrongCommand?.(raw);
   }
 }

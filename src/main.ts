@@ -62,14 +62,21 @@ class BsodExperienceApp {
   private lastDragY = 0;
   private dragTravelPx = 0;
 
-  // Act 2 BSOD & Predatory Suction state
+  // Act 2 — "THE SCREEN DOES NOT BREAK"
+  // contactProgress is a *timeline*, not a click counter. It advances only while the
+  // player is NOT staring at the ':('; stare long enough and it advances anyway.
   private inspectBlend = 0;
   private exitInspectBlend = 0;
-  private clickCount = 0;
+  private clickCount = 0; // authored stage 0..5 fed to BsodScreen
   private inspectClickCooldown = 0;
+  private contactProgress = 0;
+  private gazeHoldTimer = 0;
+  private contactCues: Record<string, boolean> = {};
+  private lastContactStage = 0;
+  private readonly lastCursorPx = new THREE.Vector2();
   private madness = 0;
   private targetMadness = 0;
-  private jawOpen = 0;
+  private jawOpen = 0; // page-stack aperture / blackout
   private jawVel = 0;
   private targetJawOpen = 0;
   private clickPulse = 0;
@@ -78,8 +85,6 @@ class BsodExperienceApp {
   private cursorMonitorUv = new THREE.Vector2(0.5, 0.5);
   private suctionTimer = 0;
   private readonly suctionDuration = 7.2;
-  private suctionWhooshPlayed = false;
-  private suctionBurstMidPlayed = false;
   private suctionCues: Record<string, boolean> = {};
   private aftermath = false;
 
@@ -91,7 +96,6 @@ class BsodExperienceApp {
 
   // Staged glitch-event scheduler: every disturbance is an authored signature with its own sound.
   private glitchEvents: GlitchEvent[] = [];
-  private periodicWarpCooldown = 6.2;
 
   // First inspection staging: the panel re-syncs, the room tone drains, and the glass ticks —
   // no imagery beyond the authentic BSOD and the ':(' it already shows.
@@ -123,8 +127,6 @@ class BsodExperienceApp {
   // Active Sky-Eye Crimson Gaze & Locked-Chair Resistance state (zero per-frame allocations!)
   private opticStrain = 0;
   private gazeWarnCooldown = 0;
-  private chairEscapeCooldown = 0;
-  private creatureTwitchCooldown = 1.8;
   private readonly _camFwd = new THREE.Vector3();
   private readonly _skyEyeDir = new THREE.Vector3(0, 0.25, -0.968).normalize();
 
@@ -258,8 +260,11 @@ class BsodExperienceApp {
     // True 1-frame offscreen GPU warmup for BOTH isolated realms + all deferred cutscene meshes/textures!
     // Uploads every VAO, texture, and exact light-count shader program so transitions have 0.00ms hitch!
     this.loadingStatus.textContent = 'GPUシェーダーとテクスチャを事前転送中... 99%';
-    for (const tex of this.bedroom.bsodScreen.getAllTextures()) {
-      this.renderer.initTexture(tex);
+    for (const tex of [
+      ...this.bedroom.bsodScreen.getAllTextures(),
+      ...this.glitchWorld.getExtraTextures(),
+    ]) {
+      if (tex) this.renderer.initTexture(tex);
     }
 
     this.bedroom.setWarmupVisibility(true);
@@ -427,7 +432,9 @@ class BsodExperienceApp {
 
       if (e.code === 'Escape') {
         e.preventDefault();
-        if (this.phase === 'INSPECT_PC' && this.clickCount < 3 && !this.paused) {
+        // Leaving is always allowed. Being trapped was a cheap trick; being
+        // unable to stop the timeline is the scary part.
+        if (this.phase === 'INSPECT_PC' && !this.paused) {
           this.exitPcInspection();
           return;
         }
@@ -445,7 +452,7 @@ class BsodExperienceApp {
           this.player.position.x - this.glitchWorld.corePosition.x,
           this.player.position.z - this.glitchWorld.corePosition.z
         );
-        this.consoleUI.open(this.glitchWorld.coreSecretRevealed, distCore);
+        this.consoleUI.open(distCore);
         return;
       }
 
@@ -469,11 +476,7 @@ class BsodExperienceApp {
       }
 
       if (e.code === 'KeyQ' && this.phase === 'INSPECT_PC') {
-        if (this.clickCount < 3) {
-          this.exitPcInspection();
-        } else {
-          this.triggerLockedChairWrench();
-        }
+        this.exitPcInspection();
         return;
       }
 
@@ -552,11 +555,7 @@ class BsodExperienceApp {
           this.updatePcCursorRaycast();
         }
         if (e.button === 2) {
-          if (this.clickCount < 3) {
-            this.exitPcInspection();
-          } else {
-            this.triggerLockedChairWrench();
-          }
+          this.exitPcInspection();
           return;
         }
         if (e.button === 0) {
@@ -706,7 +705,7 @@ class BsodExperienceApp {
         return '深夜 02:47 — 自室';
       case 'INSPECT_PC':
       case 'SUCTION_CUTSCENE':
-        return '0x000000F4 — BSOD 侵食中';
+        return '0x000000F4 — 停止画面';
       case 'GLITCH_ARRIVAL_CUTSCENE':
       case 'ROAM_GLITCH':
       case 'COLLAPSE_CUTSCENE':
@@ -740,9 +739,9 @@ class BsodExperienceApp {
   }
 
   /**
-   * First inspection: a composed 4.2s beat where the room tone drains away and the panel
-   * re-syncs with a single vertical roll and a hairline tear. No imagery is added to the
-   * screen — the BSOD and its ':(' must stay perfectly authentic.
+   * First inspection: four seconds in which *nothing happens on the screen*.
+   * Only the room's breath thins out. No roll, no tear, no stinger. The old
+   * version announced the horror with sound design before earning it.
    */
   private stepFirstContact(dt: number): void {
     if (this.firstContactTimer < 0) return;
@@ -755,61 +754,26 @@ class BsodExperienceApp {
       }
     };
 
-    // 0.15s — the room's life drains away, a reverse swell breathes in under everything.
-    cue('swell', 0.15, () => {
+    cue('drain', 0.25, () => {
+      this.audio.startOrUpdateLoop('room_tone', 'room_tone', {
+        volume: 0.055,
+        lowpassHz: 460,
+        fadeSec: 2.0,
+      });
       this.audio.playOneShot('void_swell', {
-        volume: 0.30,
-        rate: 0.82,
-        duration: 2.4,
-        fadeInSec: 0.45,
-        releaseSec: 0.7,
-        reverb: 0.45,
+        volume: 0.16,
+        rate: 0.74,
+        duration: 3.2,
+        fadeInSec: 1.1,
+        releaseSec: 1.2,
+        reverb: 0.5,
       });
+    });
+    cue('settle', 2.9, () => {
       this.audio.startOrUpdateLoop('room_tone', 'room_tone', {
-        volume: 0.05,
-        lowpassHz: 520,
+        volume: 0.11,
+        lowpassHz: 760,
         fadeSec: 1.6,
-      });
-    });
-    // 0.55s — the panel re-syncs: a single vertical roll and a soft panel tick.
-    cue('sync', 0.55, () => {
-      this.audio.playOneShot('monitor_glitch', {
-        volume: 0.24,
-        rate: 0.72,
-        duration: 1.25,
-        releaseSec: 0.5,
-      });
-      this.triggerGlitch('roll', 0.38, 0.85);
-    });
-    // 1.15s — the panel warms under your gaze.
-    cue('face', 1.15, () => {
-      this.audio.playOneShot('glitch_stutter', {
-        volume: 0.28,
-        rate: 0.66,
-        duration: 2.2,
-        fadeInSec: 0.25,
-        releaseSec: 0.8,
-        reverb: 0.6,
-      });
-      this.audio.playOneShot('heartbeat', { volume: 0.30, rate: 0.82 });
-      this.horrorPulse = 0.55;
-    });
-    // 2.15s — a hairline tear runs down the panel.
-    cue('look', 2.15, () => {
-      this.triggerGlitch('tear', 0.46, 0.28);
-      this.audio.playOneShot('glitch_slice', { volume: 0.16, rate: 0.82, reverb: 0.42 });
-    });
-    // 3.05s — the panel settles back into its idle BSOD.
-    cue('sink', 3.05, () => {
-      this.audio.playOneShot('gasp', { volume: 0.20, rate: 0.9, pos: this.behindNeckSoundPos });
-      this.showSubtitle('今、何か動いた？', 4600);
-    });
-    // 3.55s — the room's own life fades back in, as if nothing happened.
-    cue('restore', 3.55, () => {
-      this.audio.startOrUpdateLoop('room_tone', 'room_tone', {
-        volume: 0.14,
-        lowpassHz: 950,
-        fadeSec: 1.4,
       });
     });
 
@@ -935,6 +899,10 @@ class BsodExperienceApp {
     this.aftermath = false;
     this.clickCount = 0;
     this.inspectClickCooldown = 0;
+    this.contactProgress = 0;
+    this.gazeHoldTimer = 0;
+    this.contactCues = {};
+    this.lastContactStage = 0;
     this.madness = 0;
     this.targetMadness = 0;
     this.jawOpen = 0;
@@ -942,20 +910,16 @@ class BsodExperienceApp {
     this.targetJawOpen = 0;
     this.clickPulse = 0;
     this.suctionTimer = 0;
-    this.suctionWhooshPlayed = false;
-    this.suctionBurstMidPlayed = false;
     this.suctionCues = {};
     this.glitchArrivalTimer = 0;
     this.glitchArrivalRollCuePlayed = false;
     this.glitchArrivalLanded = false;
     this.glitchMilestones = {};
     this.glitchEvents.length = 0;
-    this.periodicWarpCooldown = 6.2;
     this.firstContactTimer = -1;
     this.firstContactDone = false;
     this.firstContactCues = {};
     this.heartbeatCooldown = 0.9;
-    this.creatureTwitchCooldown = 1.8;
     this.roomDreadTimer = 4.6;
     this.horrorPulse = 0;
     this.extraGlitchBurst = 0;
@@ -1026,6 +990,7 @@ class BsodExperienceApp {
     this.player.clearKeys();
     this.player.capturePoseForBlend();
     this.player.inspectCursorPx.set(window.innerWidth * 0.52, window.innerHeight * 0.52);
+    this.lastCursorPx.copy(this.player.inspectCursorPx);
 
     this.crosshairEl.classList.add('hidden');
     this.pcCursorEl.classList.remove('hidden');
@@ -1033,14 +998,15 @@ class BsodExperienceApp {
 
     if (this.aftermath) {
       this.audio.playOneShot('dissonance', { volume: 0.18, duration: 2.8, fadeInSec: 0.3, releaseSec: 1.0, reverb: 0.5 });
-      this.showSubtitle('……まだ、見ている。', 4200);
       return;
     }
 
-    if (!this.firstContactDone && this.clickCount === 0) {
+    if (!this.firstContactDone && this.contactProgress === 0) {
       this.firstContactTimer = 0;
       this.firstContactCues = {};
     }
+    // No second subtitle here: the opening line already said it, and silence
+    // is the point. The screen is allowed to speak for itself.
   }
 
   private exitPcInspection(): void {
@@ -1054,34 +1020,25 @@ class BsodExperienceApp {
     this.crosshairEl.classList.remove('hidden');
     this.interactPromptEl.classList.add('hidden');
     this.audio.stopLoop('throat_draft', 0.25);
-  }
-
-  private triggerLockedChairWrench(): void {
-    if (this.chairEscapeCooldown > 0) return;
-    this.chairEscapeCooldown = 1.1;
-    // Brief futile backward neck strain that gets violently yanked right back to the monitor!
-    this.inspectBlend = 0.82;
-    this.clickPulse = Math.max(this.clickPulse, 0.86);
-    this.horrorPulse = Math.max(this.horrorPulse, 0.78);
-    this.triggerGlitch('roll', 0.68, 0.45);
-    this.audio.playOneShot('glitch_stutter', {
-      volume: 0.44,
-      rate: 1.18,
-      duration: 0.7,
-      releaseSec: 0.25,
-      pos: this.behindNeckSoundPos,
+    // The machine keeps its own time while you look away. Leaving never resets it.
+    this.audio.startOrUpdateLoop('room_tone', 'room_tone', {
+      volume: 0.14,
+      lowpassHz: 950,
+      fadeSec: 1.2,
     });
-    this.audio.playOneShot('creak_room', { volume: 0.52, rate: 0.74, pos: this.behindNeckSoundPos });
-    this.showSubtitle('動けない。', 3100);
   }
 
+  /**
+   * Clicks no longer provoke anything. They are acknowledged, briefly "work",
+   * and are then silently overwritten. The old six-click escalation is gone.
+   */
   private handlePcScreenClick(): void {
-    // Let each reaction register before accepting another deliberate touch.
     if (this.inspectBlend < 0.85 || this.inspectClickCooldown > 0) return;
-    this.audio.playOneShot('mouse_click', { volume: 0.5, rate: 0.96 + Math.random() * 0.08 });
+    this.inspectClickCooldown = 0.26;
+    this.audio.playOneShot('mouse_click', { volume: 0.30, rate: 0.96 + Math.random() * 0.06 });
 
     if (this.aftermath) {
-      // Clicking the haunted aftermath monitor violently re-engages PARASYTE_HOOK!
+      // Clicking the dead panel re-mounts the dump and starts the whole loop over.
       this.aftermath = false;
       this.glitchWorld.resetCollapse();
       this.consoleUI.reset();
@@ -1089,191 +1046,80 @@ class BsodExperienceApp {
       this.bedroom.setAftermathMode(false);
       this.aftermathBarEl.classList.add('hidden');
       this.clickCount = 0;
+      this.contactProgress = 0;
+      this.gazeHoldTimer = 0;
+      this.contactCues = {};
+      this.lastContactStage = 0;
+      this.lastCursorPx.copy(this.player.inspectCursorPx);
       this.madness = 0;
       this.targetMadness = 0;
       this.jawOpen = 0;
       this.jawVel = 0;
       this.targetJawOpen = 0;
-      this.extraGlitchBurst = 0.55;
-      this.horrorPulse = 0.42;
-      this.triggerGlitch('tear', 0.72, 0.38);
-      this.audio.playOneShot('glitch_short', { volume: 0.52 });
-      this.audio.playOneShot('monitor_glitch', { volume: 0.38, duration: 0.85, releaseSec: 0.3 });
-      this.showSubtitle('また、あの青だ。', 3400);
+      this.triggerGlitch('tear', 0.42, 0.30);
+      this.audio.playOneShot('monitor_glitch', { volume: 0.24, duration: 0.7, releaseSec: 0.3 });
       return;
     }
 
-    if (!this.hoverFace) {
-      // Even off-face clicks produce a tactile LCD liquid-crystal pressure ripple right at the cursor!
-      this.bedroom.bsodScreen.pulseCrack(this.cursorMonitorUv);
-      if (this.clickCount === 0) {
-        this.showSubtitle('あの顔……。', 3400);
-      } else if (this.clickCount >= 2) {
-        this.audio.playOneShot('glitch_stutter', { volume: 0.24, rate: 1.15, duration: 0.55, releaseSec: 0.2 });
-        this.showSubtitle('こちらを見ている。', 2600);
-      }
-      return;
-    }
-
-    this.endFirstContact();
-    this.clickCount++;
-    this.inspectClickCooldown = this.clickCount === 1 ? 1.35 : 1.1;
-    this.clickPulse = 1.0;
+    // 0.22s of false control: the panel restores stage 0, then rewrites itself.
     this.bedroom.bsodScreen.pulseCrack(this.cursorMonitorUv);
-    this.triggerSpatialWave(0.38 + this.clickCount * 0.11, 0.78);
-
-    if (this.clickCount === 1) {
-      this.targetMadness = 0.23;
-      this.jawVel += 0.45;
-      this.targetJawOpen = 0.18;
-      this.horrorPulse = 0.32;
-      this.triggerGlitch('tear', 0.65, 0.44);
-      this.audio.playOneShot('dissonance', {
-        volume: 0.28,
-        duration: 4.4,
-        fadeInSec: 0.2,
-        releaseSec: 1.2,
-        reverb: 0.5,
-      });
-      this.showSubtitle('……笑った？', 3800);
-    } else if (this.clickCount === 2) {
-      this.targetMadness = 0.43;
-      this.jawVel += 0.95;
-      this.targetJawOpen = 0.38;
-      this.horrorPulse = 0.52;
-      this.triggerGlitch('mash', 0.72, 0.52);
-      this.audio.playOneShot('monitor_glitch', { volume: 0.42, duration: 1.0, releaseSec: 0.35 });
-      this.audio.playOneShot('glitch_stutter', { volume: 0.36, rate: 1.12, duration: 0.9, releaseSec: 0.3, reverb: 0.3 });
-      // Creepy spatialised floorboard creak + breath RIGHT BEHIND YOUR CHAIR!
-      this.audio.playOneShot('creak_room', {
-        volume: 0.58,
-        rate: 0.78,
-        pos: this.behindNeckSoundPos,
-      });
-      this.audio.playOneShot('gasp', {
-        volume: 0.28,
-        rate: 0.82,
-        pos: this.behindNeckSoundPos,
-      });
-      this.audio.startOrUpdateLoop('static_elec', 'static_elec', {
-        volume: 0.12,
-        fadeSec: 1.1,
-      });
-      this.showSubtitle('後ろに、誰かいる。', 3900);
-    } else if (this.clickCount === 3) {
-      this.targetMadness = 0.66;
-      this.jawVel += 1.45;
-      this.targetJawOpen = 0.62;
-      this.horrorPulse = 0.72;
-      // Desk lamp bulb violently pops out -> bedroom plunges into dread!
-      this.audio.playOneShot('shatter', { volume: 0.52, rate: 1.55, duration: 0.55, releaseSec: 0.2, reverb: 0.25 });
-      this.audio.playOneShot('glitch_stutter', { volume: 0.44, rate: 0.98, duration: 1.2, releaseSec: 0.35, reverb: 0.35 });
-      this.triggerGlitch('sort', 0.80, 0.64);
-      this.audio.playOneShot('scrapemare', {
-        volume: 0.36,
-        duration: 5.2,
-        fadeInSec: 0.4,
-        releaseSec: 1.6,
-        reverb: 0.5,
-      });
-      this.audio.startOrUpdateLoop('static_elec', 'static_elec', {
-        volume: 0.22,
-        fadeSec: 0.8,
-      });
-      this.showSubtitle('立てない。', 3800);
-    } else if (this.clickCount === 4) {
-      this.targetMadness = 0.84;
-      this.jawVel += 1.85;
-      this.targetJawOpen = 0.80;
-      this.horrorPulse = 0.86;
-      this.triggerGlitch('roll', 0.86, 0.78);
-      this.audio.playOneShot('noise_wave', { volume: 0.42, duration: 2.8, releaseSec: 1.0, reverb: 0.4 });
-      this.audio.playOneShot('monitor_glitch', { volume: 0.58, duration: 1.2, releaseSec: 0.4 });
-      this.audio.playOneShot('glitch_stutter', { volume: 0.52, rate: 0.90, duration: 1.4, releaseSec: 0.4, reverb: 0.38 });
-      this.audio.startOrUpdateLoop('static_elec', 'static_elec', {
-        volume: 0.36,
-        fadeSec: 0.7,
-      });
-      this.showSubtitle('息が、吸えない。', 3600);
-    } else if (this.clickCount === 5) {
-      // UNHINGED PREDATORY GAPE — wide-open waiting maw pulling air inward before swallowing!
-      this.targetMadness = 0.96;
-      this.jawVel += 2.45;
-      this.targetJawOpen = 0.92;
-      this.horrorPulse = 0.99;
-      this.triggerGlitch('ghost', 0.96, 1.5);
-      this.triggerGlitch('tear', 0.88, 0.42);
-      this.audio.playOneShot('sub_boom', { volume: 0.68, rate: 1.06, reverb: 0.3 });
-      this.audio.playOneShot('glitch_stutter', { volume: 0.62, rate: 0.88, duration: 1.6, releaseSec: 0.4, reverb: 0.42 });
-      this.audio.playOneShot('pain_glitch', { volume: 0.55, rate: 0.86, duration: 1.4, releaseSec: 0.4, reverb: 0.35 });
-      this.showSubtitle('やめて。', 3000);
-    } else {
-      this.audio.stopLoop('throat_draft', 0.15);
-      this.beginPredatorySuction();
+    this.clickPulse = 0.32;
+    if (!this.contactCues.refused) {
+      this.contactCues.refused = true;
+      this.showSubtitle('……効かない。', 2200);
     }
   }
 
-  private beginPredatorySuction(): void {
+  /**
+   * The transfer begins when the panel simply switches off. No mouth, no teeth,
+   * no suction gasp. Sub-bass riser and one thin breath; every other stinger is
+   * deliberately withheld so the 7.2s read as falling *into a document*.
+   */
+  private beginScreenTransfer(): void {
     this.phase = 'SUCTION_CUTSCENE';
     this.suctionStartClock = this.getTimelineClock();
     this.suctionTimer = 0;
-    this.suctionWhooshPlayed = false;
-    this.suctionBurstMidPlayed = false;
-    this.targetMadness = 1.0;
-    this.jawVel += 2.6;
+    this.suctionCues = {};
+    this.targetMadness = 0.42;
+    this.jawVel += 0.9;
     this.targetJawOpen = 1.0;
-    this.extraGlitchBurst = 1.0;
-    this.horrorPulse = 1.0;
+    this.horrorPulse = 0.55;
 
     this.pcCursorEl.classList.add('hidden');
     this.interactPromptEl.classList.add('hidden');
 
-    this.audio.stopLoop('clock_tick', 0.3);
-    this.audio.stopLoop('room_tone', 0.4);
-    this.audio.stopLoop('rain_window', 0.6);
+    this.audio.stopLoop('clock_tick', 0.6);
+    this.audio.stopLoop('room_tone', 0.9);
+    this.audio.stopLoop('rain_window', 1.2);
     this.audio.stopLoop('rain_aftermath', 0.4);
+    this.audio.stopLoop('throat_draft', 0.2);
     this.audio.playOneShot('reality_rift', {
-      volume: 0.62,
-      duration: 2.4,
-      releaseSec: 0.8,
-      reverb: 0.42,
-      channel: 'transition',
-    });
-    this.audio.playOneShot('scrapemare', {
-      volume: 0.34,
-      rate: 0.96,
-      duration: 6.6,
+      volume: 0.44,
+      duration: 3.0,
       fadeInSec: 0.6,
-      releaseSec: 1.4,
+      releaseSec: 1.2,
       reverb: 0.5,
       channel: 'transition',
     });
-    this.audio.playOneShot('gasp', { volume: 0.62 });
-    this.audio.playOneShot('breathing_panic', {
-      volume: 0.42,
-      fadeInSec: 0.3,
-      releaseSec: 0.8,
+    this.audio.playOneShot('horror_riser', {
+      volume: 0.58,
+      offset: 0.85,
+      fadeInSec: 0.5,
+      reverb: 0.5,
       channel: 'transition',
     });
-    // horror_riser is 8.05s: starting at offset 0.85s aligns its exact 8.05s peak to suctionDuration = 7.20s!
-    this.audio.playOneShot('horror_riser', {
-      volume: 0.76,
-      offset: 0.85,
-      fadeInSec: 0.22,
-      reverb: 0.45,
+    this.audio.playOneShot('breathing_panic', {
+      volume: 0.20,
+      fadeInSec: 0.8,
+      releaseSec: 1.2,
       channel: 'transition',
     });
     this.audio.startOrUpdateLoop('static_elec', 'static_elec', {
-      volume: 0.66,
-      rate: 1.18,
-      fadeSec: 0.22,
+      volume: 0.16,
+      rate: 0.82,
+      fadeSec: 1.4,
     });
   }
-
-  /**
-   * Continue the destination camera that was already running during the tunnel overlap.
-   * It emerges from the sleeve into the open world without restarting its flight.
-   */
   private beginGlitchArrivalCutscene(): void {
     this.phase = 'GLITCH_ARRIVAL_CUTSCENE';
     this.arrivalStartClock = this.suctionStartClock + this.suctionDuration - this.handoffArrivalAdvance;
@@ -1381,6 +1227,10 @@ class BsodExperienceApp {
     this.bedroom.bsodScreen.setInsideTunnelMode(false);
 
     this.clickCount = 0;
+    this.contactProgress = 0;
+    this.gazeHoldTimer = 0;
+    this.contactCues = {};
+    this.lastContactStage = 0;
     this.madness = 0;
     this.targetMadness = 0;
     this.jawOpen = 0;
@@ -1435,26 +1285,11 @@ class BsodExperienceApp {
     });
   }
 
-  private updatePcCursorRaycast(dt = 0.016): void {
-    // At high madness (clickCount >= 3), the Parasyte maw subtly drags & trembles the cursor toward its teeth!
-    if (this.madness > 0.38 && !this.aftermath && document.pointerLockElement === this.renderer.domElement) {
-      const pullStrength = (this.madness - 0.38) * 62.0 * dt;
-      const targetX = window.innerWidth * 0.49;
-      const targetY = window.innerHeight * 0.51;
-      const dx = targetX - this.player.inspectCursorPx.x;
-      const dy = targetY - this.player.inspectCursorPx.y;
-      const dist = Math.hypot(dx, dy);
-      if (dist > 14) {
-        this.player.inspectCursorPx.x += (dx / dist) * pullStrength;
-        this.player.inspectCursorPx.y += (dy / dist) * pullStrength;
-      }
-    }
-
-    const tremor = this.madness > 0.30 ? (this.madness - 0.30) * 4.5 : 0;
-    const jx = tremor > 0 ? Math.sin(this.elapsed * 47.0) * tremor : 0;
-    const jy = tremor > 0 ? Math.cos(this.elapsed * 53.0) * tremor : 0;
-    const px = this.player.inspectCursorPx.x + jx;
-    const py = this.player.inspectCursorPx.y + jy;
+  private updatePcCursorRaycast(_dt = 0.016): void {
+    // The cursor is entirely the player's. No drag, no tremor, no puppetry.
+    // Where they choose to look is the only input this act actually reads.
+    const px = this.player.inspectCursorPx.x;
+    const py = this.player.inspectCursorPx.y;
     this.pcCursorEl.style.transform = `translate3d(${px - 3}px, ${py - 2}px, 0)`;
 
     this.ndcVec.set(
@@ -1475,7 +1310,6 @@ class BsodExperienceApp {
       this.wasHoveringFace = this.hoverFace;
       if (this.hoverFace) {
         this.pcCursorEl.classList.add('hover-face');
-        this.audio.playOneShot('ui_hover', { volume: 0.25, rate: 0.8 + this.madness * 0.5 });
       } else {
         this.pcCursorEl.classList.remove('hover-face');
       }
@@ -1583,25 +1417,27 @@ class BsodExperienceApp {
       vigAmt = 0.32;
       bloomAmt = 0.56;
       sharpenAmt = 0.38;
-    } else if (this.phase === 'INSPECT_PC') {
-      chromaAmt = Math.max(chromaAmt, this.madness * 0.22);
-      vigAmt = 0.34 + this.madness * 0.24;
-      warpAmt = Math.max(0, (this.madness - 0.55) * 0.28);
-      horrorAmt = Math.max(horrorAmt, this.madness * 0.45);
-      bloomAmt = 0.60 + this.madness * 0.55;
-      sharpenAmt = 0.36;
+    } else if (this.phase === 'INSPECT_PC' || this.phase === 'EXIT_INSPECT') {
+      // Razor sharp, clinical, almost no grade at all. The image must look like
+      // a photograph of a real monitor so the one-glyph changes register.
+      chromaAmt = Math.max(chromaAmt, 0.012);
+      vigAmt = 0.33 + this.madness * 0.06;
+      warpAmt = 0;
+      horrorAmt = Math.max(horrorAmt, this.madness * 0.12);
+      bloomAmt = 0.50 + this.madness * 0.10;
+      sharpenAmt = 0.42;
     } else if (this.phase === 'SUCTION_CUTSCENE') {
-      const tunnelRush = THREE.MathUtils.smoothstep(this.suctionTimer, 2.1, 6.2);
+      const tunnelRush = THREE.MathUtils.smoothstep(this.suctionTimer, 2.4, 6.4);
       const handoffClean = 1.0 - THREE.MathUtils.smoothstep(this.suctionTimer, 5.4, 7.1);
-      distortAmt = Math.max(distortAmt, 0.14 + (1.0 - tunnelRush) * 0.34);
-      chromaAmt = 0.24 + tunnelRush * 0.14;
+      distortAmt = Math.max(distortAmt, 0.06 + (1.0 - tunnelRush) * 0.16);
+      chromaAmt = 0.10 + tunnelRush * 0.10;
       vigAmt = 0.38 + tunnelRush * 0.06;
-      warpAmt = 0.16 + tunnelRush * 0.22;
-      horrorAmt = Math.max(horrorAmt, 0.55 * (1.0 - tunnelRush * 0.75));
-      mashAmt = Math.max(mashAmt, tunnelRush * 0.14 * handoffClean);
-      ghostAmt = Math.max(ghostAmt, tunnelRush * 0.12 * handoffClean);
-      bloomAmt = 0.78 + tunnelRush * 0.28;
-      sharpenAmt = 0.18;
+      warpAmt = 0.05 + tunnelRush * 0.18;
+      horrorAmt = Math.max(horrorAmt, 0.20 * (1.0 - tunnelRush * 0.75));
+      mashAmt = Math.max(mashAmt, tunnelRush * 0.08 * handoffClean);
+      ghostAmt = Math.max(ghostAmt, tunnelRush * 0.08 * handoffClean);
+      bloomAmt = 0.68 + tunnelRush * 0.20;
+      sharpenAmt = 0.26;
     } else if (this.phase === 'GLITCH_ARRIVAL_CUTSCENE') {
       // Continue the visual treatment from the overlapping tunnel shot into the flight.
       const diveFrac = THREE.MathUtils.clamp(1.0 - this.glitchArrivalTimer / 4.30, 0, 1);
@@ -1668,49 +1504,27 @@ class BsodExperienceApp {
       this.glitchEvents = this.glitchEvents.filter((ev) => ev.age < ev.dur);
     }
 
-    // Distortion pacing while the monitor is being provoked (the 3D world owns its own pacing
-    // via GlitchWorld's anomaly surges, so the two never stack into constant noise).
-    if (this.phase === 'INSPECT_PC' && this.clickCount >= 1) {
-      this.periodicWarpCooldown -= dt;
-      if (this.periodicWarpCooldown <= 0) {
-        this.periodicWarpCooldown = 3.8 - this.madness * 1.1 + Math.random() * 2.0;
-        this.triggerRandomGlitch(0.28 + this.madness * 0.42);
-      }
-    }
+    // Act 2 deliberately emits NO periodic glitches. An authentic stop screen is
+    // defined by being frozen; a stuttering one is just a screensaver. All the
+    // distortion budget is spent in the 3D world instead.
+    this.madness = THREE.MathUtils.lerp(this.madness, this.targetMadness, Math.min(1, dt * 2.2));
 
-    this.madness = THREE.MathUtils.lerp(this.madness, this.targetMadness, Math.min(1, dt * 4.5));
-    // The jaw is driven by a critically-underdamped spring rather than a plain exponential lerp:
-    // each stage of the yawn overshoots a hair and settles, and every click injects a little
-    // impulse, so the aperture snaps open like a hinge under load instead of melting open.
+    // The "jaw" channel now opens the blackout / page-stack aperture, once, at
+    // the very end of the transfer. It never responds to clicks.
     {
-      const jawStiffness = this.phase === 'SUCTION_CUTSCENE' ? 120 : 42;
-      const jawDamping = this.phase === 'SUCTION_CUTSCENE' ? 15.5 : 8.4;
       const step = Math.min(dt, 1 / 45);
-      this.jawVel += (this.targetJawOpen - this.jawOpen) * jawStiffness * step;
-      this.jawVel -= this.jawVel * jawDamping * step;
-      this.jawVel += this.clickPulse * 0.55 * step;
+      this.jawVel += (this.targetJawOpen - this.jawOpen) * 26 * step;
+      this.jawVel -= this.jawVel * 7.2 * step;
       this.jawOpen += this.jawVel * step;
-      this.jawOpen = THREE.MathUtils.clamp(this.jawOpen, 0, 1.12);
+      this.jawOpen = THREE.MathUtils.clamp(this.jawOpen, 0, 1.0);
     }
 
-    // Continuous accelerating sub-bass Heartbeat from first anomaly click right through suction!
-    if (
-      (this.phase === 'INSPECT_PC' && this.clickCount >= 1) ||
-      this.phase === 'SUCTION_CUTSCENE'
-    ) {
+    // One slow heartbeat only during the transfer. No accelerating panic loop.
+    if (this.phase === 'SUCTION_CUTSCENE') {
       this.heartbeatCooldown -= dt;
       if (this.heartbeatCooldown <= 0) {
-        const panicLevel =
-          this.phase === 'SUCTION_CUTSCENE'
-            ? 1.0
-            : THREE.MathUtils.clamp(this.clickCount / 5.0, 0.15, 0.95);
-        // Accelerates smoothly from ~70 BPM (0.86s) up to frantic 182 BPM (0.33s)!
-        this.heartbeatCooldown = THREE.MathUtils.lerp(0.86, 0.33, panicLevel);
-        this.audio.playOneShot('heartbeat', {
-          volume: THREE.MathUtils.lerp(0.32, 0.76, panicLevel),
-          rate: THREE.MathUtils.lerp(0.94, 1.32, panicLevel),
-        });
-        this.horrorPulse = Math.max(this.horrorPulse, panicLevel * 0.35);
+        this.heartbeatCooldown = 0.94;
+        this.audio.playOneShot('heartbeat', { volume: 0.22, rate: 0.88 });
       }
     }
 
@@ -1788,7 +1602,7 @@ class BsodExperienceApp {
           {
             hoverFace: false,
             cursorUv: this.cursorMonitorUv,
-            clickCount: 0,
+            clickCount: this.aftermath ? 0 : this.clickCount,
             madness: 0,
             jawOpen: 0,
             suctionProgress: 0,
@@ -1830,22 +1644,6 @@ class BsodExperienceApp {
 
       case 'INSPECT_PC': {
         this.inspectClickCooldown = Math.max(0, this.inspectClickCooldown - dt);
-        if (this.chairEscapeCooldown > 0) {
-          this.chairEscapeCooldown = Math.max(0, this.chairEscapeCooldown - dt);
-        }
-        // Between clicks the corrupted signal stutters on its own, spatially anchored to the screen.
-        if (!this.aftermath && this.clickCount >= 2) {
-          this.creatureTwitchCooldown -= dt;
-          if (this.creatureTwitchCooldown <= 0) {
-            this.creatureTwitchCooldown = 2.2 + Math.random() * 2.0;
-            this.jawVel += 0.35 + this.madness * 0.65;
-            this.audio.playOneShot('glitch_stutter', {
-              volume: 0.22 + this.madness * 0.20, rate: 0.78 + Math.random() * 0.26,
-              duration: 0.8, releaseSec: 0.3, pos: this.bedroom.monitorWorldPos,
-            });
-            this.horrorPulse = Math.max(this.horrorPulse, 0.18 + this.madness * 0.22);
-          }
-        }
         this.inspectBlend = Math.min(1, this.inspectBlend + dt * 2.4);
         this.player.updateInspectPose(
           dt,
@@ -1853,48 +1651,90 @@ class BsodExperienceApp {
           this.inspectBlend,
           this.bedroom.inspectCamPos,
           this.bedroom.inspectLookTarget,
-          this.madness,
-          this.clickPulse
+          this.madness * 0.28,
+          this.clickPulse * 0.15
         );
         this.updatePcCursorRaycast(dt);
 
-        if (!this.aftermath && this.inspectClickCooldown > 0) {
-          this.interactPromptEl.textContent = '……';
-          this.interactPromptEl.classList.remove('hidden');
-        } else if (this.aftermath) {
-          this.interactPromptEl.textContent = '[クリック / E] 画面に触れる  |  [右クリック / Q] 離れる';
-          this.interactPromptEl.classList.remove('hidden');
-        } else if (this.clickCount === 0) {
-          this.interactPromptEl.textContent = '「:(」にカーソルを重ねて [クリック / E]  |  [右クリック / Q] 離れる';
-          this.interactPromptEl.classList.remove('hidden');
-        } else if (this.clickCount < 3) {
-          this.interactPromptEl.textContent = '「:(」に触れる  |  [右クリック / Q] 離れる';
+        if (this.aftermath) {
+          this.interactPromptEl.textContent = '[クリック] 再びマウント  |  [Q / ESC] 離れる';
           this.interactPromptEl.classList.remove('hidden');
         } else {
-          this.interactPromptEl.textContent = 'もう一度、触れる';
-          this.interactPromptEl.classList.remove('hidden');
-        }
-
-        if (!this.aftermath) {
           this.stepFirstContact(dt);
-          // Low digital draft as the signal distortion expands.
-          if (this.jawOpen > 0.18) {
-            const draftVol = THREE.MathUtils.clamp((this.jawOpen - 0.18) * 0.28, 0.03, 0.22);
-            this.audio.startOrUpdateLoop('throat_draft', 'fall_wind', {
-              volume: draftVol,
-              rate: 0.56 + this.madness * 0.14,
-              lowpassHz: 420 + this.madness * 260,
-              pos: this.bedroom.monitorWorldPos,
-              refDistance: 0.5,
-              maxDistance: 3.5,
-              fadeSec: 0.25,
-            });
+
+          // ------------------------------------------------------------------
+          // THE RULE. No prompt, no objective, no "click the sad face".
+          // While the cursor is perfectly still the machine holds still too.
+          // Move — look anywhere else, touch anything — and it writes. Hold
+          // still for 5.5s and it writes anyway: you were never the one
+          // deciding when the next glyph changed.
+          //
+          // Implemented from cursor *motion* rather than a UV hit-test so it
+          // works identically under pointer lock, drag-to-look, and any FOV.
+          // ------------------------------------------------------------------
+          const cursorMove = Math.hypot(
+            this.player.inspectCursorPx.x - this.lastCursorPx.x,
+            this.player.inspectCursorPx.y - this.lastCursorPx.y
+          );
+          this.lastCursorPx.copy(this.player.inspectCursorPx);
+
+          if (this.inspectBlend >= 0.98) {
+            if (cursorMove < 2.5) {
+              this.gazeHoldTimer += dt;
+              if (this.gazeHoldTimer > 5.5) {
+                this.contactProgress += dt * 0.085;
+                if (!this.contactCues.forced) {
+                  this.contactCues.forced = true;
+                  this.audio.playOneShot('heartbeat', { volume: 0.16, rate: 0.72 });
+                  this.showSubtitle('……動かしていないのに。', 2600);
+                }
+              }
+            } else {
+              if (!this.contactCues.lookAway) {
+                this.contactCues.lookAway = true;
+                this.audio.playOneShot('key1', { volume: 0.13, rate: 1.45 });
+              }
+              this.gazeHoldTimer = 0;
+              this.contactProgress += dt / 10.5;
+            }
+            this.contactProgress = Math.min(1, this.contactProgress);
           }
+
+          const stageNow = Math.min(5, Math.floor(this.contactProgress * 6));
+          if (stageNow !== this.lastContactStage) {
+            this.lastContactStage = stageNow;
+            this.clickCount = stageNow;
+            // One almost-inaudible keypress = "a write happened". No flash,
+            // no tear, no stinger, no subtitle. If you blink, you miss it.
+            this.audio.playOneShot('key2', {
+              volume: 0.045 + stageNow * 0.010,
+              rate: 1.55 + stageNow * 0.09,
+            });
+            if (stageNow === 5) {
+              this.audio.playOneShot('tape_stop', {
+                volume: 0.14,
+                rate: 0.58,
+                duration: 1.5,
+                fadeInSec: 0.2,
+                releaseSec: 0.7,
+                reverb: 0.5,
+              });
+            }
+          }
+          this.targetMadness = stageNow >= 2 ? 0.06 + stageNow * 0.035 : 0;
+
+          this.interactPromptEl.textContent =
+            this.contactProgress < 0.02 ? '……' : '[Q / ESC] 離れる';
+          this.interactPromptEl.classList.remove('hidden');
+
+          if (this.contactProgress >= 1) this.beginScreenTransfer();
         }
 
-        const roomInfect = this.aftermath ? 0 : THREE.MathUtils.clamp((this.madness - 0.18) * 1.15, 0, 0.92);
-        const roomPull = this.aftermath ? 0 : THREE.MathUtils.clamp((this.madness - 0.45) * 0.85, 0, 0.48);
-        this.tunnelScrollPhase += dt * (6.0 + this.madness * 6.0);
+        // Nothing peels, nothing opens. The room only starts to acquire raster
+        // lines during the transfer itself (see SUCTION_CUTSCENE below).
+        const roomInfect = this.aftermath ? 0 : Math.min(0.16, this.contactProgress * 0.16);
+        const roomPull = 0;
+        this.tunnelScrollPhase += dt * 6.0;
         this.camera.getWorldDirection(this._camFwd);
 
         this.bedroom.bsodScreen.update(
@@ -1915,7 +1755,6 @@ class BsodExperienceApp {
         this.bedroom.update(dt, this.elapsed, roomInfect, roomPull, this.aftermath, undefined, this._camFwd);
         break;
       }
-
       case 'SUCTION_CUTSCENE': {
         this.suctionTimer = Math.max(0, this.getTimelineClock() - this.suctionStartClock);
         const { progress, insideTunnel } = this.player.updateSuctionCutscene(
@@ -1928,7 +1767,8 @@ class BsodExperienceApp {
 
         this.bedroom.bsodScreen.setInsideTunnelMode(insideTunnel);
 
-        // Seven authored beats across the 7.2s devouring — each one has its own signature & sound.
+        // Three beats, not seven. The transfer is a document being read through,
+        // so withholding stingers is what makes the 7.2 seconds feel long.
         const cue = (key: string, at: number, fn: () => void): void => {
           if (this.suctionTimer > at && !this.suctionCues[key]) {
             this.suctionCues[key] = true;
@@ -1936,71 +1776,29 @@ class BsodExperienceApp {
           }
         };
 
-        // 0.30s — the glass surface shears and the glyph rips sideways for a frame.
-        cue('tearA', 0.3, () => this.triggerGlitch('tear', 0.74, 0.34));
-        // 1.12s — your head wrenches 62° back at the bedroom: the room "rolls" one frame and drops a beat.
-        cue('rollA', 1.12, () => {
-          this.triggerGlitch('roll', 0.72, 0.8);
-          this.audio.playOneShot('glitch_stutter', {
-            volume: 0.34,
-            rate: 0.76,
-            duration: 1.9,
-            fadeInSec: 0.1,
-            releaseSec: 0.7,
-            reverb: 0.6,
-          });
-          this.horrorPulse = 0.95;
-        });
-        // 2.28s — the throat opens and the air is pulled out of the room.
-        cue('rush', 2.28, () => {
+        // 1.9s — the room's air quietly leaves; the page stack starts moving.
+        cue('drift', 1.9, () => {
           this.audio.playOneShot('swoosh_thunder', {
-            volume: 0.72,
-            reverb: 0.42,
-            channel: 'transition',
-          });
-          this.audio.playOneShot('wormhole_suck', {
-            volume: 0.74,
-            reverb: 0.42,
-            channel: 'transition',
+            volume: 0.34, reverb: 0.55, channel: 'transition',
           });
           this.audio.startOrUpdateLoop('fall_wind', 'fall_wind', {
-            volume: 0.72,
-            rate: 1.28,
-            fadeSec: 0.4,
+            volume: 0.44, rate: 1.08, fadeSec: 1.1,
           });
-          this.triggerGlitch('mash', 0.78, 0.55);
         });
-        // 3.30s — the whole frame datamoshes into blue macroblocks.
-        cue('mashA', 3.3, () => this.triggerGlitch('mash', 0.88, 0.6));
-        // 4.10s — pixel-sort streaks as the walls are dragged past you.
-        cue('sortA', 4.1, () => this.triggerGlitch('sort', 0.82, 0.8));
-        // 4.60s — mid-throat slam + the reverse swell that carries you out into the sky.
-        cue('burst', 4.6, () => {
-          this.audio.playOneShot('whoosh_cyber', {
-            volume: 0.74,
-            rate: 1.05,
-            reverb: 0.45,
-            channel: 'transition',
-          });
-          this.audio.playOneShot('sub_boom', {
-            volume: 0.44,
-            rate: 1.25,
-            duration: 1.2,
-            releaseSec: 0.4,
-            channel: 'transition',
-          });
+        // 4.4s — one long optical bend as the stack accelerates past you.
+        cue('accel', 4.4, () => {
+          this.triggerGlitch('bend', 0.52, 1.15);
           this.audio.playOneShot('void_swell', {
-            volume: 0.62,
-            rate: 1.12,
-            duration: 2.65,
-            releaseSec: 0.45,
-            fadeInSec: 0.4,
-            channel: 'transition',
+            volume: 0.40, rate: 1.06, duration: 2.6,
+            fadeInSec: 0.5, releaseSec: 0.6, reverb: 0.55, channel: 'transition',
           });
-          this.triggerGlitch('bend', 0.9, 1.0);
         });
-        // 5.40s — brief memory double-exposure well before the clean 7.20s sleeve handoff!
-        cue('ghostA', 5.4, () => this.triggerGlitch('ghost', 0.45, 0.85));
+        // 6.1s — the aperture, still no impact, still no flash.
+        cue('aperture', 6.1, () => {
+          this.audio.playOneShot('whoosh_cyber', {
+            volume: 0.34, rate: 0.92, reverb: 0.5, channel: 'transition',
+          });
+        });
 
         this.tunnelScrollPhase += dt * (6.0 + progress * 42.0);
         this.camera.getWorldDirection(this._camFwd);
@@ -2010,16 +1808,16 @@ class BsodExperienceApp {
           {
             hoverFace: true,
             cursorUv: this.cursorMonitorUv,
-            clickCount: 6,
-            madness: 1.0,
+            clickCount: 5,
+            madness: 0.42,
             jawOpen: 1.0,
             suctionProgress: progress,
             aftermath: false,
           },
-          0.4,
+          0,
           this.tunnelScrollPhase
         );
-        this.bedroom.update(dt, this.elapsed, 1.0, 0.55 + progress * 0.65, false, undefined, this._camFwd);
+        this.bedroom.update(dt, this.elapsed, THREE.MathUtils.smoothstep(progress, 0.05, 0.85), 0.18 + progress * 0.22, false, undefined, this._camFwd);
 
         // Run the destination camera alongside the throat, before the scene switch.
         // A radial dissolve reveals the actual world, not a painted stand-in at the exit.
@@ -2069,7 +1867,6 @@ class BsodExperienceApp {
           this.glitchArrivalRollCuePlayed = true;
           this.audio.playOneShot('swoosh_thunder', { volume: 0.76, rate: 0.94, reverb: 0.55 });
           this.audio.playOneShot('transition_solemn', { volume: 0.58, reverb: 0.55 });
-          this.showSubtitle('あの光は……。', 4600);
         }
 
         if (touchedDown && !this.glitchArrivalLanded) {
@@ -2089,19 +1886,17 @@ class BsodExperienceApp {
         if (finished) {
           this.phase = 'ROAM_GLITCH';
           this.opticStrain = 0;
-          this.periodicWarpCooldown = 6.5;
           this.crosshairEl.classList.remove('hidden');
-          this.setObjective('光の柱を目指す');
+          this.setObjective('[C] コンソール — どこでも WAKE_UP');
           this.worldHintEl.textContent = '[C] コンソール';
           this.worldHintEl.classList.remove('hidden');
-          this.showSubtitle('橋の向こうに、光が見える。', 5200);
+          this.showSubtitle('命令は、もう知っている。', 4200);
         }
         break;
       }
 
       case 'ROAM_GLITCH': {
         const canMove = !this.consoleUI.isOpen;
-        const wasRevealed = this.glitchWorld.coreSecretRevealed;
         if (this.gazeWarnCooldown > 0) {
           this.gazeWarnCooldown = Math.max(0, this.gazeWarnCooldown - dt);
         }
@@ -2140,7 +1935,6 @@ class BsodExperienceApp {
             this.gazeWarnCooldown = 5.5;
             this.triggerGlitch('tear', 0.48, 0.28);
             this.audio.playOneShot('heartbeat', { volume: 0.42, rate: 1.2 });
-            this.showSubtitle('見られている。', 3000);
           }
         } else {
           this.opticStrain = Math.max(0, this.opticStrain - dt * 1.25);
@@ -2150,32 +1944,30 @@ class BsodExperienceApp {
           this.player.position.x - this.glitchWorld.corePosition.x,
           this.player.position.z - this.glitchWorld.corePosition.z
         );
-        this.consoleUI.setWorldState(this.glitchWorld.coreSecretRevealed, distCore);
+        // The console is fully usable ANYWHERE. The tower is now optional:
+        // reaching it only adds context, never permission.
+        this.consoleUI.setWorldState(distCore, this.glitchWorld.coreSecretRevealed);
 
         // Seamless Environmental Horror Milestones along the Causeway (zero tedious item collecting!)
         if (this.player.position.z < 4.0 && !this.glitchMilestones.archEntry) {
           this.glitchMilestones.archEntry = true;
           this.audio.playOneShot('dissonance', { volume: 0.22, duration: 3.6, fadeInSec: 0.3, releaseSec: 1.2, reverb: 0.55 });
-          this.showSubtitle('誰か、いる。', 4400);
         } else if (this.player.position.z < -20.0 && !this.glitchMilestones.midSpan) {
           this.glitchMilestones.midSpan = true;
           this.glitchWorld.triggerAnomalySurge(0.70);
           this.horrorPulse = Math.max(this.horrorPulse, 0.34);
           this.triggerGlitch('ghost', 0.42, 0.7);
           this.audio.playOneShot('anomaly_tremor', { volume: 0.30, reverb: 0.58 });
-          this.showSubtitle('ここは、何の中だ？', 4600);
         } else if (this.player.position.z < -39.0 && !this.glitchMilestones.effigySeen) {
           this.glitchMilestones.effigySeen = true;
           this.horrorPulse = Math.max(this.horrorPulse, 0.48);
           this.audio.playOneShot('heartbeat', { volume: 0.46, rate: 1.15 });
-          this.showSubtitle('あれは……自分？', 4800);
         }
 
-        if (!wasRevealed && this.glitchWorld.coreSecretRevealed) {
-          this.audio.playOneShot('ghost_cantata', { volume: 0.48, reverb: 0.55 });
-          this.setObjective('[C] コンソールで命令を実行する');
-          this.worldHintEl.textContent = '[C] コンソール';
-          this.showSubtitle('命令が読める。コンソールに入力しよう。', 5200);
+        if (!this.glitchMilestones.coreContext && this.glitchWorld.coreSecretRevealed) {
+          this.glitchMilestones.coreContext = true;
+          this.audio.playOneShot('ghost_cantata', { volume: 0.34, reverb: 0.6 });
+          this.showSubtitle('ここが、書き込み元だった。', 4200);
         }
 
         const nearCoreFactor = THREE.MathUtils.clamp(1 - distCore / 50, 0, 1);
@@ -2320,10 +2112,7 @@ class BsodExperienceApp {
           this.crosshairEl.classList.remove('hidden');
           this.setObjective(null);
           this.aftermathBarEl.classList.remove('hidden');
-          this.showSubtitle(
-            '……帰ってきた？',
-            6000
-          );
+          this.showSubtitle('02:48', 5200);
         }
         break;
       }
