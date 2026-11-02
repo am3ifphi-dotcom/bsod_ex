@@ -13,9 +13,10 @@
     <div id="title-overlay" class="overlay visible">
       <div class="title-vignette"></div>
       <div class="title-card">
-        <div class="sys-tag">STOP: 0x000000F4 // CRITICAL_REALITY_FAULT</div>
+        <div class="sys-tag"><span class="status-light"></span> INTERACTIVE HORROR EXPERIENCE <span class="tag-end"> / 02:47 AM</span></div>
         <h1 class="game-title" data-text="BSOD_EX">BSOD_EX</h1>
-        <p class="game-sub">深夜 02:47 — 自室のモニターが青く光っている</p>
+        <p class="game-sub">目が覚めると、モニターだけがついていた。</p>
+        <div class="title-rule"><span>AN UNEXPECTED INTERRUPTION</span><span>0x000000F4</span></div>
 
         <div id="loading-block">
           <div class="loading-bar-track">
@@ -25,16 +26,18 @@
         </div>
 
         <button id="start-btn" class="primary-btn hidden" disabled>
-          <span class="btn-icon">:(</span>
           <span>目を覚ます</span>
+          <span class="btn-arrow" aria-hidden="true">↗</span>
         </button>
 
+        <div class="controls-heading">CONTROLS <span> / 操作方法</span></div>
         <div class="controls-grid">
           <div><kbd>W A S D</kbd> 移動 / <kbd>SPACE</kbd> ジャンプ</div>
           <div><kbd>MOUSE</kbd> 視点移動</div>
-          <div><kbd>CLICK / E</kbd> 調べる・干渉</div>
+          <div><kbd>CLICK / E</kbd> 調べる・触れる</div>
           <div><kbd>C</kbd> コンソール（異世界）</div>
         </div>
+        <p class="experience-note">音声・画面の点滅・急な演出があります。ヘッドホン推奨。<br>ポインターロックが使えない場合はドラッグで視点移動できます。</p>
       </div>
     </div>
 
@@ -57,9 +60,10 @@
         </svg>
       </div>
 
+      <div id="objective" class="hidden"><span class="objective-label">CURRENT OBJECTIVE</span><span id="objective-text"></span></div>
       <div id="interact-prompt" class="hidden"></div>
       <div id="world-hint" class="hidden"></div>
-      <div id="subtitle-banner" class="hidden"></div>
+      <div id="subtitle-banner" class="hidden" role="status" aria-live="polite"></div>
       <div id="aftermath-bar" class="hidden">
         <span>[R] 最初からやり直す</span>
         <span>[ESC] メニュー</span>
@@ -91,7 +95,7 @@
         </form>
         <div class="console-footer">
           <span>[ENTER] 実行</span>
-          <span>[ESC / C] 閉じて探索へ戻る</span>
+          <span>[ESC] 閉じて探索へ戻る</span>
         </div>
       </div>
     </div>
