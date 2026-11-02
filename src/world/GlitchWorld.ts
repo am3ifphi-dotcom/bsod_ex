@@ -83,6 +83,8 @@ export class GlitchWorld {
   private skyExitStreamMat!: THREE.ShaderMaterial;
   private causewayBusMat!: THREE.ShaderMaterial;
   private floatingShardMat!: THREE.ShaderMaterial;
+  // Landmark-scale broken signal sculptures: all real geometry, no flat exposition boards.
+  private fractureMat!: THREE.ShaderMaterial;
   private landingShockMat!: THREE.ShaderMaterial;
   private landingShockTimer = 99.0;
   private crtGlassMat!: THREE.ShaderMaterial;
@@ -261,8 +263,11 @@ export class GlitchWorld {
     // 3. Central Sanctuary (Colossal Cray-1 Supercomputer + Server Obelisks + WAKE_UP Secret)
     this.buildCentralSanctuary(crayGltf.scene, rackGltf.scene, cablesGltf.scene);
 
-    // 4. World Landmarks (Server Megaliths, Floating CRT Monitors, Giant Motherboards, Diegetic Clue Terminals)
+    // 4. World Landmarks (Server Megaliths, Floating CRT Monitors, Giant Motherboards)
     this.buildWorldLandmarks(rackGltf.scene, crtGltf.scene, moboGltf.scene, cablesGltf.scene);
+
+    // 4b. Abstract dimensional ruptures replace the old explanatory signboards.
+    this.buildFractureArchitecture();
 
     // 5. Floating UI Fragments & Rising Digital Ash
     this.buildFloatingAtmosphere();
@@ -2457,7 +2462,7 @@ export class GlitchWorld {
     addInstancedGltf(sanctuary, rackTemplate, sanctRackMats);
     addInstancedGltf(sanctuary, cablesTemplate, sanctCableMats);
 
-    // === THE WORLD SECRET: "WAKE_UP" 3D OBSIDIAN & CRYSTAL STELE MONOLITHS ===
+    // === OPTIONAL VISUAL ECHO: "WAKE_UP" monoliths answer when the Sanctuary is approached ===
     const chars = ['W', 'A', 'K', 'E', '_', 'U', 'P'];
     const spacing = 1.44;
     const startX = -((chars.length - 1) * spacing) * 0.5;
@@ -2566,8 +2571,8 @@ export class GlitchWorld {
 
     pctx.fillStyle = '#d4ecff';
     pctx.font = '28px "Segoe UI", "Yu Gothic UI", sans-serif';
-    pctx.fillText('[ C ] でカーネルコンソールを開き WAKE_UP を実行せよ。', 44, 254);
-    pctx.fillText('※ 意識が完全にダンプ固定される前に強制割り込みをかけろ', 44, 304);
+    pctx.fillText('[ C ] はどこからでも開ける。ここは命令を反響させるだけだ。', 44, 254);
+    pctx.fillText('※ この場所に来る必要はない。だが、ここもあなたを見ている。', 44, 304);
 
     const plaqueTex = new THREE.CanvasTexture(plaqueCanvas);
     plaqueTex.colorSpace = THREE.SRGBColorSpace;
@@ -2809,21 +2814,132 @@ export class GlitchWorld {
     // 5. East (+18.5, -8) & West (-18.5, -28) Sculpted Wing Reliquary Pavilions + Jumpable Stepped Vantage Terraces!
     this.buildWingPavilionAndJumpTerraces();
 
-    this.createDiegeticLogSign(
-      new THREE.Vector3(-2.8, this.getTerrainHeight(-2.8, 9) + 1.45, 9),
-      0.38,
-      'MEMORY_0247.DMP // 意識隔離領域',
-      'あなたの身体はまだ部屋の椅子に座ったまま、顎に咥えられています。',
-      '視線を動かすと変質する石碑や影を抜け、最奥の中央聖域核を目指せ。'
-    );
+    // The path is intentionally readable through silhouette, light and scale rather than
+    // literal floating noticeboards. The player discovers the world's rules by moving through it.
+  }
 
-    this.createDiegeticLogSign(
-      new THREE.Vector3(3.1, this.getTerrainHeight(3.1, -18) + 1.45, -18),
-      -0.38,
-      'OPTIC_HAZARD // 天球の紅い凝視と跳躍段丘',
-      '空の瞳が紅く脈動する間は直視せず、大聖堂アーチの影へ退避せよ。',
-      '東西の支道には [ SPACE ] 跳躍で登れる記憶観測段丘が存在する。'
-    );
+  /**
+   * Three-dimensional packet fractures and broken coordinate halos.  They read as the city
+   * having been sliced into layers of render data, and deliberately leave the central path clear.
+   * This replaces readable billboards with a composition the player can understand at a glance.
+   */
+  private buildFractureArchitecture(): void {
+    const shardGeo = new THREE.OctahedronGeometry(1, 1);
+    const shardCount = 118;
+    const seeds = new Float32Array(shardCount * 2);
+
+    this.fractureMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: true,
+      uniforms: {
+        uTime: { value: 0 },
+        uAnomaly: { value: 0 },
+      },
+      vertexShader: /* glsl */ `
+        attribute vec2 aFracture;
+        varying vec3 vWorldPos;
+        varying vec3 vNormalW;
+        varying float vSeed;
+        uniform float uTime;
+        uniform float uAnomaly;
+        float hash11(float p) { return fract(sin(p * 127.1) * 43758.5453); }
+        void main() {
+          vSeed = aFracture.x;
+          vec3 p = position;
+          // A shard holds still for a few frames, then jumps as a whole packet rather than wobbling like confetti.
+          float tick = floor(uTime * (2.0 + aFracture.y * 2.4));
+          float packet = step(0.91 - uAnomaly * 0.34, hash11(tick + aFracture.x * 71.0));
+          p.x += packet * (hash11(aFracture.x * 19.0 + tick) - 0.5) * (0.75 + uAnomaly * 2.1);
+          p.z += packet * (hash11(aFracture.x * 43.0 + tick) - 0.5) * (0.42 + uAnomaly * 1.4);
+          p.y += sin(uTime * (0.7 + aFracture.y) + aFracture.x * 19.0) * 0.10;
+          vec4 wp = modelMatrix * instanceMatrix * vec4(p, 1.0);
+          vWorldPos = wp.xyz;
+          vNormalW = normalize(mat3(modelMatrix) * mat3(instanceMatrix) * normal);
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec3 vWorldPos;
+        varying vec3 vNormalW;
+        varying float vSeed;
+        uniform float uTime;
+        uniform float uAnomaly;
+        void main() {
+          vec3 N = normalize(vNormalW);
+          vec3 V = normalize(cameraPosition - vWorldPos);
+          float rim = pow(1.0 - abs(dot(N, V)), 2.7);
+          float facet = 0.35 + 0.65 * abs(dot(N, normalize(vec3(0.18, 0.72, -0.66))));
+          float scan = step(0.94, fract(vWorldPos.y * 0.34 - uTime * (1.7 + vSeed * 1.8)));
+          float fault = step(0.92 - uAnomaly * 0.46, fract(sin(floor(uTime * 12.0) + vSeed * 87.0) * 9182.3));
+          vec3 ink = vec3(0.003, 0.016, 0.064) * facet;
+          vec3 cyan = vec3(0.16, 0.76, 1.0);
+          vec3 magenta = vec3(1.0, 0.07, 0.28);
+          vec3 col = ink + cyan * (rim * 0.82 + scan * 0.40);
+          col += mix(cyan, magenta, fault) * (0.10 + uAnomaly * 0.45) * scan;
+          float fade = smoothstep(150.0, 20.0, length(cameraPosition - vWorldPos));
+          gl_FragColor = vec4(col, (0.76 + rim * 0.22) * fade);
+        }
+      `,
+    });
+
+    const shards = new THREE.InstancedMesh(shardGeo, this.fractureMat, shardCount);
+    shards.name = 'PacketFractureField';
+    shards.frustumCulled = false;
+    const d = new THREE.Object3D();
+    for (let i = 0; i < shardCount; i++) {
+      const ring = Math.floor(i / 38);
+      const side = i % 2 === 0 ? -1 : 1;
+      const a = ((i * 0.61803398875) % 1) * Math.PI * 2;
+      const baseX = side * (11.0 + ring * 8.5 + Math.cos(a) * 5.5);
+      const baseZ = 16.0 - ((i * 17) % 82);
+      const baseY = 5.0 + ((i * 13) % 12) * 1.25 + Math.sin(a * 3.0) * 2.2;
+      d.position.set(baseX, baseY, baseZ);
+      d.rotation.set(a * 0.7, a * 1.9, a * 0.4);
+      const sc = 0.55 + ((i * 7) % 9) * 0.20;
+      d.scale.set(sc * (0.55 + ring * 0.16), sc * (1.4 + ring * 0.25), sc * 0.55);
+      d.updateMatrix();
+      shards.setMatrixAt(i, d.matrix);
+      seeds[i * 2] = (i * 0.754877666) % 1;
+      seeds[i * 2 + 1] = (i * 0.381966011) % 1;
+    }
+    shardGeo.setAttribute('aFracture', new THREE.InstancedBufferAttribute(seeds, 2));
+    shards.instanceMatrix.needsUpdate = true;
+    this.group.add(shards);
+
+    // Broken halo frames provide three unmistakable silhouettes at the horizon. They are made
+    // from solid bars so their depth survives every camera angle, unlike flat signage.
+    const railGeo = this.makeChamferedColumnGeometry(8, 0.44, 3);
+    const rails: THREE.Matrix4[] = [];
+    const frameConfigs = [
+      { x: -31, y: 27, z: -16, r: 11, tilt: -0.30 },
+      { x: 34, y: 36, z: -48, r: 16, tilt: 0.24 },
+      { x: -18, y: 49, z: -66, r: 21, tilt: -0.14 },
+    ];
+    for (let f = 0; f < frameConfigs.length; f++) {
+      const cfg = frameConfigs[f];
+      for (let k = 0; k < 12; k++) {
+        // Four missing pieces make each ring look cut out of the world rather than decorative.
+        if ((k + f * 3) % 7 === 0 || (k === 8 && f === 1)) continue;
+        const a = (k / 12) * Math.PI * 2 + cfg.tilt;
+        d.position.set(cfg.x + Math.cos(a) * cfg.r, cfg.y + Math.sin(a) * cfg.r, cfg.z + Math.sin(a * 2.0) * 1.4);
+        d.rotation.set(0.18 * Math.sin(a), -a, Math.PI * 0.5 + a + cfg.tilt);
+        d.scale.set(0.34 + f * 0.08, cfg.r * 0.52, 0.42 + f * 0.10);
+        d.updateMatrix();
+        rails.push(d.matrix.clone());
+      }
+    }
+    const railSeeds = new Float32Array(rails.length * 2);
+    for (let i = 0; i < rails.length; i++) {
+      railSeeds[i * 2] = (i * 0.414213562) % 1;
+      railSeeds[i * 2 + 1] = (i * 0.732050808) % 1;
+    }
+    railGeo.setAttribute('aFracture', new THREE.InstancedBufferAttribute(railSeeds, 2));
+    const haloBars = new THREE.InstancedMesh(railGeo, this.fractureMat, rails.length);
+    haloBars.name = 'BrokenCoordinateHalos';
+    haloBars.frustumCulled = false;
+    for (let i = 0; i < rails.length; i++) haloBars.setMatrixAt(i, rails[i]);
+    haloBars.instanceMatrix.needsUpdate = true;
+    this.group.add(haloBars);
   }
 
   /**
@@ -2910,78 +3026,6 @@ export class GlitchWorld {
     }
     stepMesh.instanceMatrix.needsUpdate = true;
     this.group.add(stepMesh);
-  }
-
-  private createDiegeticLogSign(
-    pos: THREE.Vector3,
-    rotY: number,
-    header: string,
-    line1: string,
-    line2: string
-  ): void {
-    const c = document.createElement('canvas');
-    c.width = 768;
-    c.height = 280;
-    const ctx = c.getContext('2d')!;
-    ctx.fillStyle = 'rgba(2, 22, 54, 0.94)';
-    ctx.fillRect(0, 0, 768, 280);
-    ctx.fillStyle = 'rgba(24, 118, 220, 0.28)';
-    ctx.fillRect(10, 10, 748, 56);
-    ctx.strokeStyle = 'rgba(130, 212, 255, 0.92)';
-    ctx.lineWidth = 4;
-    ctx.strokeRect(8, 8, 752, 264);
-
-    ctx.fillStyle = '#8ad4ff';
-    ctx.font = 'bold 22px Consolas, monospace';
-    ctx.fillText(header, 32, 46);
-
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '24px "Segoe UI", "Yu Gothic UI", sans-serif';
-    ctx.fillText(line1, 32, 136);
-    ctx.fillText(line2, 32, 188);
-
-    ctx.fillStyle = 'rgba(122, 200, 255, 0.65)';
-    ctx.font = '16px Consolas, monospace';
-    ctx.fillText('STATUS: DIAGNOSTIC_TERMINAL_ONLINE // [0x0078D7]', 32, 246);
-
-    const tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
-
-    // Sculpted Brutalist Obsidian Diagnostic Lectern (replaces thin 5cm stick post!)
-    const consoleGroup = new THREE.Group();
-    consoleGroup.position.set(pos.x, pos.y - 1.45, pos.z);
-    consoleGroup.rotation.y = rotY;
-
-    const obsidianMat = new THREE.MeshLambertMaterial({
-      color: 0x050e22,
-      emissive: 0x041d42,
-      emissiveIntensity: 0.65,
-    });
-    const trimMat = new THREE.MeshBasicMaterial({ color: 0x5cc2ff });
-
-    const plinth = new THREE.Mesh(this.makeChamferedColumnGeometry(8, 0.35, 2), obsidianMat);
-    plinth.position.set(0, 0.68, -0.08);
-    plinth.scale.set(0.88, 1.36, 0.56);
-    consoleGroup.add(plinth);
-
-    const baseGlow = new THREE.Mesh(new THREE.BoxGeometry(1.04, 0.05, 0.72), trimMat);
-    baseGlow.position.set(0, 0.03, -0.08);
-    consoleGroup.add(baseGlow);
-
-    const hood = new THREE.Mesh(new THREE.BoxGeometry(2.08, 0.84, 0.14), obsidianMat);
-    hood.position.set(0, 1.42, 0.02);
-    hood.rotation.x = -0.24;
-    consoleGroup.add(hood);
-
-    const sign = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.94, 0.71),
-      new THREE.MeshBasicMaterial({ map: tex })
-    );
-    sign.position.set(0, 1.42, 0.095);
-    sign.rotation.x = -0.24;
-    consoleGroup.add(sign);
-
-    this.group.add(consoleGroup);
   }
 
   private buildFloatingAtmosphere(): void {
@@ -4776,7 +4820,7 @@ export class GlitchWorld {
       this.anomalyIntensity = Math.min(1.0, 0.55 + collapseElapsed * 0.25);
     }
 
-    // 2. Central Sanctuary WAKE_UP Stele Convergence (aligns seamlessly as player approaches the Core!)
+    // 2. Optional Sanctuary response: an environmental reward, never an access requirement.
     const distToCore = Math.hypot(
       playerPos.x - this.corePosition.x,
       playerPos.z - this.corePosition.z
@@ -4867,6 +4911,10 @@ export class GlitchWorld {
     this.astrolabeMat.uniforms.uAnomaly.value = this.anomalyIntensity;
     this.crtGlassMat.uniforms.uTime.value = elapsed;
     this.crtGlassMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+    if (this.fractureMat) {
+      this.fractureMat.uniforms.uTime.value = elapsed;
+      this.fractureMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+    }
     this.dustMat.uniforms.uTime.value = elapsed;
     this.coreBeamMat.uniforms.uTime.value = elapsed;
     this.coreBeamMat.uniforms.uAnomaly.value = this.anomalyIntensity;

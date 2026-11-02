@@ -30,18 +30,17 @@ const { ConsoleUI } = await import('../src/ui/ConsoleUI.ts');
 const ui: any = new ConsoleUI({ playOneShot() {}, playKeystroke() {} } as any);
 let wakes = 0;
 ui.onWakeUpCommand = () => wakes++;
+
+// The recovery shell must work before any landmark is approached.
 ui.handleCommand('WAKE_UP');
-assert.equal(ui.locked, false, 'command must not bypass the sanctuary');
-assert.equal(wakes, 0);
-ui.setWorldState(true, 1);
-ui.handleCommand('wake up');
-assert.equal(ui.locked, true);
+assert.equal(ui.locked, true, 'WAKE_UP must be available from the current location');
 await new Promise((resolve) => setTimeout(resolve, 650));
-assert.equal(wakes, 1, 'discovered command should trigger the ending');
+assert.equal(wakes, 1, 'portable WAKE_UP should trigger the ending');
+
+// Reset must still cancel any queued ending callbacks.
 ui.reset();
-ui.setWorldState(true, 1);
 ui.handleCommand('WAKE_UP');
 ui.reset();
 await new Promise((resolve) => setTimeout(resolve, 650));
 assert.equal(wakes, 1, 'reset must cancel pending ending callbacks');
-console.log('Console progression and reset: passed');
+console.log('Portable console access and reset: passed');

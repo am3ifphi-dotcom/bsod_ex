@@ -35,7 +35,7 @@
           <div><kbd>W A S D</kbd> 移動 / <kbd>SPACE</kbd> ジャンプ</div>
           <div><kbd>MOUSE</kbd> 視点移動</div>
           <div><kbd>CLICK / E</kbd> 調べる・触れる</div>
-          <div><kbd>C</kbd> コンソール（異世界）</div>
+          <div><kbd>C</kbd> 緊急コンソール（異世界内・どこでも）</div>
         </div>
         <p class="experience-note">音声・画面の点滅・急な演出があります。ヘッドホン推奨。<br>ポインターロックが使えない場合はドラッグで視点移動できます。</p>
       </div>
@@ -70,19 +70,19 @@
       </div>
     </div>
 
-    <!-- Diegetic In-Game Kernel Console (C key in Glitch World) -->
+    <!-- Portable recovery shell: C key works from anywhere in the Glitch World. -->
     <div id="console-modal" class="hidden" aria-hidden="true">
       <div class="console-window">
         <div class="console-titlebar">
           <div class="console-title">
             <span class="console-sq"></span>
-            <span>Administrator: X:\WINDOWS\SYSTEM32\KERNEL_RECOVERY_CON.EXE</span>
+            <span>MEMORY_DUMP // LOCAL RECOVERY SHELL // EXIT ROUTE ONLINE</span>
           </div>
           <button id="console-close-btn" type="button" title="閉じる (ESC)">✕</button>
         </div>
         <div id="console-log" class="console-log"></div>
         <form id="console-form" class="console-input-row" autocomplete="off">
-          <span class="console-prompt">DUMP:\CORE&gt;</span>
+          <span class="console-prompt">MEM:\SELF&gt;</span>
           <input
             id="console-input"
             type="text"
@@ -95,7 +95,7 @@
         </form>
         <div class="console-footer">
           <span>[ENTER] 実行</span>
-          <span>[ESC] 閉じて探索へ戻る</span>
+          <span>[ESC] 閉じて探索へ戻る  //  [WAKE_UP] 現在地から離脱</span>
         </div>
       </div>
     </div>

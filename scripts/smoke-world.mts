@@ -44,6 +44,7 @@ if (!w.group.getObjectByName('ImpossibleArchive')) throw new Error('Missing impo
 w.buildCathedralCausewayAndLeviathan();
 w.buildCentralSanctuary(new THREE.Object3D(), new THREE.Object3D(), new THREE.Object3D());
 w.buildWorldLandmarks(new THREE.Object3D(), new THREE.Object3D(), new THREE.Object3D(), new THREE.Object3D());
+w.buildFractureArchitecture();
 w.buildFloatingAtmosphere();
 w.buildAtmosphericDepth();
 w.buildCausewayDetailAndMonoliths();
@@ -250,7 +251,7 @@ if (eastStepTop <= eastStepGround + 1.8) {
   throw new Error(`East Pavilion jump terrace missing: ground=${eastStepGround}, stepTop=${eastStepTop}`);
 }
 
-// 4) Verify ZERO tedious fetch-quest seals & seamless proximity WAKE_UP convergence at Central Cray-1 Sanctuary!
+// 4) Verify ZERO tedious collection gates; the Sanctuary is an optional visual response, not a console lock.
 if (anyW.neuralSeals || typeof anyW.severSeal === 'function') {
   throw new Error('3-item Neural Seal collection system must be completely removed!');
 }
@@ -260,7 +261,7 @@ if (anyW.phantomMesh?.count !== 8) {
 if (w.coreSecretRevealed) {
   throw new Error('Expected initial coreSecretRevealed=false before approaching Sanctuary!');
 }
-// Approaching Central Cray-1 Sanctuary directly reveals WAKE_UP without any tedious collection chores!
+// Approaching Central Cray-1 Sanctuary still triggers its optional WAKE_UP visual convergence.
 w.update(1 / 60, 2.0, new THREE.Vector3(0, 4.4, -48), null);
 if (!w.coreSecretRevealed) {
   throw new Error('Approaching Central Sanctuary must seamlessly align & reveal WAKE_UP!');
@@ -269,6 +270,6 @@ w.resetCollapse();
 if (w.coreSecretRevealed) {
   throw new Error('resetCollapse() failed to reset coreSecretRevealed!');
 }
-console.log('Zero-tedium Sanctuary WAKE_UP convergence & 8 peripheral Glitch Apparitions verified OK!');
+console.log('Optional Sanctuary convergence & 8 peripheral Glitch Apparitions verified OK!');
 console.log('non-finite instance matrix values:', bad, '| degenerate geometries:', degenGeos, '| max arrival step (m):', maxStepJump.toFixed(3));
 console.log('SMOKE TEST PASSED');

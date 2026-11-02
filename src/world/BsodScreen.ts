@@ -1215,12 +1215,11 @@ export class BsodScreen {
             }
 
             // ---------------------------------------------------------------- 4. ULTRA-CRISP SDF ':(' TYPOGRAPHY -> BIOMECHANICAL SPLIT
-            float idleTick = floor(uTime * 10.0);
-            float stage0Betrayal = step(2.6, uTime) * (1.0 - step(0.06, uMadness))
-                                 * step(0.965 - 0.020 * uHover, hash11(idleTick * 17.31));
-            float stage1Rictus = smoothstep(0.05, 0.13, uMadness) * (1.0 - smoothstep(0.24, 0.38, uMadness))
-                               * step(0.62 - uClickPulse * 0.35, hash11(floor(uTime * 14.0) * 5.77));
-            float smileFlip = clamp(max(stage0Betrayal, stage1Rictus), 0.0, 1.0);
+            // No idle jump-scare: the initial glyph remains a perfectly still, recognisable
+            // BSOD mark. The player must create the fault before the signal deforms.
+            float stage0Betrayal = 0.0;
+            float stage1Rictus = 0.0;
+            float smileFlip = 0.0;
 
             vec2 cursorPullF = clamp((uCursorUv - faceCenter) * vec2(1.90566, 1.0), vec2(-0.42), vec2(0.42))
                              * (0.032 * uHover + 0.055 * uMadness);
@@ -2653,266 +2652,103 @@ export class BsodScreen {
       return finalizeTex();
     }
 
-    // Authentic Windows 10/11 Cerulean Blue (#0078D7), bruising colder & deeper at late stages
-    ctx.fillStyle = stage >= 5 ? '#00336e' : stage >= 4 ? '#00498f' : '#0078d7';
+    // The BSOD is staged as an interruption, not a busy information board.  The first
+    // image is recognisably ordinary; every following image removes certainty instead
+    // of piling another dialog on top of it.  The animated shader supplies the actual
+    // fracture, while this texture provides the calm, readable signal underneath.
+    const blue = ['#0078d7', '#0074cf', '#005ba9', '#003e7d', '#00295c', '#001a42'][Math.min(stage, 5)];
+    ctx.fillStyle = blue;
     ctx.fillRect(0, 0, W, H);
 
-    const leftX = 232;
-    const fontStack = '"Segoe UI", "Yu Gothic UI", "Meiryo", sans-serif';
-
-    // Subtle clinical kernel memory telemetry creeping down the right margin from Stage 1+
-    if (stage >= 1) {
-      ctx.save();
-      ctx.font = '19px Consolas, monospace';
-      ctx.fillStyle = `rgba(195, 234, 255, ${0.045 + stage * 0.036})`;
-      const tags = [
-        'SACCADE_CAPTURE',
-        'C3_MOTOR_INHIBIT',
-        'GLYPH_DEFORM',
-        'CURSOR_TRACK',
-        'CHIASM_DMA_LOCK',
-        'SIGNAL_BREACH',
-      ];
-      for (let r = 0; r < 18; r++) {
-        const addr = (0xf8000247 + r * 0x18 + stage * 0x100).toString(16).toUpperCase();
-        const tag = tags[(r + stage) % tags.length];
-        ctx.fillText(
-          `FFFF${addr}: 00 78 D7 F4  3A 29 0${stage}  [${tag}]`,
-          W - 820,
-          86 + r * 54
-        );
-      }
-      ctx.restore();
+    // A restrained screen-pixel weave keeps the panel physical without turning the image
+    // into permanent TV snow. It only becomes visible once the signal starts failing.
+    if (stage > 0) {
+      ctx.fillStyle = `rgba(202, 237, 255, ${0.015 + stage * 0.009})`;
+      for (let y = 8; y < H; y += 6) ctx.fillRect(0, y, W, 1);
     }
 
-    ctx.fillStyle = '#ffffff';
+    const leftX = 224;
+    const fontStack = '"Segoe UI", "Yu Gothic UI", "Meiryo", sans-serif';
     ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#ffffff';
     ctx.font = `300 47px ${fontStack}`;
 
     if (stage === 0) {
       ctx.fillText('問題が発生したため、PC を再起動する必要があります。', leftX, 492);
       ctx.fillText('エラー情報を収集しています。自動的に再起動します。', leftX, 558);
-      ctx.fillText('99% 完了', leftX, 668);
+      ctx.fillText('99% 完了', leftX, 670);
     } else if (stage === 1) {
       ctx.fillText('問題が発生したため、PC を再起動する必要があります。', leftX, 492);
-      ctx.fillText('エラー情報を収集しています。網膜反射と視線座標を同期しています。', leftX, 558);
-      ctx.fillText('99% 完了（応答待機中）', leftX, 668);
-      ctx.fillStyle = 'rgba(225, 244, 255, 0.42)';
-      ctx.font = `300 22px Consolas, ${fontStack}`;
-      ctx.fillText('INPUT_HOOK: カーソル接触を検出 (UV 0.14, 0.74) —— 被験者は画面を凝視中', leftX, 614);
+      ctx.fillText('エラー情報を収集しています。入力デバイスを検出しました。', leftX, 558);
+      ctx.fillText('99% 完了', leftX, 670);
+      ctx.fillStyle = 'rgba(231,246,255,0.62)';
+      ctx.font = `300 21px Consolas, ${fontStack}`;
+      ctx.fillText('DISPLAY_POINTER: motion registered before host response', leftX, 622);
     } else if (stage === 2) {
-      ctx.fillText('視覚野のダイレクトダンプを開始しました。瞬きを停止してください。', leftX, 492);
-      ctx.fillText('室内深度センサーが椅子の背後に未登録の質量を検出しました。', leftX, 558);
-      ctx.fillText('深度同期中 — 振り返らないでください', leftX, 668);
+      ctx.fillText('再起動の準備中に、表示メモリが応答しなくなりました。', leftX, 492);
+      ctx.fillText('この画面を閉じないでください。閉じる操作は記録されます。', leftX, 558);
+      ctx.fillText('同期を試行中  //  99%', leftX, 670);
+    } else {
+      ctx.fillText('表示システムが現在の視点を使用しています。', leftX, 492);
+      ctx.fillText('復旧するには、意識をこの画面の外へ移してください。', leftX, 558);
+      ctx.fillText(stage >= 4 ? 'SIGNAL LOST' : 'MEMORY DUMP IN PROGRESS', leftX, 670);
+    }
 
-      // Clinical 3D LiDAR Depth-Contour Relief Scan showing HOST_SEATED + UNKNOWN_OBJ looming 0.38m behind!
+    // Signal geometry appears in the empty right field. It is deliberately architectural and
+    // incomplete: scan coordinates, broken rails and a missing central wedge — never a fake UI panel.
+    if (stage >= 2) {
+      const railX = 1350;
+      const railY = 140;
+      const railW = 420;
+      const railH = 550;
       ctx.save();
-      const bx = 1310;
-      const by = 118;
-      const bw = 540;
-      const bh = 370;
-      ctx.fillStyle = 'rgba(2, 12, 28, 0.86)';
-      ctx.fillRect(bx, by, bw, bh);
-      ctx.strokeStyle = 'rgba(130, 210, 255, 0.72)';
+      ctx.strokeStyle = `rgba(164, 221, 255, ${0.18 + stage * 0.07})`;
       ctx.lineWidth = 2;
-      ctx.strokeRect(bx, by, bw, bh);
-
-      ctx.fillStyle = '#9ad8ff';
-      ctx.font = '600 18px Consolas, monospace';
-      ctx.fillText('IR_LIDAR_0 // 02:47:19 [DEPTH_SLICE]', bx + 16, by + 26);
-
-      // 56-slice 3D LiDAR elevation contour raster (replaces crude circle+box shapes with realistic sensor relief!)
-      const slices = 56;
-      for (let s = 0; s < slices; s++) {
-        const vNorm = s / (slices - 1);
-        const baseLineY = by + 44 + vNorm * 258;
-
-        // Background entity depth field (tall organic cranial/shoulder/torso relief standing at u = 0.59)
-        const dHeadBack = Math.hypot((vNorm - 0.23) * 1.45, 0);
-        const dTorsoBack = Math.abs(vNorm - 0.64);
-        const hasBack = dHeadBack < 0.16 || (vNorm > 0.31 && dTorsoBack < 0.38);
-
+      for (let i = 0; i < 7; i++) {
+        const y = railY + i * 78;
+        const gap = 88 + ((i * 79 + stage * 47) % 190);
         ctx.beginPath();
-        let anyAnom = false;
-        for (let ix = 0; ix <= 90; ix++) {
-          const uNorm = ix / 90;
-          const pxX = bx + 14 + uNorm * (bw - 28);
-
-          // Seated foreground host (head centered at (0.39, 0.48), shoulders at (0.39, 0.78))
-          const hHostHead =
-            Math.exp(-(((uNorm - 0.39) / 0.068) ** 2 + ((vNorm - 0.48) / 0.105) ** 2)) * 16.0;
-          const hHostNeck =
-            Math.exp(-(((uNorm - 0.39) / 0.036) ** 2 + ((vNorm - 0.61) / 0.055) ** 2)) * 9.0;
-          const hHostTorso =
-            Math.exp(-(((uNorm - 0.39) / 0.145) ** 2 + ((vNorm - 0.84) / 0.22) ** 2)) * 14.0;
-          const hostZ = hHostHead + hHostNeck + hHostTorso;
-
-          // Looming tall entity standing directly behind the chair (tilted head at (0.59, 0.22), wide shoulders)
-          const tiltU = uNorm - (0.59 + (vNorm - 0.22) * 0.06);
-          const hEntHead =
-            Math.exp(-((tiltU / 0.064) ** 2 + ((vNorm - 0.22) / 0.10) ** 2)) * 15.0;
-          const hEntShoulders =
-            Math.exp(-(((uNorm - 0.59) / 0.155) ** 2 + ((vNorm - 0.62) / 0.34) ** 2)) * 13.0;
-          const entZ = hEntHead + hEntShoulders;
-          if (entZ > 3.5) anyAnom = true;
-
-          const microNoise = Math.sin(ix * 1.9 + s * 2.7) * 0.55;
-          const pyY = baseLineY - Math.max(hostZ, entZ * 0.88) + microNoise;
-          if (ix === 0) ctx.moveTo(pxX, pyY);
-          else ctx.lineTo(pxX, pyY);
-        }
-        ctx.strokeStyle =
-          hasBack && anyAnom && s % 2 === 0
-            ? 'rgba(255, 86, 118, 0.52)'
-            : 'rgba(120, 212, 255, 0.38)';
-        ctx.lineWidth = 1.25;
+        ctx.moveTo(railX, y);
+        ctx.lineTo(railX + gap, y);
+        ctx.moveTo(railX + gap + 56 + stage * 12, y);
+        ctx.lineTo(railX + railW, y);
         ctx.stroke();
       }
-
-      // Target reticle & vector callout on the looming anomaly behind the chair
-      const tx = bx + 14 + 0.59 * (bw - 28);
-      const ty = by + 44 + 0.20 * 258;
-      ctx.strokeStyle = 'rgba(255, 98, 128, 0.82)';
-      ctx.lineWidth = 1.6;
-      ctx.strokeRect(tx - 34, ty - 28, 68, 64);
+      ctx.strokeStyle = `rgba(255, 98, 137, ${Math.max(0, stage - 2) * 0.13})`;
+      ctx.lineWidth = 5;
       ctx.beginPath();
-      ctx.moveTo(bx + 228, by + 168);
-      ctx.lineTo(tx - 34, ty + 18);
+      ctx.moveTo(railX + railW * 0.53, railY - 20);
+      ctx.lineTo(railX + railW * 0.45, railY + railH * 0.42);
+      ctx.lineTo(railX + railW * 0.62, railY + railH + 28);
       ctx.stroke();
-
-      ctx.fillStyle = 'rgba(4, 14, 30, 0.84)';
-      ctx.fillRect(bx + 12, by + 300, bw - 24, 58);
-      ctx.fillStyle = '#8fd4ff';
-      ctx.font = '600 17px Consolas, "Yu Gothic UI", monospace';
-      ctx.fillText('HOST_SEATED : Z=0.58m  HR=132bpm', bx + 20, by + 322);
-      ctx.fillStyle = '#ff7b96';
-      ctx.fillText('ANOMALY_01  : Z=0.96m [椅子の背後 0.38m]', bx + 20, by + 347);
-      ctx.restore();
-    } else if (stage === 3) {
-      ctx.fillText('脊髄運動路 (C3-C5) をアンマウントしました。離席要求は拒否されました。', leftX, 492);
-      ctx.fillText('表示データが自己複製しています。画面から目を離さないでください。', leftX, 558);
-      ctx.fillText('運動権委譲: 完了', leftX, 668);
-
-      // Cascading corrupted Windows Kernel Exception Dialog Boxes!
-      ctx.save();
-      for (let d = 0; d < 3; d++) {
-        const dx = 1170 + d * 42;
-        const dy = 116 + d * 54;
-        const dw = 610;
-        const dh = 232;
-        ctx.fillStyle = 'rgba(6, 18, 40, 0.90)';
-        ctx.fillRect(dx + 8, dy + 8, dw, dh);
-        ctx.fillStyle = '#e9f2fb';
-        ctx.fillRect(dx, dy, dw, dh);
-        ctx.fillStyle = d === 2 ? '#8c0d29' : '#004e98';
-        ctx.fillRect(dx, dy, dw, 40);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = `600 20px Consolas, ${fontStack}`;
-        ctx.fillText('wininit.exe - 運動神経の強制切断 (0xC0000247)', dx + 16, dy + 27);
-
-        ctx.fillStyle = '#0e1726';
-        ctx.font = `400 21px ${fontStack}`;
-        ctx.fillText('指および頸椎の制御権を SMILE_ENTITY.SYS へ移行します。', dx + 24, dy + 88);
-        ctx.fillText('あなたが今クリックしているのは自分の意志ですか？', dx + 24, dy + 124);
-
-        // Two identical inescapable buttons: [ 委譲する ]  [ 委譲する ]
-        for (let b = 0; b < 2; b++) {
-          const bx = dx + 260 + b * 162;
-          const by = dy + 164;
-          ctx.strokeStyle = '#004e98';
-          ctx.lineWidth = 2;
-          ctx.strokeRect(bx, by, 144, 42);
-          ctx.fillStyle = '#0e1726';
-          ctx.font = `600 20px ${fontStack}`;
-          ctx.fillText('委譲する(Y)', bx + 18, by + 28);
-        }
-      }
-      ctx.restore();
-    } else {
-      // Stage 4 & 5: Cold Clinical Host Sensory Unmount Autopsy + Ghostly Vertical ':)' Columns!
-      ctx.save();
-      ctx.font = '300 28px Consolas, monospace';
-      for (let colIdx = 0; colIdx < 16; colIdx++) {
-        ctx.fillStyle = colIdx % 4 === 0 ? 'rgba(255, 90, 122, 0.20)' : 'rgba(185, 228, 255, 0.10)';
-        for (let r = 0; r < 14; r++) {
-          ctx.fillText((colIdx + r) % 3 === 0 ? ':)' : ':(', 86 + colIdx * 122, 64 + r * 74);
-        }
-      }
-
-      // Clinical black diagnostic overlay frame on right side (avoids clogging center mouth at (0.48, 0.48)!)
-      const px = 1180;
-      const py = 128;
-      const pw = 690;
-      const ph = 430;
-      ctx.fillStyle = 'rgba(4, 10, 24, 0.86)';
-      ctx.fillRect(px, py, pw, ph);
-      ctx.strokeStyle = 'rgba(255, 92, 124, 0.72)';
-      ctx.lineWidth = 2.5;
-      ctx.strokeRect(px, py, pw, ph);
-
-      ctx.fillStyle = '#ff6b88';
-      ctx.font = `700 24px Consolas, ${fontStack}`;
-      ctx.fillText(
-        stage >= 5
-          ? 'OPTIC_CHIASM_BREACH // 意識領域の転送を実行中'
-          : 'HOST_SENSORY_TABLE // 生体デバイス切り離し状況',
-        px + 24,
-        py + 44
-      );
-
-      const rows = [
-        ['BLINK_REFLEX (瞬き反射)', 'UNMOUNTED'],
-        ['VOCAL_CORD_MOTOR (声帯)', 'UNMOUNTED'],
-        ['CERVICAL_SPINE (頸椎回旋)', 'LOCKED_0DEG'],
-        ['DISPLAY_STATE (表示異常)', stage >= 5 ? 'TRANSFERRING' : 'DESYNCED'],
-        ['CONSCIOUSNESS_DEST', 'RING0://0x0078D7'],
-      ];
-      ctx.font = `400 22px Consolas, ${fontStack}`;
-      rows.forEach(([k, v], idx) => {
-        const ry = py + 106 + idx * 60;
-        ctx.fillStyle = 'rgba(214, 236, 255, 0.88)';
-        ctx.fillText(k, px + 24, ry);
-        ctx.fillStyle = idx >= 3 ? '#ff6b88' : '#8ad4ff';
-        ctx.fillText(`[ ${v} ]`, px + 418, ry);
-      });
       ctx.restore();
     }
 
-    // Authentic QR Code + Support / Stop Code section at bottom
-    const qrY = 738;
+    // Tiny diagnostic labels at the far edge are a depth cue. They do not compete with the
+    // message or turn the whole monitor into a wall of exposition.
+    if (stage >= 1) {
+      ctx.save();
+      ctx.font = '18px Consolas, monospace';
+      ctx.fillStyle = `rgba(205, 237, 255, ${0.12 + stage * 0.045})`;
+      const tags = ['FRAME_SYNC', 'INPUT_ECHO', 'RASTER_GAP', 'VIEWPORT_LOCK', 'EXIT_VECTOR'];
+      for (let row = 0; row < 7; row++) {
+        const addr = (0x0078d700 + row * 0x30 + stage * 0x100).toString(16).toUpperCase();
+        ctx.fillText(`0x${addr}  ${tags[(row + stage) % tags.length]}`, 1505, 790 + row * 30);
+      }
+      ctx.restore();
+    }
+
+    const qrY = 742;
     const qrSize = 178;
     this.drawQrCode(ctx, leftX, qrY, qrSize, stage);
-
     const infoX = leftX + qrSize + 38;
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
     ctx.font = `300 25px ${fontStack}`;
-    ctx.fillText(
-      stage < 3
-        ? 'この問題と可能な解決方法の詳細については、https://www.windows.com/stopcode を参照してください'
-        : '視覚野ダンプの転送先アドレス: dump://0x0078d7/optic_chiasm — 切断は許可されていません',
-      infoX,
-      qrY + 38
-    );
-
+    ctx.fillText(stage < 2 ? '詳細については、https://www.windows.com/stopcode を参照してください' : 'DISPLAY_BUFFER: ownership could not be restored', infoX, qrY + 38);
     ctx.font = `300 22px ${fontStack}`;
-    ctx.fillText(
-      stage < 2
-        ? 'サポート担当者に連絡する場合は、次の情報を伝えてください:'
-        : '生体テレメトリは次の停止コードへバインドされました:',
-      infoX,
-      qrY + 108
-    );
-
-    const stopCodes = [
-      'CRITICAL_PROCESS_DIED',
-      'OPTIC_NERVE_PAGE_FAULT',
-      'UNREGISTERED_OBSERVER_BEHIND_HOST',
-      'MOTOR_CORTEX_UNMOUNTED',
-      'DISPLAY_GLYPH_CORRUPTION',
-      'CONSCIOUSNESS_TRANSFER_COMMIT',
-    ];
-    const code = stopCodes[Math.min(stage, stopCodes.length - 1)];
-    ctx.fillText(`停止コード: ${code}`, infoX, qrY + 148);
+    ctx.fillText(stage < 2 ? 'サポート担当者に連絡する場合は、次の情報を伝えてください:' : '最後に記録された停止コード:', infoX, qrY + 108);
+    const stopCodes = ['CRITICAL_PROCESS_DIED', 'INPUT_ECHO_DETECTED', 'VIEWPORT_DESYNC', 'DISPLAY_OWNER_UNKNOWN', 'NO_SIGNAL', 'CONSCIOUSNESS_TRANSFER'];
+    ctx.fillText(`停止コード: ${stopCodes[Math.min(stage, stopCodes.length - 1)]}`, infoX, qrY + 148);
 
     return finalizeTex();
   }

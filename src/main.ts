@@ -94,7 +94,7 @@ class BsodExperienceApp {
   private periodicWarpCooldown = 6.2;
 
   // First inspection staging: the panel re-syncs, the room tone drains, and the glass ticks —
-  // no imagery beyond the authentic BSOD and the ':(' it already shows.
+  // the original BSOD holds still until the player deliberately disturbs it.
   private firstContactTimer = -1;
   private firstContactDone = false;
   private firstContactCues: Record<string, boolean> = {};
@@ -441,11 +441,9 @@ class BsodExperienceApp {
         e.preventDefault();
         this.player.clearKeys();
         this.audio.playOneShot('ui_hover', { volume: 0.45, rate: 1.15 });
-        const distCore = Math.hypot(
-          this.player.position.x - this.glitchWorld.corePosition.x,
-          this.player.position.z - this.glitchWorld.corePosition.z
-        );
-        this.consoleUI.open(this.glitchWorld.coreSecretRevealed, distCore);
+        // The recovery shell belongs to the player, not a landmark. Exploration remains
+        // optional spectacle; escape should never be held behind a long walk.
+        this.consoleUI.open();
         return;
       }
 
@@ -1122,93 +1120,43 @@ class BsodExperienceApp {
     this.bedroom.bsodScreen.pulseCrack(this.cursorMonitorUv);
     this.triggerSpatialWave(0.38 + this.clickCount * 0.11, 0.78);
 
+    // Three deliberate contacts make a clean dramatic arc: recognition, contamination, breach.
+    // It replaces the old six-click escalation, which made the screen feel like a button-mashing task.
     if (this.clickCount === 1) {
-      this.targetMadness = 0.23;
-      this.jawVel += 0.45;
-      this.targetJawOpen = 0.18;
-      this.horrorPulse = 0.32;
-      this.triggerGlitch('tear', 0.65, 0.44);
+      this.targetMadness = 0.34;
+      this.jawVel += 0.7;
+      this.targetJawOpen = 0.22;
+      this.horrorPulse = 0.34;
+      this.triggerGlitch('tear', 0.48, 0.28);
       this.audio.playOneShot('dissonance', {
-        volume: 0.28,
-        duration: 4.4,
-        fadeInSec: 0.2,
-        releaseSec: 1.2,
-        reverb: 0.5,
-      });
-      this.showSubtitle('……笑った？', 3800);
-    } else if (this.clickCount === 2) {
-      this.targetMadness = 0.43;
-      this.jawVel += 0.95;
-      this.targetJawOpen = 0.38;
-      this.horrorPulse = 0.52;
-      this.triggerGlitch('mash', 0.72, 0.52);
-      this.audio.playOneShot('monitor_glitch', { volume: 0.42, duration: 1.0, releaseSec: 0.35 });
-      this.audio.playOneShot('glitch_stutter', { volume: 0.36, rate: 1.12, duration: 0.9, releaseSec: 0.3, reverb: 0.3 });
-      // Creepy spatialised floorboard creak + breath RIGHT BEHIND YOUR CHAIR!
-      this.audio.playOneShot('creak_room', {
-        volume: 0.58,
-        rate: 0.78,
-        pos: this.behindNeckSoundPos,
-      });
-      this.audio.playOneShot('gasp', {
-        volume: 0.28,
-        rate: 0.82,
-        pos: this.behindNeckSoundPos,
-      });
-      this.audio.startOrUpdateLoop('static_elec', 'static_elec', {
-        volume: 0.12,
-        fadeSec: 1.1,
-      });
-      this.showSubtitle('後ろに、誰かいる。', 3900);
-    } else if (this.clickCount === 3) {
-      this.targetMadness = 0.66;
-      this.jawVel += 1.45;
-      this.targetJawOpen = 0.62;
-      this.horrorPulse = 0.72;
-      // Desk lamp bulb violently pops out -> bedroom plunges into dread!
-      this.audio.playOneShot('shatter', { volume: 0.52, rate: 1.55, duration: 0.55, releaseSec: 0.2, reverb: 0.25 });
-      this.audio.playOneShot('glitch_stutter', { volume: 0.44, rate: 0.98, duration: 1.2, releaseSec: 0.35, reverb: 0.35 });
-      this.triggerGlitch('sort', 0.80, 0.64);
-      this.audio.playOneShot('scrapemare', {
-        volume: 0.36,
-        duration: 5.2,
-        fadeInSec: 0.4,
-        releaseSec: 1.6,
-        reverb: 0.5,
-      });
-      this.audio.startOrUpdateLoop('static_elec', 'static_elec', {
         volume: 0.22,
-        fadeSec: 0.8,
+        duration: 2.8,
+        fadeInSec: 0.18,
+        releaseSec: 0.85,
+        reverb: 0.42,
       });
-      this.showSubtitle('立てない。', 3800);
-    } else if (this.clickCount === 4) {
-      this.targetMadness = 0.84;
-      this.jawVel += 1.85;
-      this.targetJawOpen = 0.80;
-      this.horrorPulse = 0.86;
-      this.triggerGlitch('roll', 0.86, 0.78);
-      this.audio.playOneShot('noise_wave', { volume: 0.42, duration: 2.8, releaseSec: 1.0, reverb: 0.4 });
-      this.audio.playOneShot('monitor_glitch', { volume: 0.58, duration: 1.2, releaseSec: 0.4 });
-      this.audio.playOneShot('glitch_stutter', { volume: 0.52, rate: 0.90, duration: 1.4, releaseSec: 0.4, reverb: 0.38 });
-      this.audio.startOrUpdateLoop('static_elec', 'static_elec', {
-        volume: 0.36,
-        fadeSec: 0.7,
-      });
-      this.showSubtitle('息が、吸えない。', 3600);
-    } else if (this.clickCount === 5) {
-      // UNHINGED PREDATORY GAPE — wide-open waiting maw pulling air inward before swallowing!
-      this.targetMadness = 0.96;
-      this.jawVel += 2.45;
-      this.targetJawOpen = 0.92;
-      this.horrorPulse = 0.99;
-      this.triggerGlitch('ghost', 0.96, 1.5);
-      this.triggerGlitch('tear', 0.88, 0.42);
-      this.audio.playOneShot('sub_boom', { volume: 0.68, rate: 1.06, reverb: 0.3 });
-      this.audio.playOneShot('glitch_stutter', { volume: 0.62, rate: 0.88, duration: 1.6, releaseSec: 0.4, reverb: 0.42 });
-      this.audio.playOneShot('pain_glitch', { volume: 0.55, rate: 0.86, duration: 1.4, releaseSec: 0.4, reverb: 0.35 });
-      this.showSubtitle('やめて。', 3000);
+      this.showSubtitle('カーソルが、先に動いた。', 3200);
+    } else if (this.clickCount === 2) {
+      this.targetMadness = 0.72;
+      this.jawVel += 1.35;
+      this.targetJawOpen = 0.62;
+      this.horrorPulse = 0.66;
+      this.triggerGlitch('mash', 0.62, 0.38);
+      this.audio.playOneShot('monitor_glitch', { volume: 0.44, duration: 0.82, releaseSec: 0.28 });
+      this.audio.playOneShot('glitch_stutter', { volume: 0.32, rate: 0.92, duration: 0.82, releaseSec: 0.26, reverb: 0.3 });
+      this.audio.playOneShot('creak_room', { volume: 0.44, rate: 0.82, pos: this.behindNeckSoundPos });
+      this.audio.startOrUpdateLoop('static_elec', 'static_elec', { volume: 0.16, fadeSec: 0.65 });
+      this.showSubtitle('青が、部屋の輪郭を覚えている。', 3900);
     } else {
-      this.audio.stopLoop('throat_draft', 0.15);
+      this.targetMadness = 1.0;
+      this.jawVel += 2.25;
+      this.targetJawOpen = 1.0;
+      this.horrorPulse = 1.0;
+      this.triggerGlitch('ghost', 0.88, 0.9);
+      this.triggerGlitch('tear', 0.76, 0.34);
+      this.audio.playOneShot('sub_boom', { volume: 0.62, rate: 1.04, reverb: 0.3 });
+      this.audio.playOneShot('pain_glitch', { volume: 0.48, rate: 0.9, duration: 1.0, releaseSec: 0.32, reverb: 0.35 });
+      this.showSubtitle('NO SIGNAL.', 2200);
       this.beginPredatorySuction();
     }
   }
@@ -2091,8 +2039,8 @@ class BsodExperienceApp {
           this.opticStrain = 0;
           this.periodicWarpCooldown = 6.5;
           this.crosshairEl.classList.remove('hidden');
-          this.setObjective('光の柱を目指す');
-          this.worldHintEl.textContent = '[C] コンソール';
+          this.setObjective('[C] で緊急コンソールを開く — いつでも離脱できる');
+          this.worldHintEl.textContent = '[C] 緊急コンソール';
           this.worldHintEl.classList.remove('hidden');
           this.showSubtitle('橋の向こうに、光が見える。', 5200);
         }
@@ -2146,11 +2094,8 @@ class BsodExperienceApp {
           this.opticStrain = Math.max(0, this.opticStrain - dt * 1.25);
         }
 
-        const distCore = Math.hypot(
-          this.player.position.x - this.glitchWorld.corePosition.x,
-          this.player.position.z - this.glitchWorld.corePosition.z
-        );
-        this.consoleUI.setWorldState(this.glitchWorld.coreSecretRevealed, distCore);
+        // The sanctuary still reacts if discovered, but it is no longer a progress gate.
+        // This keeps the skyline as an invitation rather than a mandatory destination.
 
         // Seamless Environmental Horror Milestones along the Causeway (zero tedious item collecting!)
         if (this.player.position.z < 4.0 && !this.glitchMilestones.archEntry) {
@@ -2173,11 +2118,13 @@ class BsodExperienceApp {
 
         if (!wasRevealed && this.glitchWorld.coreSecretRevealed) {
           this.audio.playOneShot('ghost_cantata', { volume: 0.48, reverb: 0.55 });
-          this.setObjective('[C] コンソールで命令を実行する');
-          this.worldHintEl.textContent = '[C] コンソール';
-          this.showSubtitle('命令が読める。コンソールに入力しよう。', 5200);
+          this.showSubtitle('塔の残骸が、あなたの入力に遅れて明滅している。', 4600);
         }
 
+        const distCore = Math.hypot(
+          this.player.position.x - this.glitchWorld.corePosition.x,
+          this.player.position.z - this.glitchWorld.corePosition.z
+        );
         const nearCoreFactor = THREE.MathUtils.clamp(1 - distCore / 50, 0, 1);
         this.audio.startOrUpdateLoop('bgm_dread', 'bgm_dread_drone', {
           volume: 0.12 + nearCoreFactor * 0.26,
