@@ -27,6 +27,12 @@ export type PostFXOptions = {
   sort?: number;
   roll?: number;
   ghost?: number;
+  /** Decoder macroblock failure: whole tiles of the frame are displaced and crushed. */
+  block?: number;
+  /** Line-slip: horizontal slices of the field drop out of vertical lock. */
+  slice?: number;
+  /** Composite CRT transport fault: sync bar, line noise, chroma bleed. 0 = clean. */
+  signal?: number;
   bloom?: number;
   sharpen?: number;
   transition?: { scene: THREE.Scene; camera: THREE.Camera; progress: number };
@@ -95,6 +101,9 @@ export class PostFX {
         uSort: { value: 0 },
         uRoll: { value: 0 },
         uGhost: { value: 0 },
+        uBlock: { value: 0 },
+        uSlice: { value: 0 },
+        uSignal: { value: 0 },
         tBloom: { value: null },
         uBloom: { value: 0.0 },
         uSharpen: { value: 0.28 },
@@ -125,6 +134,9 @@ export class PostFX {
         uniform float uSort;
         uniform float uRoll;
         uniform float uGhost;
+        uniform float uBlock;
+        uniform float uSlice;
+        uniform float uSignal;
         uniform sampler2D tBloom;
         uniform float uBloom;
         uniform float uSharpen;
@@ -178,7 +190,8 @@ export class PostFX {
             r2 = dot(centered, centered);
           }
 
-          float total = uDistort + uTear + uMash + uSort + uRoll + uGhost + uWarp + uChromatic;
+          float total = uDistort + uTear + uMash + uSort + uRoll + uGhost + uWarp + uChromatic
+                      + uBlock + uSlice + uSignal * 0.7;
           vec2 refractOffset = vec2(0.0);
           float waveMask = 0.0;
           float seam = 0.0;
@@ -244,6 +257,38 @@ export class PostFX {
               float anchor = hash21(vec2(row * 3.1, tick + 2.0));
               uv.x = mix(uv.x, anchor * 0.55 + uv.x * 0.45, rowActive * 0.65);
               seam += rowActive * 0.55;
+            }
+
+            // ------------------------------------------------------------ 4b. LINE SLIP
+            // The field's vertical hold lets go for a handful of scanline groups. Unlike TEAR,
+            // which shoves a band sideways, this drops slices *up and down* and leaves a black
+            // gap at the seam — the classic broken-transport look.
+            if (uSlice > 0.01) {
+              float slices = 9.0;
+              float sliceId = floor(uv.y * slices);
+              float sliceTick = floor(uTime * 15.0);
+              float pick = hash21(vec2(sliceId, sliceTick) + vec2(11.3, 2.7));
+              float sliceOn = step(0.80 - uSlice * 0.35, pick);
+              float drop = (hash21(vec2(sliceId * 2.1, sliceTick + 9.0)) - 0.5) * 0.055 * uSlice;
+              uv.y += drop * sliceOn;
+              // The torn seam: a thin dark rule where the slice detached from its neighbours.
+              float sliceEdge = smoothstep(0.006, 0.0, abs(fract(uv.y * slices) - 0.5));
+              seam += sliceOn * uSlice * 0.55;
+              chaseBands += sliceOn * sliceEdge * uSlice;
+            }
+
+            // ------------------------------------------------------------ 4c. DECODER BLOCKS
+            // Whole macroblocks give up: displaced as units, so the frame reads as a broken
+            // codec instead of blurred noise.
+            if (uBlock > 0.01) {
+              vec2 grid = mix(vec2(12.0, 7.0), vec2(30.0, 17.0), fract(uBlock * 3.7));
+              vec2 cell = floor(uv * grid);
+              float tick = floor(uTime * (6.0 + uBlock * 10.0));
+              float pick = hash21(cell + tick * 0.61);
+              float on = step(0.90 - uBlock * 0.42, pick);
+              vec2 off = (vec2(hash21(cell * 1.71 + tick), hash21(cell * 3.13 - tick)) - 0.5);
+              uv += off * vec2(0.09, 0.045) * uBlock * on;
+              chaseBands += on * uBlock * 0.6;
             }
 
             // ------------------------------------------------------------ 5. CRT ROLL
@@ -325,6 +370,35 @@ export class PostFX {
             float chan = clamp(uMash * 0.012, 0.0, 0.014);
             col.r = mix(col.r, fetch(uv + vec2(chan, 0.0)).r, uMash * 0.7);
             col.b = mix(col.b, fetch(uv - vec2(chan, 0.0)).b, uMash * 0.7);
+          }
+
+          // ---------------------------------------------------------------- DECODER BLOCK CRUSH
+          // Blocks that were displaced also lose their colour resolution: they hold a single
+          // quantised tint, which is exactly what a failing YUV decoder does.
+          if (uBlock > 0.03) {
+            vec2 bgrid = mix(vec2(12.0, 7.0), vec2(30.0, 17.0), fract(uBlock * 3.7));
+            vec2 bcell = floor(vUv * bgrid);
+            float btick = floor(uTime * (6.0 + uBlock * 10.0));
+            float bpick = hash21(bcell + btick * 0.61);
+            float bon = step(0.90 - uBlock * 0.42, bpick);
+            vec3 blockTint = col * 0.55 + vec3(0.02, 0.10, 0.22) * 0.9;
+            col = mix(col, floor(blockTint * 6.0) / 6.0, bon * clamp(uBlock * 1.1, 0.0, 0.9));
+          }
+
+          // ---------------------------------------------------------------- TRANSPORT FAULT
+          // One bright sync bar sweeping the field, plus line noise that only lives in the darks,
+          // so it reads as a dying analogue transport rather than generic film grain.
+          if (uSignal > 0.01) {
+            float barY = fract(uTime * 0.42);
+            float bar = exp(-pow((fract(vUv.y - barY + 0.5) - 0.5) * 22.0, 2.0));
+            col += vec3(0.35, 0.72, 1.0) * bar * uSignal * 0.14;
+            float lineNoise = hash21(vec2(floor(vUv.y * 320.0), floor(uTime * 24.0)));
+            float darkMask = 1.0 - smoothstep(0.10, 0.42, dot(col, vec3(0.2126, 0.7152, 0.0722)));
+            col += (lineNoise - 0.5) * 0.10 * uSignal * darkMask;
+            // Chroma bleed along the transport direction.
+            float bleed = 0.004 * uSignal;
+            col.r = mix(col.r, fetch(vUv + vec2(bleed, 0.0)).r, 0.55 * uSignal);
+            col.b = mix(col.b, fetch(vUv - vec2(bleed, 0.0)).b, 0.45 * uSignal);
           }
 
           // ---------------------------------------------------------------- SEAMS & BEAM
@@ -594,6 +668,9 @@ export class PostFX {
     u.uSort.value = opts.sort ?? 0;
     u.uRoll.value = opts.roll ?? 0;
     u.uGhost.value = opts.ghost ?? 0;
+    u.uBlock.value = opts.block ?? 0;
+    u.uSlice.value = opts.slice ?? 0;
+    u.uSignal.value = opts.signal ?? 0;
     u.uSharpen.value = opts.sharpen ?? 0.28;
 
     renderer.setRenderTarget(this.rt);

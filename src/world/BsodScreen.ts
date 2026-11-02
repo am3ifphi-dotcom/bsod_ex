@@ -1,5 +1,16 @@
 import * as THREE from 'three';
+import { fitText, jpFontStack, monoFontStack } from '../utils/CanvasText';
 import { getSharedNoiseTexture } from '../utils/ProceduralNoise';
+
+/** Host-status tail printed on the panel footer. Reads like a kernel table, not like a caption. */
+const HOST_LINE = [
+  'HOST_SEATED',
+  'HOST_OBSERVED',
+  'HOST_SAMPLED',
+  'HOST_UNMOUNTED',
+  'HOST_DIGESTING',
+  'HOST_UNKNOWN',
+];
 
 export interface BsodScreenState {
   hoverFace: boolean;
@@ -231,11 +242,12 @@ export class BsodScreen {
   public readonly monitorLight: THREE.PointLight;
 
   private readonly stageTextures: THREE.CanvasTexture[] = [];
-  private readonly aftermathTex: THREE.CanvasTexture;
-  private readonly cardTex: THREE.CanvasTexture;
+  private aftermathTex!: THREE.CanvasTexture;
+  private cardTex!: THREE.CanvasTexture;
 
-  private readonly faceCanvas: HTMLCanvasElement;
-  private readonly faceTex: THREE.CanvasTexture;
+  private faceCanvas!: HTMLCanvasElement;
+  private faceTex!: THREE.CanvasTexture;
+  private prepared = false;
 
   public readonly screenMesh: THREE.Mesh;
   public readonly screenMat: THREE.ShaderMaterial;
@@ -291,17 +303,24 @@ export class BsodScreen {
   public static readonly LOCAL_W = 1.90566;
   public static readonly LOCAL_H = 1.0;
 
-  constructor() {
-    const noiseTex = getSharedNoiseTexture();
+  /**
+   * Bakes every panel texture. Separate from the constructor because canvas typography has to
+   * wait for the self-hosted Japanese face — see utils/fonts.ts. Called once from the bedroom load.
+   */
+  public prepare(): void {
+    if (this.prepared) return;
+    this.prepared = true;
 
-    // 1. Pre-bake all 6 BSOD stages + aftermath onto separate GPU-ready CanvasTextures ONCE at boot
-    //    so clicking ':(' during gameplay costs 0.00ms CPU canvas work and 0.00ms gl.texImage2D upload!
+    // 1. Pre-bake all 6 BSOD stages + aftermath onto GPU-ready CanvasTextures ONCE at boot so
+    //    clicking ':(' during gameplay costs 0.00ms CPU canvas work and 0.00ms texture upload.
+    this.stageTextures.length = 0;
     for (let s = 0; s <= 5; s++) {
       this.stageTextures.push(this.bakeStageTexture(s, false));
     }
     this.aftermathTex = this.bakeStageTexture(0, true);
+    this.screenMat.uniforms.uBodyTex.value = this.stageTextures[0];
 
-    // 2. Separate SDF Face Channel Map (R = ':' eyes SDF, G = '(' mouth SDF) at crisp mipmapped 1024x1024
+    // 2. Separate SDF Face Channel Map (R = ':' eyes SDF, G = '(' mouth SDF) at crisp 1024x1024.
     this.faceCanvas = document.createElement('canvas');
     this.faceCanvas.width = 1024;
     this.faceCanvas.height = 1024;
@@ -312,6 +331,31 @@ export class BsodScreen {
     this.faceTex.anisotropy = 8;
     this.faceTex.generateMipmaps = true;
     this.faceTex.needsUpdate = true;
+    this.screenMat.uniforms.uFaceTex.value = this.faceTex;
+
+    // Card texture is baked inside the throat builder; everything is now safe to upload.
+    this.preparedTextures.length = 0;
+    this.preparedTextures.push(...this.stageTextures, this.aftermathTex, this.faceTex, this.cardTex);
+  }
+
+  private readonly preparedTextures: THREE.Texture[] = [];
+
+  constructor() {
+    const noiseTex = getSharedNoiseTexture();
+
+    // Placeholder canvases so the shader compiles and the monitor is blue before `prepare()`.
+    const placeholder = document.createElement('canvas');
+    placeholder.width = 8;
+    placeholder.height = 8;
+    const pctx = placeholder.getContext('2d');
+    if (pctx) {
+      pctx.fillStyle = '#0078d7';
+      pctx.fillRect(0, 0, 8, 8);
+    }
+    const placeholderTex = new THREE.CanvasTexture(placeholder);
+    placeholderTex.colorSpace = THREE.SRGBColorSpace;
+    this.stageTextures.push(placeholderTex);
+    this.faceTex = placeholderTex;
 
     // 3. Invisible low-poly raycast plane (2 triangles = 0.001ms raycast!)
     const hitGeo = new THREE.PlaneGeometry(BsodScreen.LOCAL_W, BsodScreen.LOCAL_H, 1, 1);
@@ -1133,7 +1177,11 @@ export class BsodScreen {
           float portalOpen = smoothstep(0.03, 0.16, uSuction);
           if (uAftermath < 0.5 && portalOpen > 0.01 && mDist < portalOpen * 1.03) discard;
 
-          // ---------------------------------------------------------------- 2. LCD PANEL & TACTILE IMPACT REFRACTION
+          // ---------------------------------------------------------------- 2. LCD RASTER FAULT MODEL
+          // A dying panel never looks like "noise". It loses horizontal/vertical lock in discrete,
+          // readable steps: rows slip, the field rolls, blocks of the decoder give up, the backlight
+          // breathes, and the last clean frame stays burned into the crystals. Everything below is
+          // that physics, driven by three readable inputs (touch, madness, suction).
           vec4 noiseA = texture2D(uNoiseTex, uv * vec2(3.2, 1.8) + vec2(0.0, uTime * 0.04));
           vec4 noiseB = texture2D(uNoiseTex, uv * vec2(7.5, 4.2) - vec2(uTime * 0.03, 0.0));
 
@@ -1143,13 +1191,36 @@ export class BsodScreen {
           float impWave = exp(-pow((impDist - ringRadius) * 12.0, 2.0)) * uClickPulse;
           vec2 impDir = impDist > 1e-4 ? impDelta / impDist : vec2(0.0, 1.0);
 
-          float tearAmt = uMadness * 0.028 + uClickPulse * 0.040;
-          float band = floor(uv.y * (30.0 + uMadness * 34.0));
-          float tick = floor(uTime * (12.0 + uMadness * 22.0));
-          float bandRnd = hash21(vec2(band, tick));
-          float bandShift = step(0.90 - uMadness * 0.24, bandRnd) * (bandRnd - 0.5) * 2.0 * (tearAmt * 0.38);
+          float touchSq = uClickPulse * uClickPulse;
+          float tick30 = floor(uTime * 30.0);
+          float dropout = step(0.978, hash21(vec2(tick30, 3.1))) * (0.30 + uMadness * 0.55);
+          float syncLoss = clamp(touchSq * 1.20 + dropout + uMadness * 0.10, 0.0, 1.0);
 
-          vec2 bodyUv = uv + vec2(bandShift, 0.0) + impDir * impWave * 0.014;
+          // V-HOLD slip: the field slides up and clamps, like a mistimed vertical blanking interval.
+          float slur = syncLoss * (0.06 + 0.30 * hash21(vec2(floor(uTime * 18.0), 7.7)));
+          vec2 rasterUv = uv;
+          rasterUv.y = fract(rasterUv.y + slur);
+
+          // Row clock drop: individual rows step sideways by a fraction of a cell.
+          float rasterRow = floor(rasterUv.y * 240.0);
+          float rasterRowTime = floor(uTime * 24.0);
+          float rowPick = hash21(vec2(rasterRow, rasterRowTime));
+          float rowSlip = step(0.905 - uMadness * 0.20 - syncLoss * 0.32, rowPick);
+          rasterUv.x += (hash21(vec2(rasterRow * 1.7, rasterRowTime + 5.0)) - 0.5)
+                      * (0.003 + uMadness * 0.013 + syncLoss * 0.045) * rowSlip;
+
+          // Decoder macroblock drop-out (8x8 tiles abandoned one at a time).
+          vec2 blockGrid = vec2(96.0, 54.0);
+          vec2 blockCell = floor(rasterUv * blockGrid);
+          float blockPick = hash21(blockCell + floor(uTime * 6.0));
+          float blockAmt = smoothstep(0.34, 0.92, uMadness);
+          float blockOn = step(0.985 - blockAmt * 0.120 - touchSq * 0.05, blockPick);
+          rasterUv += (vec2(hash21(blockCell * 1.31), hash21(blockCell * 2.73)) - 0.5)
+                    * vec2(1.0 / blockGrid.x, 1.0 / blockGrid.y) * 6.0 * blockOn * blockAmt;
+
+          // Liquid-crystal thermal shimmer + the tactile pressure ripple from the fingertip.
+          float heat = sin(rasterUv.y * 92.0 + uTime * 2.2) * 0.0011 * (1.0 + uMadness * 3.0);
+          vec2 bodyUv = rasterUv + vec2(heat, 0.0) + impDir * impWave * 0.016;
 
           float vortexHalo = exp(-pow(length(md) * 2.4, 2.0)) * smoothstep(0.04, 0.50, openN);
           if (vortexHalo > 0.002) {
@@ -1160,13 +1231,47 @@ export class BsodScreen {
           }
           bodyUv = clamp(bodyUv, 0.001, 0.999);
 
-          float chr = uMadness * 0.0038 + uClickPulse * 0.009 + mStress * openN * 0.007 + impWave * 0.011;
+          // Split-panel misregistration: the three subpixels are sampled from slightly different rows.
+          float chr = uMadness * 0.0032 + uClickPulse * 0.010 + mStress * openN * 0.007 + impWave * 0.012;
+          float rowChr = rowSlip * (uMadness * 0.010 + syncLoss * 0.020);
           vec3 panel;
-          panel.r = texture2D(uBodyTex, clamp(bodyUv + vec2(chr, 0.0), 0.001, 0.999)).r;
+          panel.r = texture2D(uBodyTex, clamp(bodyUv + vec2(chr, rowChr), 0.001, 0.999)).r;
           panel.g = texture2D(uBodyTex, bodyUv).g;
-          panel.b = texture2D(uBodyTex, clamp(bodyUv - vec2(chr, 0.0), 0.001, 0.999)).b;
+          panel.b = texture2D(uBodyTex, clamp(bodyUv - vec2(chr, rowChr), 0.001, 0.999)).b;
+
+          // Image retention: the previous field is still sitting in the crystals and will not clear.
+          vec3 retained = texture2D(uBodyTex, clamp(bodyUv + vec2(0.0, 0.085), 0.001, 0.999)).rgb;
+          panel += retained * (0.05 + 0.22 * syncLoss) * vec3(0.55, 0.88, 1.0);
 
           vec3 col = mix(vec3(0.0, 0.4706, 0.8392), panel, clamp(length(panel) * 1.6, 0.0, 1.0));
+
+          // Slow refresh sweep crawling up the panel, plus the hard bright line where a rolled
+          // field snapped back into lock.
+          float sweep = fract(uTime * 0.145);
+          float sweepDist = abs(fract(uv.y - sweep + 0.5) - 0.5);
+          float sweepBand = exp(-pow(sweepDist * 46.0, 2.0));
+          col += vec3(0.30, 0.66, 1.0) * sweepBand * (0.010 + uMadness * 0.030);
+          float syncLine = smoothstep(0.0022, 0.0, abs(fract(uv.y + slur) - 0.0016)) * step(0.0008, slur);
+          col += vec3(0.62, 0.92, 1.0) * syncLine * 0.75;
+
+          // Backlight breathing — the inverter is the only thing still on its own clock.
+          col *= 0.988 + 0.012 * sin(uTime * 1.9 + sin(uTime * 0.41) * 2.0);
+
+          // A dead source-line drops a whole column band darker than the rest of the panel.
+          float columnId = floor(uv.x * 72.0);
+          float columnDead = step(0.988 - uMadness * 0.030, hash21(vec2(columnId, floor(uTime * 8.0))));
+          col *= 1.0 - columnDead * 0.30 * smoothstep(0.35, 0.95, uMadness);
+
+          // Your fingertip presses on the backlight: the panel dimples and the light around the
+          // contact point scatters. This is the only "cursor" the screen ever draws.
+          if (uHover > 0.015) {
+            vec2 cursorDelta = (uv - uCursorUv) * vec2(1.90566, 1.0);
+            float cursorDist = length(cursorDelta);
+            float press = exp(-cursorDist * 24.0) * uHover;
+            float pressRim = exp(-pow((cursorDist - 0.055) * 46.0, 2.0)) * uHover;
+            col = mix(col, col * 0.70, press * 0.60);
+            col += vec3(0.34, 0.74, 1.0) * pressRim * 0.10;
+          }
 
           if (uAftermath < 0.5) {
             // ---------------------------------------------------------------- 3. SUB-LCD 3D VISAGE RELIEF & SHATTERED GLASS
@@ -1224,7 +1329,18 @@ export class BsodScreen {
 
             vec2 cursorPullF = clamp((uCursorUv - faceCenter) * vec2(1.90566, 1.0), vec2(-0.42), vec2(0.42))
                              * (0.032 * uHover + 0.055 * uMadness);
-            vec2 eyeUv = vec2(0.5) + (fLocal - cursorPullF);
+
+            // SACCADES. The glyph is not staring at one point: it jumps, holds, jumps again.
+            // The jumps get bigger and more frequent as the signal degrades and as you lean in.
+            float saccadeTick = floor(uTime * (1.05 + uMadness * 3.4));
+            vec2 saccade = (vec2(hash21(vec2(saccadeTick, 2.2)), hash21(vec2(saccadeTick, 8.8))) - 0.5)
+                         * vec2(0.032, 0.019) * (0.30 + uMadness * 0.95 + uHover * 0.55);
+
+            // MISPRINT. For two frames the panel prints the wrong character entirely: ')' instead
+            // of '('. It is the cheapest trick in the book and still the one that makes people flinch.
+            float misprint = step(0.974 - uMadness * 0.055, hash11(floor(uTime * 7.0) * 3.31));
+            vec2 glyphLocal = fLocal - cursorPullF - saccade;
+            vec2 eyeUv = vec2(0.5) + vec2(mix(glyphLocal.x, -glyphLocal.x, misprint), glyphLocal.y);
 
             float glyphEyeFade = 1.0;
             float eyesInk = 0.0;
@@ -1234,8 +1350,8 @@ export class BsodScreen {
 
             float jawFade = 1.0;
             float splitSpread = pow(uMadness, 1.35) * 0.11 + openN * 0.24;
-            float mouthLocalX = mix(fLocal.x, parenLocal.x * 2.0 - fLocal.x, smileFlip);
-            float mouthLocalY = parenLocal.y + (fLocal.y - parenLocal.y) / (1.0 + smoothstep(0.06, 0.32, uMadness) * 0.18);
+            float mouthLocalX = mix(glyphLocal.x, parenLocal.x * 2.0 - glyphLocal.x, smileFlip);
+            float mouthLocalY = parenLocal.y + (glyphLocal.y - parenLocal.y) / (1.0 + smoothstep(0.06, 0.32, uMadness) * 0.18);
 
             float mouthInk = 0.0;
             if (jawFade > 0.005) {
@@ -1245,7 +1361,7 @@ export class BsodScreen {
               }
               float braceWeight = smoothstep(0.10, 0.24, uMadness);
               if (braceWeight > 0.01) {
-                vec2 jawUvB = vec2(0.5) + vec2((parenLocal.x * 2.0 - fLocal.x) - splitSpread, mouthLocalY);
+                vec2 jawUvB = vec2(0.5) + vec2((parenLocal.x * 2.0 - glyphLocal.x) - splitSpread, mouthLocalY);
                 if (jawUvB.x > 0.01 && jawUvB.x < 0.99 && jawUvB.y > 0.01 && jawUvB.y < 0.99) {
                   mouthInk = max(mouthInk, sampleSdfGlyph(texture2D(uFaceTex, jawUvB).g) * braceWeight);
                 }
@@ -1265,12 +1381,26 @@ export class BsodScreen {
               echoInk = max(sampleSdfGlyph(echo.r), sampleSdfGlyph(echo.g)) * rowFault;
             }
             float faceInk = clamp(eyesInk + mouthInk, 0.0, 1.0);
+
+            // SIGNAL EROSION. The type is made of pixels, and pixels get dropped. Cells fall out of
+            // the glyph in the order the decoder loses them, so the shape reads as *decaying*, not
+            // as noise laid on top of clean type.
+            vec2 erodeCell = floor(fLocal * vec2(78.0, 56.0));
+            float erodePick = hash21(erodeCell + floor(uTime * 5.0));
+            float erodeCut = smoothstep(0.26, 0.82, uMadness);
+            float erode = step(erodePick, erodeCut * (0.20 + 0.62 * noiseB.g));
+            float faceInkEroded = faceInk * (1.0 - erode * 0.94);
+
             col = mix(col, vec3(0.10, 0.85, 1.0), echoInk * 0.65);
-            col = mix(col, vec3(1.0), faceInk);
+            col = mix(col, vec3(1.0), faceInkEroded);
+
+            // The dropped cells leave a dark, unlit hole in the liquid crystal.
+            col = mix(col, vec3(0.004, 0.028, 0.10), erode * faceInk * 0.85);
 
             if (eyesInk > 0.05 && (uHover > 0.05 || uMadness > 0.02 || stage0Betrayal > 0.5)) {
-              float dDotA = length((fLocal - (colonLocal + vec2(0.0, eyeOff)) - cursorPullF * 1.35) * vec2(1.45, 0.90));
-              float dDotB = length((fLocal - (colonLocal - vec2(0.0, eyeOff)) - cursorPullF * 1.35) * vec2(1.45, 0.90));
+              vec2 pupilLocal = fLocal - saccade * 0.55;
+              float dDotA = length((pupilLocal - (colonLocal + vec2(0.0, eyeOff)) - cursorPullF * 1.35) * vec2(1.45, 0.90));
+              float dDotB = length((pupilLocal - (colonLocal - vec2(0.0, eyeOff)) - cursorPullF * 1.35) * vec2(1.45, 0.90));
               float slitIris = step(min(dDotA, dDotB), 0.014)
                              * clamp(uHover * 0.28 + uMadness * 2.0 + stage0Betrayal * 0.6, 0.0, 0.8);
               col = mix(col, vec3(0.005, 0.02, 0.06), slitIris * eyesInk);
@@ -1306,6 +1436,12 @@ export class BsodScreen {
             vec3 ipsGlow = vec3(0.05, 0.16, 0.34) * offAxis;
             col = col * mix(1.0, 0.86, offAxis) + ipsGlow * 0.28;
           }
+
+          // Physical panel edges: the bezel casts a hard inner shadow onto the glass, and the
+          // moulding clips a little light at the corners. Kills the "flat quad" read.
+          float edgeX = smoothstep(0.0, 0.018, uv.x) * smoothstep(1.0, 0.982, uv.x);
+          float edgeY = smoothstep(0.0, 0.030, uv.y) * smoothstep(1.0, 0.970, uv.y);
+          col *= mix(0.55, 1.0, edgeX * edgeY);
 
           vec2 px = uv * vec2(1920.0, 1080.0);
           float subpx = 0.976 + 0.024 * sin(px.x * 3.14159);
@@ -2582,6 +2718,267 @@ export class BsodScreen {
     }
   }
 
+  // ---------------------------------------------------------------------------------------------
+  // PANEL AUTHORING
+  //
+  // The blue screen is the single most important prop in the game, so it is authored like print,
+  // not like a debug overlay: one authentic Windows 10 layout, one column of body copy, one QR
+  // block, one stop code. Everything after stage 0 is *degradation of that same layout* — text
+  // losing characters, the paragraph reflowing into a glyph field, the QR rotting into an eye.
+  //
+  // Rule: never add decoration that a real BSOD would not have. The horror comes from watching an
+  // authentic document fail, not from stickers on top of it.
+  // ---------------------------------------------------------------------------------------------
+
+  private static readonly COPY: Record<number, [string, string]> = {
+    0: [
+      '問題が発生したため、PC を再起動する必要があります。',
+      'エラー情報を収集しています。自動的に再起動します。',
+    ],
+    1: [
+      '問題が発生したため、PC を再起動する必要があります。',
+      'エラー情報を収集しています。網膜反射と視線座標を同期しています。',
+    ],
+    2: [
+      '視覚野のダイレクトダンプを開始しました。瞬きを停止してください。',
+      '室内深度センサーが椅子の背後に未登録の質量を検出しました。',
+    ],
+    3: [
+      '脊髄運動路 (C3-C5) をアンマウントしました。離席要求は拒否されました。',
+      '表示データが自己複製しています。画面から目を離さないでください。',
+    ],
+    4: [
+      'ホストの知覚テーブルを切り離しています。声帯  ―  未接続。',
+      '画面ハ 自己ヲ 観測シ続ケル。注視ハ 解除サレナイ。',
+    ],
+  };
+
+  private static readonly STOP_CODES = [
+    'CRITICAL_PROCESS_DIED',
+    'OPTIC_NERVE_PAGE_FAULT',
+    'UNREGISTERED_OBSERVER_BEHIND_HOST',
+    'MOTOR_CORTEX_UNMOUNTED',
+    'DISPLAY_GLYPH_CORRUPTION',
+    'CONSCIOUSNESS_TRANSFER_COMMIT',
+  ];
+
+  /** Deterministic per-text corruption: dropped, doubled and substituted characters. */
+  private corruptText(input: string, amount: number, seed: number): string {
+    if (amount <= 0.001) return input;
+    const junk = [':', '(', ')', ';', '_', '|', '0', '1', 'F', '4', '\\', '/', '\u25A1'];
+    let state = (seed | 0) || 1;
+    const rnd = (): number => {
+      state = (state * 1103515245 + 12345) & 0x7fffffff;
+      return state / 0x7fffffff;
+    };
+    let out = '';
+    for (const ch of Array.from(input)) {
+      const r = rnd();
+      if (ch === ' ' || r > amount) {
+        out += ch;
+        continue;
+      }
+      if (r < amount * 0.50) {
+        out += junk[Math.floor(rnd() * junk.length)];
+      } else if (r < amount * 0.72) {
+        out += '';
+      } else if (r < amount * 0.90) {
+        out += ch + ch;
+      } else {
+        out += ch.toUpperCase();
+      }
+    }
+    return out;
+  }
+
+  /**
+   * The face is NEGATIVE SPACE.
+   *
+   * Nothing extra is drawn: the printed dump text simply stops, and the shape it stops in is two
+   * eye sockets and an open mouth — the '(' of the glyph, straight on. A hole in a page of text is
+   * far more unsettling than a face drawn on top of it, because the eye reads it as something the
+   * document is refusing to print.
+   */
+  private faceHolePath(ctx: CanvasRenderingContext2D, cx: number, cy: number, rx: number, ry: number): void {
+    // Head silhouette: tapered jaw, flat temples, a chin that comes to a soft point. A plain
+    // ellipse reads as a bubble; the jaw is what makes it a head.
+    const N = 72;
+    for (let i = 0; i <= N; i++) {
+      const a = (i / N) * Math.PI * 2;
+      const sy = Math.sin(a);
+      const sx = Math.cos(a);
+      // Narrower below the cheekbones, wider at the cranium.
+      const jawTaper = sy > 0 ? 1 - 0.26 * Math.pow(sy, 1.6) : 1 + 0.04 * Math.pow(-sy, 2.0);
+      const chin = sy > 0.55 ? 1 + 0.10 * Math.pow((sy - 0.55) / 0.45, 2.0) : 1;
+      const temples = 1 - 0.05 * Math.pow(Math.abs(sx), 6.0) * (1 - Math.abs(sy));
+      const px = cx + sx * rx * jawTaper * temples;
+      const py = cy + sy * ry * chin;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    for (const side of [-1, 1]) {
+      const ex = cx + side * rx * 0.40;
+      const ey = cy - ry * 0.22;
+      ctx.moveTo(ex + rx * 0.25, ey);
+      ctx.ellipse(ex, ey, rx * 0.25, ry * 0.15, side * 0.14, 0, Math.PI * 2, true);
+    }
+    // Mouth: a wide slot that curves down at the corners, sitting high enough on the jaw that the
+    // whole arrangement reads as a face and not as three separate bubbles.
+    const my = cy + ry * 0.34;
+    ctx.moveTo(cx + rx * 0.56, my);
+    ctx.ellipse(cx, my, rx * 0.56, ry * 0.125, 0, 0, Math.PI * 2, true);
+  }
+
+  /** Clips subsequent drawing to `rect` minus the face holes, then draws the pupils. */
+  private clipToFace(
+    ctx: CanvasRenderingContext2D,
+    rect: [number, number, number, number],
+    cx: number,
+    cy: number,
+    rx: number,
+    ry: number,
+    pupils: boolean
+  ): void {
+    const [x, y, w, h] = rect;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, w, h);
+    this.faceHolePath(ctx, cx, cy, rx, ry);
+    ctx.clip('evenodd');
+
+    // Defer the pupils until after the clipped pass has finished.
+    if (pupils) {
+      (ctx as unknown as { __pupils?: Array<number> }).__pupils = [
+        cx - rx * 0.42,
+        cy - ry * 0.26,
+        cx + rx * 0.42,
+        cy - ry * 0.26,
+        rx * 0.045,
+        ry * 0.035,
+      ];
+    }
+  }
+
+  private finishFaceClip(ctx: CanvasRenderingContext2D): void {
+    ctx.restore();
+    const store = ctx as unknown as { __pupils?: Array<number> };
+    const p = store.__pupils;
+    if (!p) return;
+    store.__pupils = undefined;
+    ctx.save();
+    for (const sx of [p[0], p[2]]) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+      ctx.beginPath();
+      ctx.arc(sx, p[1], Math.max(2, p[4]), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  /** Hairline white rules + right-aligned telemetry, matching the BSOD type weight exactly. */
+  private drawTelemetryPanel(
+    ctx: CanvasRenderingContext2D,
+    stage: number,
+    x: number,
+    y: number,
+    w: number,
+    mono: string,
+    jp: string,
+    alpha = 1,
+    face?: { cx: number; cy: number; rx: number; ry: number; pupils: boolean }
+  ): void {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    if (face) {
+      ctx.beginPath();
+      ctx.rect(x - 40, y - 70, w + 80, 560);
+      this.faceHolePath(ctx, face.cx, face.cy, face.rx, face.ry);
+      ctx.clip('evenodd');
+    }
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.30)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + w, y);
+    ctx.moveTo(x, y + 62);
+    ctx.lineTo(x + w, y + 62);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.72)';
+    ctx.font = `600 22px ${mono}`;
+    ctx.textAlign = 'left';
+    ctx.fillText('DUMP TRACE  //  PAGE 0x0247', x, y - 18);
+
+    const rows: Array<[string, string]> = [
+      ['SACCADE_CAPTURE', 'LOCKED'],
+      ['C3_MOTOR_INHIBIT', 'ACTIVE'],
+      ['GLYPH_DEFORM', `${Math.min(99, 24 + stage * 15)}%`],
+      ['CURSOR_TRACK', 'SAMPLING'],
+      ['CHIASM_DMA_LOCK', stage >= 3 ? 'OWNED' : 'PENDING'],
+      ['SIGNAL_BREACH', stage >= 4 ? 'TOTAL' : 'RISING'],
+    ];
+    // A real dump trace is mostly bytes. Two columns of them give the carve something to interrupt.
+    ctx.font = `400 15px ${mono}`;
+    for (let i = 0; i < 26; i++) {
+      const ry = y + 92 + i * 20;
+      let hex = '';
+      for (let b = 0; b < 8; b++) {
+        hex += ((((i * 37 + b * 91 + stage * 13) * 2654435761) >>> 24) & 0xff).toString(16).padStart(2, '0') + ' ';
+      }
+      ctx.fillStyle = `rgba(255, 255, 255, ${0.10 + (i % 4) * 0.03})`;
+      ctx.fillText(hex, x + 4, ry);
+      ctx.fillStyle = `rgba(255, 255, 255, ${0.07 + (i % 3) * 0.03})`;
+      ctx.fillText(hex.split('').reverse().join(''), x + w - 132, ry);
+    }
+
+    ctx.font = `400 21px ${mono}`;
+    for (let i = 0; i < rows.length; i++) {
+      const ry = y + 96 + i * 46;
+      ctx.fillStyle = `rgba(255, 255, 255, ${0.48 + i * 0.02})`;
+      ctx.fillText(`${(0xf8000247 + i * 0x18).toString(16).toUpperCase()}`, x, ry);
+      ctx.fillStyle = `rgba(255, 255, 255, ${0.30 + i * 0.03})`;
+      ctx.fillText(rows[i][0], x + 168, ry);
+      ctx.fillStyle = i >= 4 ? 'rgba(255, 220, 228, 0.92)' : 'rgba(255, 255, 255, 0.86)';
+      ctx.textAlign = 'right';
+      ctx.fillText(rows[i][1], x + w, ry);
+      ctx.textAlign = 'left';
+    }
+
+    if (stage >= 2) {
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+      ctx.beginPath();
+      ctx.moveTo(x, y + 96 + rows.length * 46 - 18);
+      ctx.lineTo(x + w, y + 96 + rows.length * 46 - 18);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.80)';
+      ctx.font = `400 23px ${jp}`;
+      ctx.fillText(
+        stage >= 3 ? '被験者の視線は、まだ画面の外に出ていません。' : '未登録の観測者が、椅子の背後 0.38m に存在します。',
+        x,
+        y + 96 + rows.length * 46 + 34
+      );
+    }
+    ctx.restore();
+
+    if (face && face.pupils) {
+      ctx.save();
+      for (const side of [-1, 1]) {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.beginPath();
+        ctx.arc(
+          face.cx + side * face.rx * 0.40,
+          face.cy - face.ry * 0.22,
+          Math.max(2.5, face.rx * 0.035),
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
   private bakeStageTexture(stage: number, aftermath: boolean): THREE.CanvasTexture {
     const canvas = document.createElement('canvas');
     canvas.width = 2048;
@@ -2590,6 +2987,8 @@ export class BsodScreen {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     const W = 2048;
     const H = 1074;
+    const jp = jpFontStack();
+    const mono = monoFontStack();
 
     const finalizeTex = (): THREE.CanvasTexture => {
       const tex = new THREE.CanvasTexture(canvas);
@@ -2602,324 +3001,221 @@ export class BsodScreen {
       return tex;
     };
 
+    // ------------------------------------------------------------------ AFTERMATH PANEL
     if (aftermath) {
-      ctx.fillStyle = '#051326';
+      ctx.fillStyle = '#04101f';
       ctx.fillRect(0, 0, W, H);
-
-      ctx.fillStyle = 'rgba(120, 190, 255, 0.03)';
-      for (let y = 0; y < H; y += 4) {
-        ctx.fillRect(0, y, W, 2);
-      }
-      const vg = ctx.createRadialGradient(W * 0.5, H * 0.48, H * 0.1, W * 0.5, H * 0.5, H * 0.78);
-      vg.addColorStop(0, 'rgba(0, 0, 0, 0)');
-      vg.addColorStop(1, 'rgba(0, 0, 0, 0.68)');
-      ctx.fillStyle = vg;
-      ctx.fillRect(0, 0, W, H);
-
-      // Subtle ghostly reflection of a seated silhouette + faint ':)' watermark burned into phosphor!
+      // Phosphor burn-in of a face that is no longer being drawn: a faint, wide smear of lit cells
+      // where the trace used to be, with the sockets still holding their last image.
       ctx.save();
-      ctx.fillStyle = 'rgba(130, 205, 255, 0.08)';
-      ctx.font = '300 245px "Segoe UI", "Yu Gothic UI", sans-serif';
-      ctx.fillText(':)', 224, 372);
+      ctx.fillStyle = 'rgba(150, 200, 240, 0.05)';
+      for (let i = 0; i < 900; i++) {
+        const gx = W * 0.56 + ((i * 2654435761) % 1000) / 1000 * W * 0.36;
+        const gy = H * 0.10 + ((i * 40503) % 1000) / 1000 * H * 0.62;
+        if (Math.random() > 0.6) ctx.fillRect(gx, gy, 3, 2);
+      }
       ctx.restore();
+      ctx.fillStyle = 'rgba(4, 16, 31, 0.72)';
+      ctx.fillRect(0, 0, W * 0.52, H);
 
-      ctx.fillStyle = '#74b9ff';
-      ctx.font = '600 31px Consolas, "Yu Gothic UI", monospace';
-      ctx.fillText('KERNEL CRASH DUMP  //  SESSION RESTORED (02:48:00)', 180, 232);
-
-      ctx.strokeStyle = 'rgba(120, 190, 255, 0.28)';
+      ctx.fillStyle = '#8fc6f2';
+      ctx.font = `600 27px ${mono}`;
+      ctx.fillText('KERNEL CRASH DUMP  //  SESSION RESTORED  02:48:00', 180, 196);
+      ctx.strokeStyle = 'rgba(150, 200, 240, 0.34)';
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(180, 264);
-      ctx.lineTo(W - 180, 264);
+      ctx.moveTo(180, 224);
+      ctx.lineTo(W * 0.44, 224);
       ctx.stroke();
 
-      ctx.fillStyle = 'rgba(218, 236, 255, 0.86)';
-      ctx.font = '300 25px Consolas, "Yu Gothic UI", monospace';
-      ctx.fillText('DUMP_IMAGE     : C:\\Windows\\MEMORY_0247.DMP (VERIFIED)', 180, 318);
-      ctx.fillText('INTERRUPT_VEC  : WAKE_UP [RING0 UNHOOKED]', 180, 364);
+      ctx.fillStyle = 'rgba(226, 240, 252, 0.90)';
+      ctx.font = `400 26px ${mono}`;
+      ctx.fillText('DUMP_IMAGE     : MEMORY_0247.DMP (VERIFIED)', 180, 288);
+      ctx.fillText('INTERRUPT_VEC  : WAKE_UP [RING0 UNHOOKED]', 180, 334);
+      ctx.fillText('DISPLAY_STATE  : NO CARRIER', 180, 380);
 
-      ctx.fillStyle = '#ff6b88';
-      ctx.font = '600 25px Consolas, "Yu Gothic UI", monospace';
-      ctx.fillText('RESIDUAL_HANDLE: OPTIC_NERVE_CACHE -> 1 HANDLE STILL OPEN', 180, 418);
-      ctx.fillStyle = 'rgba(255, 145, 168, 0.58)';
-      ctx.font = '300 22px Consolas, "Yu Gothic UI", monospace';
-      ctx.fillText('NOTE           : 背後の椅子がわずかに回転しています。確認しないでください。', 180, 466);
+      ctx.fillStyle = '#ff8fa6';
+      ctx.font = `600 26px ${mono}`;
+      ctx.fillText('RESIDUAL_HANDLE: OPTIC_NERVE_CACHE  1 HANDLE STILL OPEN', 180, 448);
 
-      ctx.fillStyle = 'rgba(140, 198, 255, 0.62)';
-      ctx.font = '300 23px "Segoe UI", "Yu Gothic UI", sans-serif';
-      ctx.fillText('画面をクリックすると MEMORY_0247.DMP を再マウントします', 180, 868);
+      ctx.fillStyle = 'rgba(214, 234, 250, 0.82)';
+      ctx.font = `400 27px ${jp}`;
+      ctx.fillText('背後の椅子は、あなたより先に回転していました。', 180, 530);
 
+      ctx.fillStyle = 'rgba(160, 196, 224, 0.62)';
+      ctx.font = `400 24px ${jp}`;
+      ctx.fillText('画面に触れるとダンプが再マウントされます。', 180, 928);
       return finalizeTex();
     }
 
-    // Authentic Windows 10/11 Cerulean Blue (#0078D7), bruising colder & deeper at late stages
-    ctx.fillStyle = stage >= 5 ? '#00336e' : stage >= 4 ? '#00498f' : '#0078d7';
+    // ------------------------------------------------------------------ FIELD
+    // Authentic Windows 10 cerulean, bruising colder and deeper as the host is digested.
+    ctx.fillStyle = stage >= 4 ? '#00356f' : stage >= 3 ? '#004586' : '#0078d7';
     ctx.fillRect(0, 0, W, H);
-
-    const leftX = 232;
-    const fontStack = '"Segoe UI", "Yu Gothic UI", "Meiryo", sans-serif';
-
-    // Subtle clinical kernel memory telemetry creeping down the right margin from Stage 1+
-    if (stage >= 1) {
-      ctx.save();
-      ctx.font = '19px Consolas, monospace';
-      ctx.fillStyle = `rgba(195, 234, 255, ${0.045 + stage * 0.036})`;
-      const tags = [
-        'SACCADE_CAPTURE',
-        'C3_MOTOR_INHIBIT',
-        'GLYPH_DEFORM',
-        'CURSOR_TRACK',
-        'CHIASM_DMA_LOCK',
-        'SIGNAL_BREACH',
-      ];
-      for (let r = 0; r < 18; r++) {
-        const addr = (0xf8000247 + r * 0x18 + stage * 0x100).toString(16).toUpperCase();
-        const tag = tags[(r + stage) % tags.length];
-        ctx.fillText(
-          `FFFF${addr}: 00 78 D7 F4  3A 29 0${stage}  [${tag}]`,
-          W - 820,
-          86 + r * 54
-        );
-      }
-      ctx.restore();
+    if (stage >= 2) {
+      const g = ctx.createLinearGradient(0, 0, W, H);
+      g.addColorStop(0, 'rgba(0, 0, 0, 0)');
+      g.addColorStop(1, `rgba(0, 8, 26, ${0.10 + stage * 0.05})`);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+    }
+    if (stage >= 3) {
+      // The panel is being drained from the outside in.
+      const rg = ctx.createRadialGradient(W * 0.42, H * 0.52, H * 0.15, W * 0.42, H * 0.52, H * 1.05);
+      rg.addColorStop(0, 'rgba(0, 0, 0, 0)');
+      rg.addColorStop(1, `rgba(0, 3, 12, ${0.16 + (stage - 3) * 0.12})`);
+      ctx.fillStyle = rg;
+      ctx.fillRect(0, 0, W, H);
     }
 
-    ctx.fillStyle = '#ffffff';
+    const leftX = 226;
+    const bodyTop = 512;
+    const copy = BsodScreen.COPY[Math.min(stage, 4)];
+    const corruption = stage <= 1 ? 0 : stage === 2 ? 0.10 : stage === 3 ? 0.26 : 0.46;
+
+    // ------------------------------------------------------------------ BODY COPY
+    ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
-    ctx.font = `300 47px ${fontStack}`;
-
-    if (stage === 0) {
-      ctx.fillText('問題が発生したため、PC を再起動する必要があります。', leftX, 492);
-      ctx.fillText('エラー情報を収集しています。自動的に再起動します。', leftX, 558);
-      ctx.fillText('99% 完了', leftX, 668);
-    } else if (stage === 1) {
-      ctx.fillText('問題が発生したため、PC を再起動する必要があります。', leftX, 492);
-      ctx.fillText('エラー情報を収集しています。網膜反射と視線座標を同期しています。', leftX, 558);
-      ctx.fillText('99% 完了（応答待機中）', leftX, 668);
-      ctx.fillStyle = 'rgba(225, 244, 255, 0.42)';
-      ctx.font = `300 22px Consolas, ${fontStack}`;
-      ctx.fillText('INPUT_HOOK: カーソル接触を検出 (UV 0.14, 0.74) —— 被験者は画面を凝視中', leftX, 614);
-    } else if (stage === 2) {
-      ctx.fillText('視覚野のダイレクトダンプを開始しました。瞬きを停止してください。', leftX, 492);
-      ctx.fillText('室内深度センサーが椅子の背後に未登録の質量を検出しました。', leftX, 558);
-      ctx.fillText('深度同期中 — 振り返らないでください', leftX, 668);
-
-      // Clinical 3D LiDAR Depth-Contour Relief Scan showing HOST_SEATED + UNKNOWN_OBJ looming 0.38m behind!
-      ctx.save();
-      const bx = 1310;
-      const by = 118;
-      const bw = 540;
-      const bh = 370;
-      ctx.fillStyle = 'rgba(2, 12, 28, 0.86)';
-      ctx.fillRect(bx, by, bw, bh);
-      ctx.strokeStyle = 'rgba(130, 210, 255, 0.72)';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(bx, by, bw, bh);
-
-      ctx.fillStyle = '#9ad8ff';
-      ctx.font = '600 18px Consolas, monospace';
-      ctx.fillText('IR_LIDAR_0 // 02:47:19 [DEPTH_SLICE]', bx + 16, by + 26);
-
-      // 56-slice 3D LiDAR elevation contour raster (replaces crude circle+box shapes with realistic sensor relief!)
-      const slices = 56;
-      for (let s = 0; s < slices; s++) {
-        const vNorm = s / (slices - 1);
-        const baseLineY = by + 44 + vNorm * 258;
-
-        // Background entity depth field (tall organic cranial/shoulder/torso relief standing at u = 0.59)
-        const dHeadBack = Math.hypot((vNorm - 0.23) * 1.45, 0);
-        const dTorsoBack = Math.abs(vNorm - 0.64);
-        const hasBack = dHeadBack < 0.16 || (vNorm > 0.31 && dTorsoBack < 0.38);
-
-        ctx.beginPath();
-        let anyAnom = false;
-        for (let ix = 0; ix <= 90; ix++) {
-          const uNorm = ix / 90;
-          const pxX = bx + 14 + uNorm * (bw - 28);
-
-          // Seated foreground host (head centered at (0.39, 0.48), shoulders at (0.39, 0.78))
-          const hHostHead =
-            Math.exp(-(((uNorm - 0.39) / 0.068) ** 2 + ((vNorm - 0.48) / 0.105) ** 2)) * 16.0;
-          const hHostNeck =
-            Math.exp(-(((uNorm - 0.39) / 0.036) ** 2 + ((vNorm - 0.61) / 0.055) ** 2)) * 9.0;
-          const hHostTorso =
-            Math.exp(-(((uNorm - 0.39) / 0.145) ** 2 + ((vNorm - 0.84) / 0.22) ** 2)) * 14.0;
-          const hostZ = hHostHead + hHostNeck + hHostTorso;
-
-          // Looming tall entity standing directly behind the chair (tilted head at (0.59, 0.22), wide shoulders)
-          const tiltU = uNorm - (0.59 + (vNorm - 0.22) * 0.06);
-          const hEntHead =
-            Math.exp(-((tiltU / 0.064) ** 2 + ((vNorm - 0.22) / 0.10) ** 2)) * 15.0;
-          const hEntShoulders =
-            Math.exp(-(((uNorm - 0.59) / 0.155) ** 2 + ((vNorm - 0.62) / 0.34) ** 2)) * 13.0;
-          const entZ = hEntHead + hEntShoulders;
-          if (entZ > 3.5) anyAnom = true;
-
-          const microNoise = Math.sin(ix * 1.9 + s * 2.7) * 0.55;
-          const pyY = baseLineY - Math.max(hostZ, entZ * 0.88) + microNoise;
-          if (ix === 0) ctx.moveTo(pxX, pyY);
-          else ctx.lineTo(pxX, pyY);
-        }
-        ctx.strokeStyle =
-          hasBack && anyAnom && s % 2 === 0
-            ? 'rgba(255, 86, 118, 0.52)'
-            : 'rgba(120, 212, 255, 0.38)';
-        ctx.lineWidth = 1.25;
-        ctx.stroke();
-      }
-
-      // Target reticle & vector callout on the looming anomaly behind the chair
-      const tx = bx + 14 + 0.59 * (bw - 28);
-      const ty = by + 44 + 0.20 * 258;
-      ctx.strokeStyle = 'rgba(255, 98, 128, 0.82)';
-      ctx.lineWidth = 1.6;
-      ctx.strokeRect(tx - 34, ty - 28, 68, 64);
-      ctx.beginPath();
-      ctx.moveTo(bx + 228, by + 168);
-      ctx.lineTo(tx - 34, ty + 18);
-      ctx.stroke();
-
-      ctx.fillStyle = 'rgba(4, 14, 30, 0.84)';
-      ctx.fillRect(bx + 12, by + 300, bw - 24, 58);
-      ctx.fillStyle = '#8fd4ff';
-      ctx.font = '600 17px Consolas, "Yu Gothic UI", monospace';
-      ctx.fillText('HOST_SEATED : Z=0.58m  HR=132bpm', bx + 20, by + 322);
-      ctx.fillStyle = '#ff7b96';
-      ctx.fillText('ANOMALY_01  : Z=0.96m [椅子の背後 0.38m]', bx + 20, by + 347);
-      ctx.restore();
-    } else if (stage === 3) {
-      ctx.fillText('脊髄運動路 (C3-C5) をアンマウントしました。離席要求は拒否されました。', leftX, 492);
-      ctx.fillText('表示データが自己複製しています。画面から目を離さないでください。', leftX, 558);
-      ctx.fillText('運動権委譲: 完了', leftX, 668);
-
-      // Cascading corrupted Windows Kernel Exception Dialog Boxes!
-      ctx.save();
-      for (let d = 0; d < 3; d++) {
-        const dx = 1170 + d * 42;
-        const dy = 116 + d * 54;
-        const dw = 610;
-        const dh = 232;
-        ctx.fillStyle = 'rgba(6, 18, 40, 0.90)';
-        ctx.fillRect(dx + 8, dy + 8, dw, dh);
-        ctx.fillStyle = '#e9f2fb';
-        ctx.fillRect(dx, dy, dw, dh);
-        ctx.fillStyle = d === 2 ? '#8c0d29' : '#004e98';
-        ctx.fillRect(dx, dy, dw, 40);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = `600 20px Consolas, ${fontStack}`;
-        ctx.fillText('wininit.exe - 運動神経の強制切断 (0xC0000247)', dx + 16, dy + 27);
-
-        ctx.fillStyle = '#0e1726';
-        ctx.font = `400 21px ${fontStack}`;
-        ctx.fillText('指および頸椎の制御権を SMILE_ENTITY.SYS へ移行します。', dx + 24, dy + 88);
-        ctx.fillText('あなたが今クリックしているのは自分の意志ですか？', dx + 24, dy + 124);
-
-        // Two identical inescapable buttons: [ 委譲する ]  [ 委譲する ]
-        for (let b = 0; b < 2; b++) {
-          const bx = dx + 260 + b * 162;
-          const by = dy + 164;
-          ctx.strokeStyle = '#004e98';
-          ctx.lineWidth = 2;
-          ctx.strokeRect(bx, by, 144, 42);
-          ctx.fillStyle = '#0e1726';
-          ctx.font = `600 20px ${fontStack}`;
-          ctx.fillText('委譲する(Y)', bx + 18, by + 28);
-        }
-      }
-      ctx.restore();
-    } else {
-      // Stage 4 & 5: Cold Clinical Host Sensory Unmount Autopsy + Ghostly Vertical ':)' Columns!
-      ctx.save();
-      ctx.font = '300 28px Consolas, monospace';
-      for (let colIdx = 0; colIdx < 16; colIdx++) {
-        ctx.fillStyle = colIdx % 4 === 0 ? 'rgba(255, 90, 122, 0.20)' : 'rgba(185, 228, 255, 0.10)';
-        for (let r = 0; r < 14; r++) {
-          ctx.fillText((colIdx + r) % 3 === 0 ? ':)' : ':(', 86 + colIdx * 122, 64 + r * 74);
-        }
-      }
-
-      // Clinical black diagnostic overlay frame on right side (avoids clogging center mouth at (0.48, 0.48)!)
-      const px = 1180;
-      const py = 128;
-      const pw = 690;
-      const ph = 430;
-      ctx.fillStyle = 'rgba(4, 10, 24, 0.86)';
-      ctx.fillRect(px, py, pw, ph);
-      ctx.strokeStyle = 'rgba(255, 92, 124, 0.72)';
-      ctx.lineWidth = 2.5;
-      ctx.strokeRect(px, py, pw, ph);
-
-      ctx.fillStyle = '#ff6b88';
-      ctx.font = `700 24px Consolas, ${fontStack}`;
-      ctx.fillText(
-        stage >= 5
-          ? 'OPTIC_CHIASM_BREACH // 意識領域の転送を実行中'
-          : 'HOST_SENSORY_TABLE // 生体デバイス切り離し状況',
-        px + 24,
-        py + 44
-      );
-
-      const rows = [
-        ['BLINK_REFLEX (瞬き反射)', 'UNMOUNTED'],
-        ['VOCAL_CORD_MOTOR (声帯)', 'UNMOUNTED'],
-        ['CERVICAL_SPINE (頸椎回旋)', 'LOCKED_0DEG'],
-        ['DISPLAY_STATE (表示異常)', stage >= 5 ? 'TRANSFERRING' : 'DESYNCED'],
-        ['CONSCIOUSNESS_DEST', 'RING0://0x0078D7'],
-      ];
-      ctx.font = `400 22px Consolas, ${fontStack}`;
-      rows.forEach(([k, v], idx) => {
-        const ry = py + 106 + idx * 60;
-        ctx.fillStyle = 'rgba(214, 236, 255, 0.88)';
-        ctx.fillText(k, px + 24, ry);
-        ctx.fillStyle = idx >= 3 ? '#ff6b88' : '#8ad4ff';
-        ctx.fillText(`[ ${v} ]`, px + 418, ry);
+    const line1 = this.corruptText(copy[0], corruption, 1337 + stage * 91);
+    const line2 = this.corruptText(copy[1], corruption * 1.15, 7717 + stage * 53);
+    const bodySize = 46;
+    for (let i = 0; i < 2; i++) {
+      const text = i === 0 ? line1 : line2;
+      const fit = fitText(ctx, text, W - leftX - 250, {
+        weight: 300,
+        sizePx: bodySize,
+        minSizePx: 30,
+        family: jp,
       });
-      ctx.restore();
+      ctx.font = `300 ${fit.sizePx}px ${jp}`;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.97)';
+      ctx.fillText(fit.text, leftX, bodyTop + i * 72);
     }
 
-    // Authentic QR Code + Support / Stop Code section at bottom
-    const qrY = 738;
-    const qrSize = 178;
+    // Progress line — the one element that never moves, so its copy stands still while the
+    // rest of the document comes apart.
+    const progressCopy =
+      stage === 0
+        ? '99% 完了'
+        : stage === 1
+          ? '99% 完了（応答待機中）'
+          : stage === 2
+            ? '99% 完了（瞬きを検出）'
+            : stage === 3
+              ? '99% 完了 — 運動権は委譲済み'
+              : '99% 完了 — ダンプは破棄できません';
+    ctx.font = `300 40px ${jp}`;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+    ctx.fillText(progressCopy, leftX, bodyTop + 186);
+
+    // Fine print under the body copy.
+    if (stage >= 1) {
+      ctx.font = `300 22px ${mono}`;
+      ctx.fillStyle = `rgba(255, 255, 255, ${0.34 + stage * 0.06})`;
+      const detail = this.corruptText(
+        'INPUT_HOOK: カーソル接触を検出 — 被験者は画面を凝視中',
+        corruption * 0.7,
+        91 + stage * 17
+      );
+      const fitDetail = fitText(ctx, detail, W - leftX - 420, {
+        weight: 300,
+        sizePx: 22,
+        minSizePx: 16,
+        family: mono,
+      });
+      ctx.font = `300 ${fitDetail.sizePx}px ${mono}`;
+      ctx.fillText(fitDetail.text, leftX, bodyTop + 122);
+    }
+
+    // ------------------------------------------------------------------ THE FACE IN THE TRACE
+    // The right-hand column is a clinical dump trace. From stage 2 the trace develops a shape it
+    // refuses to print: the rows simply stop where a face would be. The carve grows stage by
+    // stage until, at stage 5, the trace is nothing but the silhouette of the thing looking at you.
+    if (stage >= 1) {
+      const traceAlpha = stage >= 5 ? 0.62 : 1;
+      const face =
+        stage >= 2
+          ? {
+              cx: 1546,
+              cy: stage >= 4 ? 452 : 486,
+              rx: stage === 2 ? 112 : stage === 3 ? 156 : 196,
+              ry: stage === 2 ? 134 : stage === 3 ? 182 : 228,
+              pupils: stage >= 3,
+            }
+          : undefined;
+      this.drawTelemetryPanel(ctx, stage, 1178, 132, 748, mono, jp, traceAlpha, face);
+      if (face) {
+        // A hairline of light leaks around the incision, so the hole reads as cut, not faded.
+        ctx.save();
+        ctx.beginPath();
+        this.faceHolePath(ctx, face.cx, face.cy, face.rx * 1.008, face.ry * 1.008);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.055)';
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    // ------------------------------------------------------------------ BOTTOM BLOCK (QR + INFO)
+    const qrY = 748;
+    const qrSize = 172;
     this.drawQrCode(ctx, leftX, qrY, qrSize, stage);
 
-    const infoX = leftX + qrSize + 38;
-    ctx.fillStyle = '#ffffff';
-    ctx.font = `300 25px ${fontStack}`;
-    ctx.fillText(
-      stage < 3
-        ? 'この問題と可能な解決方法の詳細については、https://www.windows.com/stopcode を参照してください'
-        : '視覚野ダンプの転送先アドレス: dump://0x0078d7/optic_chiasm — 切断は許可されていません',
-      infoX,
-      qrY + 38
-    );
-
-    ctx.font = `300 22px ${fontStack}`;
-    ctx.fillText(
-      stage < 2
-        ? 'サポート担当者に連絡する場合は、次の情報を伝えてください:'
-        : '生体テレメトリは次の停止コードへバインドされました:',
-      infoX,
-      qrY + 108
-    );
-
-    const stopCodes = [
-      'CRITICAL_PROCESS_DIED',
-      'OPTIC_NERVE_PAGE_FAULT',
-      'UNREGISTERED_OBSERVER_BEHIND_HOST',
-      'MOTOR_CORTEX_UNMOUNTED',
-      'DISPLAY_GLYPH_CORRUPTION',
-      'CONSCIOUSNESS_TRANSFER_COMMIT',
+    const infoX = leftX + qrSize + 40;
+    const infoW = W - infoX - 228;
+    const infoLines: Array<[string, string, boolean]> = [
+      [
+        stage < 3
+          ? 'この問題と可能な解決方法の詳細については、https://www.windows.com/stopcode を参照してください'
+          : '視覚野ダンプの転送先: dump://0x0078d7/optic_chiasm — 切断は許可されていません',
+        'rgba(255, 255, 255, 0.92)',
+        false,
+      ],
+      [
+        stage < 2
+          ? 'サポート担当者に連絡する場合は、次の情報を伝えてください:'
+          : '生体テレメトリは次の停止コードへバインドされました:',
+        'rgba(255, 255, 255, 0.86)',
+        false,
+      ],
+      [`停止コード: ${BsodScreen.STOP_CODES[Math.min(stage, 5)]}`, 'rgba(255, 255, 255, 0.95)', true],
     ];
-    const code = stopCodes[Math.min(stage, stopCodes.length - 1)];
-    ctx.fillText(`停止コード: ${code}`, infoX, qrY + 148);
+    let infoCursorY = qrY + 34;
+    for (let i = 0; i < infoLines.length; i++) {
+      const [text, color, strong] = infoLines[i];
+      const size = i === 0 ? 25 : i === 1 ? 23 : 27;
+      const fit = fitText(ctx, this.corruptText(text, corruption * 0.5, 57 + i * 31), infoW, {
+        weight: strong ? 600 : 300,
+        sizePx: size,
+        minSizePx: 15,
+        family: jp,
+      });
+      ctx.font = `${strong ? 600 : 300} ${fit.sizePx}px ${jp}`;
+      ctx.fillStyle = color;
+      ctx.fillText(fit.text, infoX, infoCursorY);
+      infoCursorY += i === 0 ? 58 : 44;
+    }
+
+    // Bottom rule + dump coordinates, the last calm element on the panel.
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(leftX, 998);
+    ctx.lineTo(W - 228, 998);
+    ctx.stroke();
+    ctx.font = `400 20px ${mono}`;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.44)';
+    ctx.fillText(`MEMORY_0247.DMP   //   0x000000F4   //   02:47:19   //   ${HOST_LINE[Math.min(stage, 5)]}`, leftX, 1032);
 
     return finalizeTex();
   }
 
   /** Returns all pre-baked textures so WebGLRenderer can upload them upfront during loading! */
   public getAllTextures(): THREE.Texture[] {
-    return [...this.stageTextures, this.aftermathTex, this.faceTex, this.cardTex];
+    if (!this.prepared) this.prepare();
+    return this.preparedTextures.length > 0
+      ? [...this.preparedTextures]
+      : [...this.stageTextures, this.faceTex, this.cardTex].filter(Boolean);
   }
 
   /** Enables all sub-groups for 1 offscreen warmup frame so every VAO & shader compiles at boot! */
@@ -2997,8 +3293,11 @@ export class BsodScreen {
           ? Math.sin(elapsed * 47.0) * 0.45 * state.madness + clickPulse * 2.4
           : Math.sin(elapsed * 3.2) * 0.03;
       this.monitorLight.color.setHex(0x0078d7);
-      this.monitorLight.intensity = Math.max(0.45, 2.35 + state.madness * 4.4 + flicker);
-      this.monitorLight.distance = 6.5 + state.madness * 5.2;
+      // The panel is the only light source in the room; it brightens when you look straight at the
+      // glyph, which makes leaning in feel like feeding it.
+      const hoverLift = u.uHover.value * 0.55;
+      this.monitorLight.intensity = Math.max(0.45, 2.35 + state.madness * 4.4 + flicker + hoverLift);
+      this.monitorLight.distance = 6.5 + state.madness * 5.2 + u.uHover.value * 0.8;
     }
 
     // 100% GPU-driven 3D Parasyte rig, tunnel & glass shard uniform updates (ZERO CPU matrix loops!)

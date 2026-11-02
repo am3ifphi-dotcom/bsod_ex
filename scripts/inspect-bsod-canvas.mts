@@ -39,6 +39,8 @@ globalThis.self = globalThis as any;
 const { BsodScreen } = await import('../src/world/BsodScreen.ts');
 
 const screen = new BsodScreen();
+// Textures are baked on prepare() so canvas typography can wait for the self-hosted JP face.
+screen.prepare();
 
 function stats(canvas: any, label: string) {
   const ctx = canvas.getContext('2d');

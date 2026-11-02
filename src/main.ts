@@ -7,6 +7,7 @@ import { FirstPersonController } from './player/FirstPersonController';
 import { ConsoleUI } from './ui/ConsoleUI';
 import { PostFX } from './post/PostFX';
 import { tunnelHandoff } from './utils/TunnelHandoff';
+import { loadJapaneseFont } from './utils/fonts';
 
 type GlitchKind = 'bend' | 'tear' | 'mash' | 'sort' | 'roll' | 'ghost';
 
@@ -140,6 +141,10 @@ class BsodExperienceApp {
   // PostFX transients
   private extraGlitchBurst = 0;
   private screenFlash = 0;
+  /** 0..1 lean-in on the glyph while inspecting; smoothed, drives the head and the lens. */
+  private inspectFocus = 0;
+  /** Seconds of "the room stopped" stutter after certain beats. */
+  private worldFreeze = 0;
   private subtitleRemaining = 0;
 
   // DOM Elements
@@ -158,6 +163,9 @@ class BsodExperienceApp {
   private readonly worldHintEl = document.getElementById('world-hint')!;
   private readonly subtitleEl = document.getElementById('subtitle-banner')!;
   private readonly aftermathBarEl = document.getElementById('aftermath-bar')!;
+  private readonly cutFlashEl = document.getElementById('cut-flash') as HTMLElement | null;
+  private cutAlpha = 0;
+  private cutHold = 0;
 
   private readonly pauseModal = document.getElementById('pause-modal')!;
   private readonly pausePhaseLabel = document.getElementById('pause-phase-label')!;
@@ -227,6 +235,10 @@ class BsodExperienceApp {
   }
 
   public async init(): Promise<void> {
+    // Every in-world sign, plaque and panel is baked from canvas text — resolve the self-hosted
+    // Japanese face before any of that rasterisation happens.
+    await loadJapaneseFont();
+
     const gltfLoader = new GLTFLoader();
     const texLoader = new THREE.TextureLoader();
 
@@ -437,15 +449,17 @@ class BsodExperienceApp {
 
       if (this.paused) return;
 
+      // The kernel shell is always available. No location, no unlock, no fetch quest: you are
+      // inside a memory dump, and dumps do not gate their own debugger behind a landmark.
       if (e.code === 'KeyC' && this.phase === 'ROAM_GLITCH') {
         e.preventDefault();
         this.player.clearKeys();
-        this.audio.playOneShot('ui_hover', { volume: 0.45, rate: 1.15 });
+        this.audio.playOneShot('ui_hover', { volume: 0.42, rate: 1.15 });
         const distCore = Math.hypot(
           this.player.position.x - this.glitchWorld.corePosition.x,
           this.player.position.z - this.glitchWorld.corePosition.z
         );
-        this.consoleUI.open(this.glitchWorld.coreSecretRevealed, distCore);
+        this.consoleUI.open(true, distCore);
         return;
       }
 
@@ -722,6 +736,15 @@ class BsodExperienceApp {
   private setObjective(text: string | null): void {
     this.objectiveEl.classList.toggle('hidden', !text);
     this.objectiveTextEl.textContent = text ?? '';
+  }
+
+  /**
+   * Hard cut. Slams the frame to black for a beat instead of blending between shots — the single
+   * most effective way to make a first-person audience flinch, and it costs one DOM element.
+   */
+  private triggerCut(alpha = 1, holdSec = 0.05): void {
+    this.cutAlpha = Math.max(this.cutAlpha, alpha);
+    this.cutHold = Math.max(this.cutHold, holdSec);
   }
 
   private showSubtitle(text: string, durationMs = 4200): void {
@@ -1072,13 +1095,15 @@ class BsodExperienceApp {
       pos: this.behindNeckSoundPos,
     });
     this.audio.playOneShot('creak_room', { volume: 0.52, rate: 0.74, pos: this.behindNeckSoundPos });
-    this.showSubtitle('動けない。', 3100);
+    this.showSubtitle('首が、戻らない。', 3100);
   }
 
   private handlePcScreenClick(): void {
     // Let each reaction register before accepting another deliberate touch.
     if (this.inspectBlend < 0.85 || this.inspectClickCooldown > 0) return;
     this.audio.playOneShot('mouse_click', { volume: 0.5, rate: 0.96 + Math.random() * 0.08 });
+    this.pcCursorEl.classList.add('press');
+    window.setTimeout(() => this.pcCursorEl.classList.remove('press'), 90);
 
     if (this.aftermath) {
       // Clicking the haunted aftermath monitor violently re-engages PARASYTE_HOOK!
@@ -1107,10 +1132,10 @@ class BsodExperienceApp {
       // Even off-face clicks produce a tactile LCD liquid-crystal pressure ripple right at the cursor!
       this.bedroom.bsodScreen.pulseCrack(this.cursorMonitorUv);
       if (this.clickCount === 0) {
-        this.showSubtitle('あの顔……。', 3400);
+        this.showSubtitle('……今、こっちを見た。', 3400);
       } else if (this.clickCount >= 2) {
         this.audio.playOneShot('glitch_stutter', { volume: 0.24, rate: 1.15, duration: 0.55, releaseSec: 0.2 });
-        this.showSubtitle('こちらを見ている。', 2600);
+        this.showSubtitle('視線が、合った。', 2600);
       }
       return;
     }
@@ -1123,6 +1148,7 @@ class BsodExperienceApp {
     this.triggerSpatialWave(0.38 + this.clickCount * 0.11, 0.78);
 
     if (this.clickCount === 1) {
+      this.worldFreeze = 0.18;
       this.targetMadness = 0.23;
       this.jawVel += 0.45;
       this.targetJawOpen = 0.18;
@@ -1135,8 +1161,9 @@ class BsodExperienceApp {
         releaseSec: 1.2,
         reverb: 0.5,
       });
-      this.showSubtitle('……笑った？', 3800);
+      this.showSubtitle('笑った、のか。', 3800);
     } else if (this.clickCount === 2) {
+      this.worldFreeze = 0.24;
       this.targetMadness = 0.43;
       this.jawVel += 0.95;
       this.targetJawOpen = 0.38;
@@ -1159,8 +1186,9 @@ class BsodExperienceApp {
         volume: 0.12,
         fadeSec: 1.1,
       });
-      this.showSubtitle('後ろに、誰かいる。', 3900);
+      this.showSubtitle('椅子の後ろで、床が鳴った。', 3900);
     } else if (this.clickCount === 3) {
+      this.worldFreeze = 0.32;
       this.targetMadness = 0.66;
       this.jawVel += 1.45;
       this.targetJawOpen = 0.62;
@@ -1180,8 +1208,9 @@ class BsodExperienceApp {
         volume: 0.22,
         fadeSec: 0.8,
       });
-      this.showSubtitle('立てない。', 3800);
+      this.showSubtitle('足が、画面のほうへ引かれる。', 3800);
     } else if (this.clickCount === 4) {
+      this.worldFreeze = 0.40;
       this.targetMadness = 0.84;
       this.jawVel += 1.85;
       this.targetJawOpen = 0.80;
@@ -1194,8 +1223,9 @@ class BsodExperienceApp {
         volume: 0.36,
         fadeSec: 0.7,
       });
-      this.showSubtitle('息が、吸えない。', 3600);
+      this.showSubtitle('空気が、画面に吸われている。', 3600);
     } else if (this.clickCount === 5) {
+      this.worldFreeze = 0.55;
       // UNHINGED PREDATORY GAPE — wide-open waiting maw pulling air inward before swallowing!
       this.targetMadness = 0.96;
       this.jawVel += 2.45;
@@ -1206,7 +1236,7 @@ class BsodExperienceApp {
       this.audio.playOneShot('sub_boom', { volume: 0.68, rate: 1.06, reverb: 0.3 });
       this.audio.playOneShot('glitch_stutter', { volume: 0.62, rate: 0.88, duration: 1.6, releaseSec: 0.4, reverb: 0.42 });
       this.audio.playOneShot('pain_glitch', { volume: 0.55, rate: 0.86, duration: 1.4, releaseSec: 0.4, reverb: 0.35 });
-      this.showSubtitle('やめて。', 3000);
+      this.showSubtitle('まだ、見ていたい。', 3000);
     } else {
       this.audio.stopLoop('throat_draft', 0.15);
       this.beginPredatorySuction();
@@ -1214,6 +1244,8 @@ class BsodExperienceApp {
   }
 
   private beginPredatorySuction(): void {
+    // Hard cut straight into the throat: no easing, no white flash, no mercy.
+    this.triggerCut(1.0, 0.07);
     this.phase = 'SUCTION_CUTSCENE';
     this.suctionStartClock = this.getTimelineClock();
     this.suctionTimer = 0;
@@ -1388,7 +1420,8 @@ class BsodExperienceApp {
     this.targetJawOpen = 0;
 
     // Seamless dark bedroom ceiling drop — ZERO blinding whiteout flash!
-    this.screenFlash = 0.08;
+    this.triggerCut(0.95, 0.04);
+    this.screenFlash = 0.0;
     this.triggerSpatialWave(0.88, 0.95);
 
     // Smooth 0.7s release so the collapse risers resolve instead of snapping to silence.
@@ -1455,7 +1488,8 @@ class BsodExperienceApp {
     const jy = tremor > 0 ? Math.cos(this.elapsed * 53.0) * tremor : 0;
     const px = this.player.inspectCursorPx.x + jx;
     const py = this.player.inspectCursorPx.y + jy;
-    this.pcCursorEl.style.transform = `translate3d(${px - 3}px, ${py - 2}px, 0)`;
+    // Retile the 46px reticle on the pointer instead of the old 24px arrow hotspot.
+    this.pcCursorEl.style.transform = `translate3d(${px - 23}px, ${py - 23}px, 0)`;
 
     this.ndcVec.set(
       (px / Math.max(1, window.innerWidth)) * 2 - 1,
@@ -1537,6 +1571,11 @@ class BsodExperienceApp {
     let sortAmt = 0.0;
     let rollAmt = 0.0;
     let ghostAmt = 0.0;
+    // Transport-level faults are derived from the same authored events, so one click always reads
+    // as one physical failure instead of a soup of unrelated effects.
+    let sliceAmt = 0.0;
+    let blockAmt = 0.0;
+    let signalAmt = 0.0;
     let newestBend = -1;
     for (const ev of this.glitchEvents) {
       const p = THREE.MathUtils.clamp(ev.age / ev.dur, 0, 1);
@@ -1546,6 +1585,7 @@ class BsodExperienceApp {
       switch (ev.kind) {
         case 'bend':
           bendAmt = Math.max(bendAmt, v);
+          signalAmt = Math.max(signalAmt, v * 0.22);
           if (ev.age > newestBend) {
             newestBend = ev.age;
             waveProg = p;
@@ -1553,18 +1593,24 @@ class BsodExperienceApp {
           break;
         case 'tear':
           tearAmt = Math.max(tearAmt, v);
+          sliceAmt = Math.max(sliceAmt, v * 0.85);
           break;
         case 'mash':
           mashAmt = Math.max(mashAmt, v);
+          blockAmt = Math.max(blockAmt, v * 0.9);
           break;
         case 'sort':
           sortAmt = Math.max(sortAmt, v);
+          signalAmt = Math.max(signalAmt, v * 0.55);
           break;
         case 'roll':
           rollAmt = Math.max(rollAmt, v);
+          sliceAmt = Math.max(sliceAmt, v * 0.45);
+          signalAmt = Math.max(signalAmt, v * 0.7);
           break;
         case 'ghost':
           ghostAmt = Math.max(ghostAmt, v);
+          signalAmt = Math.max(signalAmt, v * 0.5);
           break;
       }
     }
@@ -1593,6 +1639,9 @@ class BsodExperienceApp {
     } else if (this.phase === 'SUCTION_CUTSCENE') {
       const tunnelRush = THREE.MathUtils.smoothstep(this.suctionTimer, 2.1, 6.2);
       const handoffClean = 1.0 - THREE.MathUtils.smoothstep(this.suctionTimer, 5.4, 7.1);
+      // The transport is failing as the signal is dragged through it.
+      signalAmt = Math.max(signalAmt, (0.10 + tunnelRush * 0.55) * handoffClean);
+      sliceAmt = Math.max(sliceAmt, tunnelRush * 0.22 * handoffClean);
       distortAmt = Math.max(distortAmt, 0.14 + (1.0 - tunnelRush) * 0.34);
       chromaAmt = 0.24 + tunnelRush * 0.14;
       vigAmt = 0.38 + tunnelRush * 0.06;
@@ -1620,6 +1669,11 @@ class BsodExperienceApp {
       horrorAmt = Math.max(horrorAmt, this.glitchWorld.anomalyIntensity * 0.28);
       bloomAmt = 0.84 + this.glitchWorld.anomalyIntensity * 0.42;
       sharpenAmt = 0.34;
+      // The world itself is a signal being played back. A permanent low-level transport fault
+      // keeps it from ever looking like clean CG, and swells with each anomaly.
+      const anomaly = this.glitchWorld.anomalyIntensity;
+      signalAmt = Math.max(signalAmt, 0.06 + anomaly * 0.34 + this.opticStrain * 0.18);
+      sliceAmt = Math.max(sliceAmt, anomaly * 0.10);
     } else if (this.phase === 'COLLAPSE_CUTSCENE') {
       const fallFactor = THREE.MathUtils.clamp((this.collapseTimer - 3.8) / 4.8, 0, 1);
       distortAmt = Math.max(distortAmt, 0.24 + fallFactor * 0.38);
@@ -1631,6 +1685,17 @@ class BsodExperienceApp {
       ghostAmt = Math.max(ghostAmt, fallFactor * 0.12);
       bloomAmt = 0.82 + fallFactor * 0.34;
       sharpenAmt = 0.24;
+      signalAmt = Math.max(signalAmt, 0.24 + fallFactor * 0.55);
+      blockAmt = Math.max(blockAmt, fallFactor * 0.30);
+    }
+
+    if (this.cutFlashEl) {
+      if (this.cutHold > 0) {
+        this.cutHold = Math.max(0, this.cutHold - dt);
+      } else {
+        this.cutAlpha = Math.max(0, this.cutAlpha - dt * 6.5);
+      }
+      this.cutFlashEl.style.opacity = this.cutAlpha.toFixed(3);
     }
 
     this.postFX.render(this.renderer, this.getActiveScene(), this.camera, this.elapsed, {
@@ -1646,6 +1711,9 @@ class BsodExperienceApp {
       sort: sortAmt,
       roll: rollAmt,
       ghost: ghostAmt,
+      block: blockAmt,
+      slice: sliceAmt,
+      signal: signalAmt,
       bloom: this.autoBloomEnabled ? bloomAmt : 0,
       sharpen: sharpenAmt,
       transition: this.phase === 'SUCTION_CUTSCENE' && this.suctionTimer > this.suctionDuration - this.handoffDuration
@@ -1660,6 +1728,7 @@ class BsodExperienceApp {
 
   private stepSimulation(dt: number): void {
     this.clickPulse = Math.max(0, this.clickPulse - dt * 3.8);
+    this.worldFreeze = Math.max(0, this.worldFreeze - dt);
     this.extraGlitchBurst = Math.max(0, this.extraGlitchBurst - dt * 2.4);
     this.screenFlash = Math.max(0, this.screenFlash - dt * 2.2);
     this.horrorPulse = Math.max(0, this.horrorPulse - dt * 1.8);
@@ -1716,13 +1785,20 @@ class BsodExperienceApp {
 
     switch (this.phase) {
       case 'TITLE': {
+        // Slow, almost imperceptible drift: a hand-held tilt the title card sits in front of. The
+        // panel does the acting, so the camera only has to breathe.
         this.tunnelScrollPhase += dt * 6.0;
+        const t = this.elapsed;
         this.camera.position.set(
-          0.35 + Math.sin(this.elapsed * 0.35) * 0.025,
-          1.58 + Math.sin(this.elapsed * 0.55) * 0.015,
-          0.62
+          0.30 + Math.sin(t * 0.19) * 0.055 + Math.sin(t * 0.83) * 0.004,
+          1.56 + Math.sin(t * 0.27) * 0.022 + Math.sin(t * 1.13) * 0.003,
+          0.66 + Math.sin(t * 0.13) * 0.045
         );
-        this.camera.lookAt(this.bedroom.monitorWorldPos);
+        this.camera.lookAt(
+          this.bedroom.monitorWorldPos.x + Math.sin(t * 0.21) * 0.012,
+          this.bedroom.monitorWorldPos.y + Math.sin(t * 0.31) * 0.008,
+          this.bedroom.monitorWorldPos.z
+        );
         this.camera.getWorldDirection(this._camFwd);
         this.bedroom.bsodScreen.update(
           dt,
@@ -1847,6 +1923,12 @@ class BsodExperienceApp {
           }
         }
         this.inspectBlend = Math.min(1, this.inspectBlend + dt * 2.4);
+        const focusTarget = this.aftermath ? 0 : this.hoverFace ? 1 : 0;
+        this.inspectFocus = THREE.MathUtils.lerp(
+          this.inspectFocus,
+          focusTarget,
+          Math.min(1, dt * 3.4)
+        );
         this.player.updateInspectPose(
           dt,
           this.elapsed,
@@ -1854,7 +1936,8 @@ class BsodExperienceApp {
           this.bedroom.inspectCamPos,
           this.bedroom.inspectLookTarget,
           this.madness,
-          this.clickPulse
+          this.clickPulse,
+          this.inspectFocus
         );
         this.updatePcCursorRaycast(dt);
 
@@ -1892,7 +1975,12 @@ class BsodExperienceApp {
           }
         }
 
-        const roomInfect = this.aftermath ? 0 : THREE.MathUtils.clamp((this.madness - 0.18) * 1.15, 0, 0.92);
+        // Even before the first touch, the act of staring the panel down bleeds into the room: the
+        // desk lamp browns out, the clock starts drifting. Directed, not random.
+        const firstContactAmt =
+          this.firstContactTimer >= 0 ? THREE.MathUtils.clamp(this.firstContactTimer / 4.2, 0, 1) : 0;
+        const baseInfect = this.aftermath ? 0 : THREE.MathUtils.clamp((this.madness - 0.18) * 1.15, 0, 0.92);
+        const roomInfect = Math.max(baseInfect, firstContactAmt * 0.24 + this.inspectFocus * 0.06);
         const roomPull = this.aftermath ? 0 : THREE.MathUtils.clamp((this.madness - 0.45) * 0.85, 0, 0.48);
         this.tunnelScrollPhase += dt * (6.0 + this.madness * 6.0);
         this.camera.getWorldDirection(this._camFwd);
@@ -1912,7 +2000,10 @@ class BsodExperienceApp {
           this.clickPulse,
           this.tunnelScrollPhase
         );
-        this.bedroom.update(dt, this.elapsed, roomInfect, roomPull, this.aftermath, undefined, this._camFwd);
+        // Everything except the panel stops for a beat: the room holds its breath while the
+        // signal keeps running. Reads as a dropped frame in reality, not in the renderer.
+        const worldDt = this.worldFreeze > 0 ? dt * 0.04 : dt;
+        this.bedroom.update(worldDt, this.elapsed, roomInfect, roomPull, this.aftermath, undefined, this._camFwd);
         break;
       }
 
@@ -2081,6 +2172,7 @@ class BsodExperienceApp {
           this.audio.playOneShot('swoosh_thunder', { volume: 0.44, rate: 1.25, reverb: 0.45 });
           this.audio.playOneShot('gasp', { volume: 0.56, rate: 0.98 });
           this.glitchWorld.triggerLandingShockwave();
+          this.triggerCut(0.85, 0.03);
           this.triggerSpatialWave(0.86, 0.95);
           this.triggerGlitch('tear', 0.48, 0.30);
           this.screenFlash = 0.14;
@@ -2091,10 +2183,10 @@ class BsodExperienceApp {
           this.opticStrain = 0;
           this.periodicWarpCooldown = 6.5;
           this.crosshairEl.classList.remove('hidden');
-          this.setObjective('光の柱を目指す');
-          this.worldHintEl.textContent = '[C] コンソール';
+          this.setObjective('[C] カーネルコンソールを開く');
+          this.worldHintEl.textContent = '[C] コンソール  /  [W A S D] 移動';
           this.worldHintEl.classList.remove('hidden');
-          this.showSubtitle('橋の向こうに、光が見える。', 5200);
+          this.showSubtitle('ダンプの中に、立っている。', 5200);
         }
         break;
       }
@@ -2150,7 +2242,7 @@ class BsodExperienceApp {
           this.player.position.x - this.glitchWorld.corePosition.x,
           this.player.position.z - this.glitchWorld.corePosition.z
         );
-        this.consoleUI.setWorldState(this.glitchWorld.coreSecretRevealed, distCore);
+        this.consoleUI.setWorldState(true, distCore);
 
         // Seamless Environmental Horror Milestones along the Causeway (zero tedious item collecting!)
         if (this.player.position.z < 4.0 && !this.glitchMilestones.archEntry) {
@@ -2173,9 +2265,7 @@ class BsodExperienceApp {
 
         if (!wasRevealed && this.glitchWorld.coreSecretRevealed) {
           this.audio.playOneShot('ghost_cantata', { volume: 0.48, reverb: 0.55 });
-          this.setObjective('[C] コンソールで命令を実行する');
-          this.worldHintEl.textContent = '[C] コンソール';
-          this.showSubtitle('命令が読める。コンソールに入力しよう。', 5200);
+          this.showSubtitle('あの柱は、覚醒の命令を彫りつけている。', 5200);
         }
 
         const nearCoreFactor = THREE.MathUtils.clamp(1 - distCore / 50, 0, 1);
@@ -2228,6 +2318,7 @@ class BsodExperienceApp {
           this.triggerGlitch('mash', 0.92, 0.5);
           this.triggerGlitch('sort', 0.8, 0.7);
           this.extraGlitchBurst = 0.9;
+          this.triggerCut(0.75, 0.02);
         }
 
         // Synced to 245m speed-line freefall plunge (t = 4.08s)!

@@ -343,7 +343,9 @@ export class FirstPersonController {
     targetPos: THREE.Vector3,
     lookTarget: THREE.Vector3,
     madness: number,
-    clickPulse: number
+    clickPulse: number,
+    /** 0..1 — how much the head is leaning in on the thing it is looking at. */
+    focus = 0
   ): void {
     const nx = (this.inspectCursorPx.x / Math.max(1, window.innerWidth)) * 2 - 1;
     const ny = -((this.inspectCursorPx.y / Math.max(1, window.innerHeight)) * 2 - 1);
@@ -354,7 +356,9 @@ export class FirstPersonController {
 
     this.scratchDir.copy(lookTarget).sub(targetPos).normalize();
     const flinchRecoil = madness > 0.45 ? clickPulse * 0.13 : clickPulse * 0.03;
-    desiredPos.addScaledVector(this.scratchDir, madness * 0.11 - flinchRecoil);
+    // Leaning in is a decision, not an effect: the head closes the distance when the player keeps
+    // aiming at the glyph, and the lens tightens with it.
+    desiredPos.addScaledVector(this.scratchDir, madness * 0.11 - flinchRecoil + focus * 0.075);
 
     const lookPt = this.scratchTarget.copy(lookTarget);
     lookPt.z -= nx * 0.036;
@@ -375,7 +379,7 @@ export class FirstPersonController {
     this.camera.position.lerpVectors(this.blendStartPos, this.dummyCam.position, smoothT);
     this.camera.quaternion.slerpQuaternions(this.blendStartQuat, this.dummyCam.quaternion, smoothT);
 
-    const targetFov = THREE.MathUtils.lerp(this.blendStartFov, 58, smoothT) + madness * 5.0;
+    const targetFov = THREE.MathUtils.lerp(this.blendStartFov, 58, smoothT) + madness * 5.0 - focus * 3.4;
     if (Math.abs(this.camera.fov - targetFov) > 0.04) {
       this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, Math.min(1, dt * 10));
       this.camera.updateProjectionMatrix();

@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>BSOD_EX // 0x000000F4</title>
+    <link rel="stylesheet" href="./fonts/jp.css" />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
@@ -48,15 +49,13 @@
         <span class="ch-ring"></span>
       </div>
 
-      <!-- Custom OS-like cursor when inspecting the PC monitor -->
+      <!-- Scan reticle used while inspecting the PC monitor (this is the only cursor on screen) -->
       <div id="pc-cursor" class="hidden">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-          <path
-            d="M4 2L4 19L8.5 14.8L11.8 21.5L14.4 20.2L11.1 13.6L17.2 13.6L4 2Z"
-            fill="#ffffff"
-            stroke="#001a38"
-            stroke-width="1.6"
-          />
+        <svg width="46" height="46" viewBox="0 0 46 46" fill="none" aria-hidden="true">
+          <circle class="rc-ring" cx="23" cy="23" r="15" stroke="#cfe9ff" stroke-width="1.1" opacity="0.72" />
+          <circle class="rc-inner" cx="23" cy="23" r="5.5" stroke="#8fd4ff" stroke-width="1" opacity="0.55" />
+          <path class="rc-ticks" d="M23 2v7M23 37v7M2 23h7M37 23h7" stroke="#cfe9ff" stroke-width="1.2" opacity="0.8" />
+          <circle class="rc-dot" cx="23" cy="23" r="1.6" fill="#ffffff" />
         </svg>
       </div>
 
@@ -64,6 +63,7 @@
       <div id="interact-prompt" class="hidden"></div>
       <div id="world-hint" class="hidden"></div>
       <div id="subtitle-banner" class="hidden" role="status" aria-live="polite"></div>
+      <div id="cut-flash"></div>
       <div id="aftermath-bar" class="hidden">
         <span>[R] 最初からやり直す</span>
         <span>[ESC] メニュー</span>
@@ -80,6 +80,7 @@
           </div>
           <button id="console-close-btn" type="button" title="閉じる (ESC)">✕</button>
         </div>
+        <div id="console-status" class="console-status">SESSION 0x0247  //  HOST: SEATED</div>
         <div id="console-log" class="console-log"></div>
         <form id="console-form" class="console-input-row" autocomplete="off">
           <span class="console-prompt">DUMP:\CORE&gt;</span>
@@ -95,7 +96,8 @@
         </form>
         <div class="console-footer">
           <span>[ENTER] 実行</span>
-          <span>[ESC] 閉じて探索へ戻る</span>
+          <span>[↑ ↓] 履歴</span>
+          <span>[ESC] 閉じる</span>
         </div>
       </div>
     </div>

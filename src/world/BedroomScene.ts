@@ -89,6 +89,8 @@ export class BedroomScene {
   ];
 
   public async load(gltfLoader: GLTFLoader, texLoader: THREE.TextureLoader): Promise<void> {
+    // Canvas typography must not be baked before the self-hosted Japanese face resolves.
+    this.bsodScreen.prepare();
     this.scene.background = new THREE.Color(0x03050a);
     this.scene.fog = new THREE.FogExp2(0x050914, 0.045);
     this.scene.add(this.group);
