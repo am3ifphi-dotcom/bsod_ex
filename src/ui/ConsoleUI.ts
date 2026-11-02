@@ -105,7 +105,7 @@ export class ConsoleUI {
     this.appendLine('Microsoft(R) Kernel Crash Dump Shell [Version 10.0.19045.78D7]', 'dim');
     this.appendLine('ACTIVE DUMP   : C:\\Windows\\MEMORY_0247.DMP  //  HOST_VITALS: 152 BPM (MOTOR_LOCKED)', 'warn');
     this.appendLine('PARASYTE_HOOK : SMILE_ENTITY.SYS -> OPTIC_CHIASM_RING0 [ACTIVE]', 'err');
-    this.appendLine('診断: STATUS / HELP でダンプ状態を確認、または中央聖堂で特定した緊急割り込み命令を実行してください。', 'dim');
+    this.appendLine('診断: STATUS / HELP でダンプ状態を確認、緊急割り込み命令を入力できます。', 'dim');
   }
 
   private appendLine(text: string, cls: '' | 'dim' | 'err' | 'warn' | 'ok' = ''): void {
@@ -132,10 +132,10 @@ export class ConsoleUI {
     }
 
     if (this.coreUnlocked) {
-      this.appendLine('[SANCTUARY_LINK: SYNCED] 中央聖堂の碑板と同期完了 — 緊急割り込み命令を入力可能。', 'ok');
+      this.appendLine('[SANCTUARY_LINK: SYNCED] 中央聖堂の碑板と同期完了 — 覚醒命令が確認されました。', 'ok');
     } else {
       this.appendLine(
-        `[CORE_SIGNAL: ${Math.max(1, Math.round(this.coreDistanceM))}m] 中央の光の柱（聖堂コア）へ近づくと、散乱した命令語が収束します。`,
+        `[CORE_SIGNAL: ${Math.max(1, Math.round(this.coreDistanceM))}m] 中央の光の柱（聖堂コア）で、覚醒命令が刻まれています。`,
         'dim'
       );
     }
@@ -188,11 +188,6 @@ export class ConsoleUI {
     const normalized = raw.toUpperCase().replace(/\s+/g, '_');
 
     if (normalized === 'WAKE_UP') {
-      if (!this.coreUnlocked) {
-        this.appendLine('[ACCESS DENIED] 信号が不完全です。光の柱に近づいてください。', 'warn');
-        this.audio.playOneShot('console_error', { volume: 0.4 });
-        return;
-      }
       this.locked = true;
       this.inputEl.disabled = true;
       this.appendLine('[CRITICAL INTERRUPT ACCEPTED] DIRECTIVE "WAKE_UP" VERIFIED!', 'ok');
@@ -226,8 +221,8 @@ export class ConsoleUI {
       this.appendLine('利用可能な診断コマンド: STATUS, PS, WHOAMI, DIR, DUMP, CLEAR, REBOOT', 'dim');
       this.appendLine(
         this.coreUnlocked
-          ? '※ 中央聖堂の上空に収束した7文字の強制覚醒命令をそのまま入力してください。'
-          : `※ 光の柱が立つ中央聖堂（残り約 ${Math.max(1, Math.round(this.coreDistanceM))}m）へ向かうと、覚醒命令が判明します。`,
+          ? '※ 中央聖堂の碑板に刻まれた7文字の強制覚醒命令をそのまま入力してください。'
+          : '※ 世界のある場所に、覚醒命令が7文字で刻まれています。',
         'warn'
       );
       return;
@@ -251,8 +246,8 @@ export class ConsoleUI {
       this.appendLine('DIGESTION     : 99.4% — 意識データが青い深淵に溶けかけています', 'err');
       this.appendLine(
         this.coreUnlocked
-          ? 'SANCTUARY_KEY : 収束完了！ 中央のプレートに浮かぶ命令語を入力してください。'
-          : `CORE_DISTANCE : 中央聖堂まで約 ${Math.max(1, Math.round(this.coreDistanceM))}m — 近づくと秘密の命令語が収束します。`,
+          ? 'SANCTUARY_KEY : 碑板が確認済み — 覚醒命令を入力してください。'
+          : `CORE_DISTANCE : 中央聖堂まで約 ${Math.max(1, Math.round(this.coreDistanceM))}m（覚醒命令は刻まれている）`,
         this.coreUnlocked ? 'ok' : 'dim'
       );
       return;
@@ -300,7 +295,7 @@ export class ConsoleUI {
     this.audio.playOneShot('console_error', { volume: 0.58 });
     const eerieErrors = [
       `[SYNTAX_FAULT] '${raw}' は無効です。空の瞳孔が収縮し、ダンプ領域が軋んでいます。`,
-      `[ACCESS_DENIED] '${raw}' では目を覚ませません。光の柱が立つ中央聖堂の刻印を読み取ってください。`,
+      `[ACCESS_DENIED] '${raw}' では目を覚ませません。覚醒命令は7文字です。`,
       `[DIGESTION_WARN] 誤入力 '${raw}' が青画面に咀嚼されました。正しい覚醒命令が必要です。`,
     ];
     this.appendLine(eerieErrors[(this.wrongAttemptCount - 1) % eerieErrors.length], 'err');
