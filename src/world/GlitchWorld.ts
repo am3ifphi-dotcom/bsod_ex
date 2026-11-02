@@ -3153,8 +3153,10 @@ export class GlitchWorld {
    */
   private buildSkyMonoliths(): void {
     // ------------------------------------------------------------------ 1. THE COLOSSAL ':('
+    // Centred so the Sanctuary light beam (x=0) passes right through the gap
+    // between the colon and the parenthesis — the face frames the beam.
     const faceGroup = new THREE.Group();
-    const faceBase = new THREE.Vector3(0, 62, -56);
+    const faceBase = new THREE.Vector3(-4, 62, -56);
     faceGroup.position.copy(faceBase);
     this.skyFaceBasePos = faceBase.clone();
 
