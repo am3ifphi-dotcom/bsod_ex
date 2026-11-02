@@ -320,13 +320,69 @@ kbd {
 }
 
 .console-window {
-  width: min(680px, 92vw);
-  background: rgba(1, 13, 31, 0.95);
-  border: 1px solid #3ca6ff;
+  width: min(740px, 94vw);
+  background: rgba(1, 11, 28, 0.96);
+  border: 1px solid #45b6ff;
   box-shadow:
-    0 24px 90px rgba(0, 0, 0, 0.88),
-    0 0 42px rgba(0, 120, 215, 0.45);
+    0 24px 90px rgba(0, 0, 0, 0.92),
+    0 0 54px rgba(0, 145, 255, 0.48),
+    inset 0 0 28px rgba(0, 120, 215, 0.16);
   font-family: var(--mono-font);
+}
+
+.console-telemetry {
+  padding: 6px 16px;
+  font-size: 11px;
+  letter-spacing: 0.07em;
+  color: #7ee8ff;
+  background: rgba(0, 42, 92, 0.55);
+  border-bottom: 1px solid rgba(69, 182, 255, 0.28);
+}
+
+.console-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  background: rgba(0, 20, 48, 0.65);
+  border-top: 1px solid rgba(69, 182, 255, 0.22);
+}
+
+.chips-label {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  color: rgba(145, 204, 255, 0.65);
+  margin-right: 4px;
+}
+
+.console-chips button {
+  background: rgba(0, 76, 156, 0.36);
+  border: 1px solid rgba(90, 195, 255, 0.45);
+  color: #d6f2ff;
+  font-family: var(--mono-font);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease, transform 0.1s ease;
+}
+
+.console-chips button:hover {
+  background: rgba(0, 132, 255, 0.52);
+  border-color: #9be8ff;
+  transform: translateY(-1px);
+}
+
+.console-chips button.chip-wake {
+  border-color: rgba(255, 92, 134, 0.72);
+  background: rgba(140, 18, 56, 0.35);
+  color: #ffc8d6;
+}
+
+.console-chips button.chip-wake:hover {
+  background: rgba(215, 36, 88, 0.58);
+  border-color: #ff8aa8;
 }
 
 .console-titlebar {
@@ -572,4 +628,829 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
   #objective { top: 18px; left: 18px; }
   .pause-card { max-height: 90dvh; overflow-y: auto; padding: 24px; }
   #world-hint { bottom: 12px; left: 12px; }
+}
+
+/* ------------------------------------------------------------------ TITLE / COLD OPEN
+   The title is a cold boot: a machine that is already corrupted when you arrive.
+   Everything here is layered DOM + CSS, so it costs nothing on the render thread. */
+#title-overlay { overflow: hidden; }
+
+.title-ghost-code {
+  position: absolute;
+  right: -2vw;
+  bottom: -6vh;
+  font: 700 clamp(90px, 17vw, 260px) / .82 var(--mono-font);
+  letter-spacing: -.05em;
+  color: rgba(120, 190, 255, .055);
+  text-shadow: 0 0 60px rgba(0, 140, 255, .16);
+  pointer-events: none;
+  user-select: none;
+  z-index: 0;
+  animation: ghostCodeDrift 24s ease-in-out infinite alternate;
+}
+@keyframes ghostCodeDrift {
+  from { transform: translate3d(0, 0, 0) skewX(-2deg); opacity: .85; }
+  to   { transform: translate3d(-1.5vw, -1vh, 0) skewX(2deg); opacity: 1; }
+}
+
+/* A single slow scan band travelling down the whole overlay. */
+.title-scan {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(150, 215, 255, .045) 46%,
+    rgba(180, 230, 255, .10) 50%,
+    rgba(150, 215, 255, .045) 54%,
+    transparent 100%
+  );
+  background-size: 100% 42vh;
+  background-repeat: no-repeat;
+  animation: titleScanSweep 7.5s linear infinite;
+  mix-blend-mode: screen;
+}
+@keyframes titleScanSweep {
+  from { background-position: 0 -42vh; }
+  to   { background-position: 0 100vh; }
+}
+
+/* Fine grain + faint vertical sync bars, so the flat gradient never looks like a CSS box. */
+.title-grain {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: .55;
+  background-image:
+    repeating-linear-gradient(90deg, rgba(160, 210, 255, .028) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, .20) 0 1px, transparent 1px 3px);
+  animation: grainShift .18s steps(2) infinite;
+}
+@keyframes grainShift {
+  0% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(0, 1px, 0); }
+  100% { transform: translate3d(0, 0, 0); }
+}
+
+/* ---- Title lockup ---- */
+.glitch-title {
+  position: relative;
+  display: inline-block;
+  isolation: isolate;
+}
+.glitch-title span { position: relative; z-index: 2; }
+.glitch-title::before,
+.glitch-title::after {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: .75;
+}
+.glitch-title::before {
+  color: rgba(0, 170, 255, .55);
+  clip-path: inset(0 0 62% 0);
+  animation: titleGlitchTop 6.4s steps(1) infinite;
+}
+.glitch-title::after {
+  color: rgba(255, 48, 96, .40);
+  clip-path: inset(58% 0 0 0);
+  animation: titleGlitchBottom 7.1s steps(1) infinite;
+}
+@keyframes titleGlitchTop {
+  0%, 86%, 100% { transform: translate3d(0, 0, 0); }
+  87% { transform: translate3d(-4px, -2px, 0); }
+  89% { transform: translate3d(5px, 1px, 0); }
+  91% { transform: translate3d(-2px, 0, 0); }
+}
+@keyframes titleGlitchBottom {
+  0%, 78%, 100% { transform: translate3d(0, 0, 0); }
+  79% { transform: translate3d(6px, 2px, 0); }
+  82% { transform: translate3d(-5px, -1px, 0); }
+  84% { transform: translate3d(3px, 0, 0); }
+}
+
+/* Five segments under the wordmark: four lit, one failing. */
+.title-underline {
+  display: flex;
+  gap: 5px;
+  margin-top: 16px;
+  width: min(320px, 70%);
+}
+.title-underline i {
+  display: block;
+  height: 2px;
+  flex: 1;
+  background: linear-gradient(90deg, rgba(120, 200, 255, .0), rgba(120, 200, 255, .85));
+}
+.title-underline i:nth-child(2) { flex: 2.4; }
+.title-underline i:nth-child(4) { flex: .4; background: #ff4f78; animation: underlineFail 2.6s steps(1) infinite; }
+.title-underline i:nth-child(5) { flex: .18; background: rgba(120, 200, 255, .3); }
+@keyframes underlineFail {
+  0%, 62%, 100% { opacity: 1; }
+  64% { opacity: .15; }
+  68% { opacity: 1; }
+  71% { opacity: .2; }
+}
+
+.title-caret {
+  display: inline-block;
+  margin-left: 4px;
+  color: #8fd6ff;
+  animation: caretBlink 1.05s steps(1) infinite;
+}
+@keyframes caretBlink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+/* ---- Boot log ---- */
+.title-bootlog {
+  margin: 4px 0 22px;
+  padding: 12px 14px;
+  border-left: 2px solid rgba(120, 200, 255, .32);
+  background: linear-gradient(90deg, rgba(6, 22, 42, .55), rgba(6, 22, 42, 0));
+  font-family: var(--mono-font);
+  font-size: 11px;
+  line-height: 1.75;
+  color: #8fb6cf;
+  min-height: 106px;
+}
+.bootlog-head {
+  color: #5f819a;
+  letter-spacing: .18em;
+  font-size: 9px;
+  margin-bottom: 6px;
+}
+.bootlog-body { white-space: pre-wrap; }
+.bootlog-line { opacity: 0; animation: bootFade .28s ease-out forwards; }
+.bootlog-line .ok { color: #7fe0c0; }
+.bootlog-line .warn { color: #ffcf72; }
+.bootlog-line .bad { color: #ff6b8a; }
+.bootlog-line .dim { color: #5c778c; }
+@keyframes bootFade {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+#start-btn {
+  position: relative;
+  overflow: hidden;
+}
+#start-btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, .55) 50%, transparent 80%);
+  transform: translateX(-120%);
+  animation: btnSheen 4.6s ease-in-out infinite;
+}
+@keyframes btnSheen {
+  0%, 62% { transform: translateX(-120%); }
+  78% { transform: translateX(120%); }
+  100% { transform: translateX(120%); }
+}
+
+/* ---- BSOD breach overlay: the "system is being eaten" HUD layer during suction ---- */
+#breach-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  pointer-events: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 26px 30px;
+  font-family: var(--mono-font);
+  font-size: 11px;
+  color: rgba(190, 232, 255, .72);
+  opacity: 0;
+  transition: opacity .28s ease;
+  mix-blend-mode: screen;
+}
+#breach-overlay.active { opacity: 1; }
+.breach-col { max-width: 46vw; line-height: 1.65; white-space: pre; }
+.breach-col.right { text-align: right; }
+.breach-col .hot { color: #ff6488; }
+.breach-col .cold { color: #7bd8ff; }
+.breach-tear {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(160, 225, 255, .9), transparent);
+  opacity: .5;
+  animation: breachTear 1.2s linear infinite;
+}
+@keyframes breachTear {
+  from { top: 8%; opacity: 0; }
+  20% { opacity: .7; }
+  to { top: 92%; opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .title-scan, .title-grain, .glitch-title::before, .glitch-title::after,
+  .title-underline i:nth-child(4), .title-caret, #start-btn::after, .breach-tear {
+    animation: none !important;
+  }
+}
+
+
+/* ------------------------------------------------------------------ BSOD ERROR DIALOG SWARM
+   Windows-98-era message boxes that spawn when you touch the screen. They are diegetic UI,
+   never interactive: they stay out of the centre so the ":(" remains clickable, and they
+   multiply as the breach deepens. */
+#bsod-dialogs {
+  position: fixed;
+  inset: 0;
+  z-index: 44;
+  pointer-events: none;
+  overflow: hidden;
+  font-family: 'Segoe UI', 'Yu Gothic UI', sans-serif;
+}
+.bsod-dialog {
+  position: absolute;
+  width: 226px;
+  background: #c3c9d4;
+  border: 1px solid #10131a;
+  box-shadow:
+    3px 3px 0 rgba(0, 0, 0, .55),
+    inset -1px -1px 0 #6d7686,
+    inset 1px 1px 0 #f4f7fb;
+  color: #0c1018;
+  font-size: 11px;
+  animation: dlgSpawn .16s steps(3) both;
+  will-change: transform, opacity;
+}
+@keyframes dlgSpawn {
+  from { transform: scale(.6); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+.bsod-dialog .dlg-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 17px;
+  padding: 0 3px;
+  background: linear-gradient(90deg, #0a2a63, #1b4a9c);
+  color: #eaf2ff;
+  font-size: 10px;
+  letter-spacing: .02em;
+}
+.bsod-dialog .dlg-close {
+  width: 13px;
+  height: 12px;
+  display: grid;
+  place-items: center;
+  background: #c3c9d4;
+  color: #10131a;
+  border: 1px solid #10131a;
+  font-size: 9px;
+  line-height: 1;
+}
+.bsod-dialog .dlg-body {
+  display: flex;
+  gap: 8px;
+  padding: 10px 9px 8px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+.bsod-dialog .dlg-icon {
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ff9db3, #b21033 65%, #66001a);
+  box-shadow: inset 0 0 4px rgba(0, 0, 0, .5);
+}
+.bsod-dialog .dlg-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+  padding: 0 8px 8px;
+}
+.bsod-dialog .dlg-btn {
+  min-width: 56px;
+  padding: 2px 7px;
+  text-align: center;
+  background: #d7dce6;
+  border: 1px solid #10131a;
+  box-shadow: inset -1px -1px 0 #7d8798, inset 1px 1px 0 #fff;
+  font-size: 10.5px;
+}
+.bsod-dialog.glitch .dlg-titlebar { background: linear-gradient(90deg, #4a0616, #8f1230); }
+.bsod-dialog.glitch { filter: hue-rotate(-38deg) saturate(1.5); }
+.bsod-dialog.tremble { animation: dlgSpawn .16s steps(3) both, dlgTremble .09s steps(2) infinite; }
+@keyframes dlgTremble {
+  0% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(1px, -1px, 0); }
+  100% { transform: translate3d(-1px, 1px, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bsod-dialog, .bsod-dialog.tremble { animation: none; }
+}
+
+
+/* ================================================================== TITLE / v2 — INTERRUPT POSTER
+   The cold open is a full-bleed poster rather than a card: an editorial left column carrying the
+   wordmark and a live recovery console, a right column of diegetic system telemetry, and one
+   enormous offset hex dump bleeding off the right edge. Everything is DOM/CSS, so the cost on the
+   render thread is one composited layer during loading and nothing at all afterwards. */
+
+#title-overlay {
+  padding: 0;
+  align-items: stretch;
+  justify-content: flex-start;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 78% 18%, rgba(10, 34, 66, .55) 0%, rgba(2, 6, 14, 0) 62%),
+    linear-gradient(96deg, rgba(1, 4, 10, .975) 0%, rgba(2, 7, 16, .93) 46%, rgba(2, 7, 16, .60) 76%, rgba(1, 4, 10, .88) 100%);
+}
+
+/* ---------------------------------------------------------- backdrop layers */
+.tt-backdrop { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
+
+/* Faint SMPTE-ish colour bars bleeding out of the bottom edge: the projector is failing. */
+.tt-bars {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 22vh;
+  opacity: .16;
+  mix-blend-mode: screen;
+  background: linear-gradient(
+    to top,
+    rgba(0, 84, 210, .55) 0%, rgba(0, 84, 210, .10) 26%,
+    rgba(0, 0, 0, 0) 60%
+  );
+  mask-image: repeating-linear-gradient(90deg, #000 0 3px, transparent 3px 9px);
+}
+
+.tt-scan {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(150, 215, 255, .05) 46%,
+    rgba(190, 235, 255, .14) 50%,
+    rgba(150, 215, 255, .05) 54%,
+    transparent 100%
+  );
+  background-size: 100% 52vh;
+  background-repeat: no-repeat;
+  animation: ttScanSweep 8.5s linear infinite;
+  mix-blend-mode: screen;
+  opacity: .8;
+}
+@keyframes ttScanSweep {
+  from { background-position: 0 -52vh; }
+  to   { background-position: 0 100vh; }
+}
+
+.tt-grain {
+  position: absolute;
+  inset: -10%;
+  opacity: .5;
+  background-image:
+    repeating-linear-gradient(90deg, rgba(168, 214, 255, .026) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, .22) 0 1px, transparent 1px 3px);
+  animation: ttGrainShift .16s steps(2) infinite;
+}
+@keyframes ttGrainShift {
+  0% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(0, 1px, 0); }
+  100% { transform: translate3d(0, 0, 0); }
+}
+
+.tt-ghost {
+  position: absolute;
+  right: -3vw;
+  bottom: -8vh;
+  font: 700 clamp(120px, 22vw, 340px) / .8 var(--mono-font);
+  letter-spacing: -.06em;
+  color: rgba(120, 190, 255, .05);
+  text-shadow: 0 0 80px rgba(0, 140, 255, .18);
+  user-select: none;
+  animation: ttGhostDrift 26s ease-in-out infinite alternate;
+}
+@keyframes ttGhostDrift {
+  from { transform: translate3d(0, 0, 0) skewX(-2deg); opacity: .8; }
+  to   { transform: translate3d(-1.4vw, -1.2vh, 0) skewX(2.4deg); opacity: 1; }
+}
+
+/* The hex dump: a machine-room wall of memory, scrolling upward forever. */
+.tt-hex {
+  position: absolute;
+  top: 12vh;
+  right: -6vw;
+  margin: 0;
+  font: 10.5px/2.05 var(--mono-font);
+  color: rgba(126, 182, 226, .16);
+  white-space: pre;
+  letter-spacing: .02em;
+  mask-image: linear-gradient(90deg, transparent 0%, #000 34%, #000 78%, transparent 100%);
+  animation: ttHexBreathe 14s ease-in-out infinite alternate;
+}
+@keyframes ttHexBreathe {
+  from { opacity: .55; transform: translate3d(0, 0, 0); }
+  to   { opacity: .95; transform: translate3d(0, -14px, 0); }
+}
+
+/* ---------------------------------------------------------- frame */
+.tt-frame {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  padding: clamp(16px, 2.4vw, 30px) clamp(18px, 4.4vw, 74px) clamp(14px, 2.2vw, 26px);
+  overflow: hidden;
+}
+
+.tt-top {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(150, 200, 235, .16);
+  font: 10px var(--mono-font);
+  letter-spacing: .2em;
+  color: #7fa8c4;
+  animation: ttFadeDown .7s ease-out both;
+}
+.tt-rec { display: inline-flex; align-items: center; gap: 7px; color: #ff5f7d; letter-spacing: .16em; }
+.tt-rec i {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #ff3355;
+  box-shadow: 0 0 12px #ff2b4e;
+  animation: ttRecBlink 1.6s steps(1) infinite;
+}
+@keyframes ttRecBlink { 0%, 58% { opacity: 1; } 60%, 100% { opacity: .18; } }
+.tt-top-mid { flex: 1; margin-left: 6px; color: #9cc6e2; }
+.tt-top-right { color: #61809a; }
+
+/* ---------------------------------------------------------- stage */
+.tt-stage {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.42fr) minmax(0, .58fr);
+  gap: clamp(22px, 4vw, 70px);
+  align-items: center;
+  padding: clamp(14px, 3vh, 40px) 0 clamp(8px, 2vh, 24px);
+  min-height: 0;
+}
+
+.tt-left {
+  min-width: 0;
+  max-width: 760px;
+  max-height: 100%;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.tt-left::-webkit-scrollbar { width: 0; }
+
+.tt-kicker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 clamp(10px, 2vh, 22px);
+  font: 10px var(--mono-font);
+  letter-spacing: .26em;
+  color: #86b6d6;
+  animation: ttFadeDown .6s ease-out both;
+}
+.tt-kicker-line {
+  display: block;
+  width: clamp(28px, 5vw, 64px);
+  height: 1px;
+  background: linear-gradient(90deg, #7fd0ff, rgba(127, 208, 255, 0));
+}
+
+/* The wordmark: oversized, tight, and deliberately fighting the grid. */
+#title-overlay .game-title {
+  margin: 0;
+  font-family: var(--mono-font);
+  font-size: clamp(58px, 11.4vw, 172px);
+  font-weight: 700;
+  line-height: .84;
+  letter-spacing: -.075em;
+  color: #f2f9ff;
+  text-shadow:
+    0 0 1px rgba(255, 255, 255, .9),
+    -3px 0 rgba(0, 150, 255, .5),
+    3px 0 rgba(255, 40, 90, .30),
+    0 24px 60px rgba(0, 90, 190, .30);
+  animation: ttTitleIn .9s cubic-bezier(.16, 1, .3, 1) both;
+}
+#title-overlay .game-title span { display: inline-block; }
+@keyframes ttTitleIn {
+  from { opacity: 0; transform: translate3d(-26px, 6px, 0) skewX(-6deg); filter: blur(6px); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0) skewX(0); filter: blur(0); }
+}
+
+.tt-title-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  font: 10.5px var(--mono-font);
+  letter-spacing: .2em;
+  color: #6f93ab;
+  animation: ttFadeUp .7s .18s ease-out both;
+}
+.tt-code {
+  padding: 3px 8px;
+  color: #ffd0da;
+  background: rgba(150, 16, 44, .30);
+  border: 1px solid rgba(255, 86, 120, .34);
+  letter-spacing: .1em;
+}
+.tt-sep { color: #3d566b; }
+
+#title-overlay .game-sub {
+  margin: clamp(16px, 2.6vh, 26px) 0 clamp(14px, 2.4vh, 24px);
+  max-width: 30em;
+  font-size: clamp(12.5px, 1.15vw, 15px);
+  line-height: 1.9;
+  letter-spacing: .09em;
+  color: #c6d6e2;
+  animation: ttFadeUp .7s .26s ease-out both;
+}
+
+/* ---------------------------------------------------------- recovery console window */
+.tt-terminal {
+  position: relative;
+  max-width: 560px;
+  border: 1px solid rgba(124, 178, 216, .26);
+  background:
+    linear-gradient(180deg, rgba(6, 20, 38, .88), rgba(3, 10, 22, .92));
+  box-shadow:
+    inset 0 0 40px rgba(0, 60, 130, .18),
+    0 18px 46px rgba(0, 0, 0, .55);
+  animation: ttFadeUp .7s .34s ease-out both;
+}
+.tt-terminal::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(150, 210, 255, .045) 0 1px, transparent 1px 3px);
+}
+.tt-terminal-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border-bottom: 1px solid rgba(124, 178, 216, .20);
+  background: rgba(12, 32, 56, .72);
+  font: 9px var(--mono-font);
+  letter-spacing: .18em;
+  color: #8fb6cf;
+}
+.tt-dot { width: 6px; height: 6px; border-radius: 50%; opacity: .8; }
+.tt-dot.r { background: #ff5a72; }
+.tt-dot.y { background: #ffc857; }
+.tt-dot.g { background: #58d6a4; }
+.tt-terminal-title { margin-left: 6px; flex: 1; }
+.tt-terminal-hint { color: #ff6b8a; letter-spacing: .14em; }
+
+#title-overlay .bootlog-body {
+  min-height: 132px;
+  padding: 10px 12px 12px;
+  font: 10.5px/1.85 var(--mono-font);
+  color: #90b7cf;
+  white-space: pre-wrap;
+}
+#title-overlay .bootlog-line { opacity: 0; animation: bootFade .28s ease-out forwards; }
+
+/* ---------------------------------------------------------- loading */
+#title-overlay #loading-block { max-width: 560px; margin: clamp(14px, 2.4vh, 22px) 0 0; }
+#title-overlay .tt-progress-head {
+  display: flex;
+  justify-content: space-between;
+  font: 9.5px var(--mono-font);
+  letter-spacing: .22em;
+  color: #7ea6c1;
+  margin-bottom: 7px;
+}
+#title-overlay .tt-progress-head #tt-pct { color: #cfeaff; letter-spacing: .1em; }
+#title-overlay .loading-bar-track {
+  height: 2px;
+  background: rgba(150, 200, 235, .14);
+  margin-bottom: 9px;
+}
+#title-overlay #loading-bar-fill {
+  background: linear-gradient(90deg, #0072d6, #7fd8ff);
+  box-shadow: 0 0 14px rgba(70, 180, 255, .8);
+  transition: width .18s ease-out;
+}
+#title-overlay #loading-status {
+  font: 10.5px var(--mono-font);
+  letter-spacing: .06em;
+  color: rgba(168, 200, 222, .78);
+}
+
+/* ---------------------------------------------------------- start button */
+#title-overlay #start-btn {
+  margin-top: clamp(16px, 2.6vh, 26px);
+  max-width: 320px;
+  min-height: 54px;
+  justify-content: space-between;
+  padding: 0 20px;
+  background: transparent;
+  border: 1px solid rgba(146, 214, 255, .48);
+  color: #eaf6ff;
+  font: 600 14px var(--ui-font);
+  letter-spacing: .22em;
+  box-shadow: inset 0 0 26px rgba(0, 96, 190, .14);
+  transition: background .2s ease, border-color .2s ease, box-shadow .2s ease, letter-spacing .3s ease;
+  animation: ttFadeUp .7s .42s ease-out both;
+}
+#title-overlay #start-btn::before {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  border: 1px solid rgba(146, 214, 255, .16);
+  pointer-events: none;
+  transition: border-color .2s ease;
+}
+#title-overlay #start-btn:hover:not(:disabled) {
+  background: rgba(0, 132, 255, .22);
+  border-color: #a9e3ff;
+  box-shadow: 0 0 34px rgba(0, 140, 255, .45), inset 0 0 34px rgba(0, 140, 255, .20);
+  letter-spacing: .28em;
+}
+#title-overlay #start-btn:hover:not(:disabled)::before { border-color: rgba(190, 235, 255, .5); }
+#title-overlay #start-btn:disabled { opacity: .4; }
+.tt-btn-label { position: relative; z-index: 2; }
+.btn-arrow { font-size: 17px; }
+
+/* ---------------------------------------------------------- right telemetry column */
+.tt-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: clamp(14px, 3vh, 30px);
+  min-width: 0;
+  animation: ttFadeUp .9s .3s ease-out both;
+}
+.tt-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: min(230px, 100%);
+  border-top: 1px solid rgba(150, 200, 235, .22);
+}
+.tt-stack-unit {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 2px;
+  border-bottom: 1px solid rgba(150, 200, 235, .13);
+}
+.tt-stack-unit b {
+  font: 700 clamp(22px, 2.4vw, 34px)/1 var(--mono-font);
+  letter-spacing: -.03em;
+  color: #cfe9ff;
+}
+.tt-stack-unit span { font: 9px var(--mono-font); letter-spacing: .2em; color: #6d8fa8; }
+.tt-stack-unit.danger b { color: #ff5a7a; text-shadow: 0 0 22px rgba(255, 60, 96, .55); }
+.tt-stack-unit.danger span { color: #b8526a; }
+
+.tt-warning-box {
+  width: min(230px, 100%);
+  padding: 12px 13px 13px;
+  border: 1px solid rgba(255, 90, 122, .30);
+  border-left: 2px solid #ff5a7a;
+  background: linear-gradient(180deg, rgba(52, 4, 14, .55), rgba(16, 2, 6, .35));
+  box-shadow: 0 12px 40px rgba(60, 0, 16, .45);
+}
+.tt-warn-head {
+  display: block;
+  margin-bottom: 7px;
+  font: 9px var(--mono-font);
+  letter-spacing: .28em;
+  color: #ff7d94;
+}
+.tt-warning-box p { margin: 0; font-size: 11px; line-height: 1.85; color: #e3c3c9; letter-spacing: .04em; }
+.tt-warn-dim {
+  margin-top: 8px !important;
+  font: 9px var(--mono-font) !important;
+  letter-spacing: .16em !important;
+  color: #8d5b66 !important;
+  animation: ttWarnPulse 3.4s ease-in-out infinite;
+}
+@keyframes ttWarnPulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+
+.tt-vertical {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  font: 9px var(--mono-font);
+  letter-spacing: .32em;
+  color: rgba(126, 168, 198, .42);
+  max-height: 34vh;
+  overflow: hidden;
+}
+
+/* ---------------------------------------------------------- footer */
+.tt-bottom {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: clamp(14px, 3vw, 40px);
+  padding-top: 12px;
+  border-top: 1px solid rgba(150, 200, 235, .14);
+  animation: ttFadeUp .8s .5s ease-out both;
+}
+#title-overlay .controls-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px clamp(14px, 2.4vw, 26px);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font: 10px var(--mono-font);
+  letter-spacing: .08em;
+  color: #7d97a9;
+}
+#title-overlay .controls-grid kbd {
+  padding: 2px 6px;
+  margin-right: 5px;
+  font: 9.5px var(--mono-font);
+  letter-spacing: .06em;
+  color: #d6ecff;
+  border: 1px solid rgba(140, 190, 224, .26);
+  background: rgba(120, 180, 224, .08);
+}
+#title-overlay .experience-note {
+  margin: 0;
+  max-width: 34em;
+  text-align: right;
+  font: 9.5px/1.85 var(--mono-font);
+  letter-spacing: .04em;
+  color: #5f7484;
+}
+
+@keyframes ttFadeUp {
+  from { opacity: 0; transform: translate3d(0, 14px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes ttFadeDown {
+  from { opacity: 0; transform: translate3d(0, -10px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+/* ---------------------------------------------------------- compact layouts */
+@media (max-width: 900px) {
+  .tt-stage { grid-template-columns: 1fr; align-items: start; }
+  .tt-right { flex-direction: row; align-items: stretch; flex-wrap: wrap; gap: 12px; }
+  .tt-stack { flex: 1 1 180px; }
+  .tt-warning-box { flex: 1 1 200px; }
+  .tt-vertical { display: none; }
+  .tt-hex { opacity: .5; }
+  .tt-bottom { flex-direction: column; align-items: flex-start; }
+  #title-overlay .experience-note { text-align: left; }
+}
+@media (max-width: 620px) {
+  .tt-top-mid, .tt-top-right { display: none; }
+  .tt-stack { display: none; }
+  .tt-warning-box { width: 100%; }
+  #title-overlay .game-title { font-size: 17vw; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tt-scan, .tt-grain, .tt-ghost, .tt-hex, .tt-rec i, .tt-warn-dim,
+  #title-overlay .game-title, .tt-top, .tt-kicker, .tt-right, .tt-bottom,
+  .tt-terminal, #title-overlay .game-sub, #title-overlay #start-btn, .tt-title-meta {
+    animation: none !important;
+  }
+}
+
+/* Short viewports (laptops, phone landscape): keep the wordmark and the console, drop garnish. */
+@media (max-height: 780px) {
+  #title-overlay .game-title { font-size: clamp(46px, 8.2vw, 104px); }
+  #title-overlay .game-sub { margin: 12px 0 14px; font-size: 12.5px; }
+  .tt-kicker { margin-bottom: 10px; }
+  #title-overlay .bootlog-body { min-height: 96px; font-size: 9.5px; line-height: 1.7; }
+  .tt-stage { padding: 8px 0; }
+  .tt-warning-box, .tt-vertical { display: none; }
+  #title-overlay .experience-note { display: none; }
+  #title-overlay #start-btn { min-height: 46px; margin-top: 14px; }
+}
+
+/* The wordmark is a kernel name with a version suffix, not one long slug: a giant "BSOD" with a
+   small underscored "EX" riding its baseline. Keeps the 164px glyphs from colliding with the
+   metadata row the way a 0.84 line-height underscore did. */
+#title-overlay .game-title em {
+  font-style: normal;
+  font-size: .30em;
+  letter-spacing: .02em;
+  vertical-align: baseline;
+  margin-left: .10em;
+  color: rgba(150, 220, 255, .92);
+  text-shadow: 0 0 24px rgba(0, 150, 255, .55);
 }

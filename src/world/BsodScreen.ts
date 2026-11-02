@@ -6,224 +6,17 @@ export interface BsodScreenState {
   cursorUv: THREE.Vector2;
   clickCount: number;
   madness: number; // 0..1 continuous escalation
-  jawOpen: number; // 0..1 opening of the ':(' fissure into 3D throat
+  jawOpen: number; // 0..1 opening of the dimensional breach
   suctionProgress: number; // 0..1 camera diving through the throat
   aftermath: boolean;
 }
 
-const THROAT_RING_COUNT = 40;
-const THROAT_SHARD_COUNT = 128;
-const THROAT_LINE_COUNT = 180;
-const THROAT_TOOTH_COUNT = 144;
-const RIM_TOOTH_COUNT = 52;
-const JAW_FLAP_COUNT = 4;
-const SINEW_COUNT = 32;
-const PARASYTE_EYE_COUNT = 11;
-const GLASS_SHARD_COUNT = 48;
-
-function buildParasyteMandibleGeometry(): THREE.BufferGeometry {
-  // High-resolution sculpted 3D Parasyte (寄生獣) quadrant jaw-and-gum mesh:
-  // u in [-1..+1] (full quadrant angular span), v in [0..1]:
-  //   v = 0.00..0.22: inner wet pharynx wall wrapping deep -Z into the throat tunnel
-  //   v = 0.22..0.44: swollen 3D alveolar gum arch (歯槽堤) with tooth-root sockets
-  //   v = 0.44..1.00: sculpted muscular cheek/brow/chin lobe tucking cleanly behind torn LCD glass
-  const uSegs = 44;
-  const vSegs = 30;
-  const positions: number[] = [];
-  const uvs: number[] = [];
-  const indices: number[] = [];
-
-  for (let iv = 0; iv <= vSegs; iv++) {
-    const v = iv / vSegs;
-    for (let iu = 0; iu <= uSegs; iu++) {
-      const u = (iu / uSegs) * 2.0 - 1.0;
-      positions.push(u, v, 0.0);
-      uvs.push(iu / uSegs, v);
-    }
-  }
-  const stride = uSegs + 1;
-  for (let iv = 0; iv < vSegs; iv++) {
-    for (let iu = 0; iu < uSegs; iu++) {
-      const a = iv * stride + iu;
-      const b = a + 1;
-      const c = a + stride;
-      const d = c + 1;
-      // Counter-clockwise winding in (+v radial outward, +u CCW tangent) -> +Z front-facing!
-      indices.push(a, c, b, b, c, d);
-    }
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-  geo.setIndex(indices);
-  geo.computeVertexNormals();
-  return geo;
-}
-
-function buildParasyteToothGeometry(): THREE.BufferGeometry {
-  // High-detail sculpted Parasyte (寄生獣) anatomical hybrid tooth with closed biting edge:
-  // Cervical root neck (buried in 3D gum socket) -> bulging enamel equator -> developmental lobes -> closed incisal/cusp ridge!
-  const rings = 13;
-  const segs = 20;
-  const profile: Array<[number, number, number, number]> = [
-    // [ty (0..1), rx (mesial-distal half-width), rz (labio-lingual half-depth), hookZ]
-    [0.00, 0.096, 0.082, -0.010],
-    [0.10, 0.106, 0.088, -0.005],
-    [0.22, 0.118, 0.094,  0.000],
-    [0.34, 0.116, 0.088,  0.005],
-    [0.46, 0.112, 0.080,  0.011],
-    [0.58, 0.106, 0.070,  0.018],
-    [0.69, 0.099, 0.058,  0.025],
-    [0.79, 0.091, 0.045,  0.031],
-    [0.87, 0.082, 0.032,  0.036],
-    [0.93, 0.071, 0.021,  0.040],
-    [0.97, 0.058, 0.012,  0.042],
-    [0.99, 0.042, 0.005,  0.043],
-    [1.00, 0.000, 0.000,  0.0435],
-  ];
-  const positions: number[] = [];
-  const uvs: number[] = [];
-  const indices: number[] = [];
-  for (let r = 0; r < rings; r++) {
-    const [ty, rx, rz, hz] = profile[r];
-    for (let s = 0; s <= segs; s++) {
-      const a = (s / segs) * Math.PI * 2;
-      const ca = Math.cos(a);
-      const sa = Math.sin(a);
-      const superX = Math.sign(ca) * Math.pow(Math.abs(ca), 0.62);
-      const superZ = Math.sign(sa) * Math.pow(Math.abs(sa), 0.72);
-      // Anatomical labial developmental mamelon grooves + palatal/lingual concavity
-      const labialGroove = 1.0 - 0.055 * Math.cos(ca * Math.PI * 2.0) * Math.max(0, sa) * Math.sin(ty * Math.PI);
-      const lingualScoop = sa < 0 ? -0.018 * Math.sin(Math.min(1, ty * 1.15) * Math.PI) * (1.0 - ca * ca) : 0.0;
-      positions.push(
-        superX * rx * labialGroove,
-        ty * 0.30,
-        superZ * rz + hz + lingualScoop * (1.0 - Math.pow(ty, 4.0))
-      );
-      uvs.push(s / segs, ty);
-    }
-  }
-  const stride = segs + 1;
-  for (let r = 0; r < rings - 1; r++) {
-    for (let s = 0; s < segs; s++) {
-      const a = r * stride + s;
-      const b = a + 1;
-      const c = a + stride;
-      const d = c + 1;
-      indices.push(a, c, b, b, c, d);
-    }
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-  geo.setIndex(indices);
-  geo.computeVertexNormals();
-  return geo;
-}
-
-function buildParasyteSocketedEyeGeometry(): THREE.BufferGeometry {
-  // Compound 1-draw-call geometry combining:
-  //   Part A (uv.y in 0.00..0.45): 28x20 high-res spherical eyeball (+Z = cornea pole)
-  //   Part B (uv.y in 0.55..1.00): 28x12 sculpted 3D fleshy orbital socket & split eyelids hugging the eyeball!
-  const ball = new THREE.SphereGeometry(1.0, 28, 20);
-  ball.rotateX(Math.PI * 0.5);
-
-  const lidSegs = 28;
-  const lidRings = 12;
-  const lidPos: number[] = [];
-  const lidUv: number[] = [];
-  const lidIdx: number[] = [];
-
-  for (let ir = 0; ir <= lidRings; ir++) {
-    const tau = ir / lidRings; // 0 = inner wet palpebral rim hugging sclera, 1 = deep muscular base in jaw flesh
-    for (let is = 0; is <= lidSegs; is++) {
-      const u = is / lidSegs;
-      const theta = u * Math.PI * 2;
-      const ct = Math.cos(theta);
-      const st = Math.sin(theta);
-
-      // Almond-shaped Parasyte palpebral fissure: pinched canthi at ±X, arched muscular tarsal folds at ±Y
-      const canthusStretchX = 1.16 - 0.10 * tau;
-      const apertureCompressY = 0.72 + 0.28 * tau;
-      // Cross-section wraps tightly around the unit sphere (r^2 + z^2 > 1.03 across middle so zero z-fighting!)
-      let rRing: number;
-      let zRing: number;
-      if (tau < 0.14) {
-        // Thick rolled mucocutaneous eyelid margin curling inward onto the wet sclera
-        const k = tau / 0.14;
-        rRing = THREE.MathUtils.lerp(0.76, 0.88, k);
-        zRing = THREE.MathUtils.lerp(0.64, 0.69, k);
-      } else {
-        const k = (tau - 0.14) / 0.86;
-        rRing = THREE.MathUtils.lerp(0.88, 1.62, Math.pow(k, 0.88));
-        zRing = THREE.MathUtils.lerp(0.69, -0.46, Math.pow(k, 1.08)) + Math.sin(k * Math.PI) * 0.14;
-      }
-
-      const browCrease = (st > 0 ? 0.08 : 0.04) * Math.sin(tau * Math.PI) * Math.pow(Math.abs(st), 1.5);
-      const x = ct * rRing * canthusStretchX;
-      const y = st * rRing * apertureCompressY;
-      const z = zRing + browCrease;
-      lidPos.push(x, y, z);
-      lidUv.push(u, 0.55 + tau * 0.45);
-    }
-  }
-  const lidStride = lidSegs + 1;
-  for (let ir = 0; ir < lidRings; ir++) {
-    for (let is = 0; is < lidSegs; is++) {
-      const a = ir * lidStride + is;
-      const b = a + 1;
-      const c = a + lidStride;
-      const d = c + 1;
-      lidIdx.push(a, c, b, b, c, d);
-    }
-  }
-  const lidGeo = new THREE.BufferGeometry();
-  lidGeo.setAttribute('position', new THREE.Float32BufferAttribute(lidPos, 3));
-  lidGeo.setAttribute('uv', new THREE.Float32BufferAttribute(lidUv, 2));
-  lidGeo.setIndex(lidIdx);
-  lidGeo.computeVertexNormals();
-
-  const bPos = ball.attributes.position.array as Float32Array;
-  const bNrm = ball.attributes.normal.array as Float32Array;
-  const bUv = ball.attributes.uv.array as Float32Array;
-  const bIdx = ball.index!.array;
-
-  const lPos = lidGeo.attributes.position.array as Float32Array;
-  const lNrm = lidGeo.attributes.normal.array as Float32Array;
-  const lUv = lidGeo.attributes.uv.array as Float32Array;
-  const lIdx = lidGeo.index!.array;
-
-  const mergedPos = new Float32Array(bPos.length + lPos.length);
-  mergedPos.set(bPos, 0);
-  mergedPos.set(lPos, bPos.length);
-
-  const mergedNrm = new Float32Array(bNrm.length + lNrm.length);
-  mergedNrm.set(bNrm, 0);
-  mergedNrm.set(lNrm, bNrm.length);
-
-  const mergedUv = new Float32Array(bUv.length + lUv.length);
-  for (let i = 0; i < bUv.length; i += 2) {
-    mergedUv[i] = bUv[i];
-    mergedUv[i + 1] = bUv[i + 1] * 0.45;
-  }
-  mergedUv.set(lUv, bUv.length);
-
-  const vertOffset = bPos.length / 3;
-  const mergedIdx = new Uint16Array(bIdx.length + lIdx.length);
-  mergedIdx.set(bIdx, 0);
-  for (let i = 0; i < lIdx.length; i++) {
-    mergedIdx[bIdx.length + i] = lIdx[i] + vertOffset;
-  }
-
-  const out = new THREE.BufferGeometry();
-  out.setAttribute('position', new THREE.BufferAttribute(mergedPos, 3));
-  out.setAttribute('normal', new THREE.BufferAttribute(mergedNrm, 3));
-  out.setAttribute('uv', new THREE.BufferAttribute(mergedUv, 2));
-  out.setIndex(new THREE.BufferAttribute(mergedIdx, 1));
-  ball.dispose();
-  lidGeo.dispose();
-  return out;
-}
+const THROAT_RING_COUNT = 44;
+const THROAT_SHARD_COUNT = 136;
+const THROAT_LINE_COUNT = 190;
+const GLASS_SHARD_COUNT = 56;
+const HOLO_PANE_COUNT = 36;
+const HOLO_RING_COUNT = 8;
 
 export class BsodScreen {
   public readonly root = new THREE.Group();
@@ -233,12 +26,24 @@ export class BsodScreen {
   private readonly stageTextures: THREE.CanvasTexture[] = [];
   private readonly aftermathTex: THREE.CanvasTexture;
   private readonly cardTex: THREE.CanvasTexture;
+  private readonly holoTex: THREE.CanvasTexture;
 
   private readonly faceCanvas: HTMLCanvasElement;
   private readonly faceTex: THREE.CanvasTexture;
 
   public readonly screenMesh: THREE.Mesh;
   public readonly screenMat: THREE.ShaderMaterial;
+
+  // Legacy empty groups preserved as hidden invariants (zero anatomical meshes!)
+  private readonly parasyteGroup = new THREE.Group();
+  private readonly throatTeeth = new THREE.Group();
+
+  // 3D Out-of-Screen Holographic Breach Rig (extrudes +Z into the bedroom!)
+  private readonly holoBreachGroup = new THREE.Group();
+  private readonly holoCascadeMesh: THREE.InstancedMesh;
+  private readonly holoCascadeMat: THREE.ShaderMaterial;
+  private readonly holoRingsMesh: THREE.InstancedMesh;
+  private readonly holoRingsMat: THREE.ShaderMaterial;
 
   // 100% GPU-animated Zero-Gravity 3D Shattered LCD Glass Shards
   private readonly glassShards: THREE.InstancedMesh;
@@ -254,26 +59,13 @@ export class BsodScreen {
   private readonly throatShardMat: THREE.ShaderMaterial;
   private readonly throatLines: THREE.InstancedMesh;
   private readonly throatLineMat: THREE.ShaderMaterial;
-  private readonly throatTeeth: THREE.InstancedMesh;
-  private readonly throatToothMat: THREE.ShaderMaterial;
   private readonly throatMaterials: THREE.Material[] = [];
-
-  // True 3D Parasyte-style Biomechanical Jaw Rig (protruding +Z out of the LCD glass!)
-  private readonly parasyteGroup = new THREE.Group();
-  private readonly jawFlapsMesh: THREE.InstancedMesh;
-  private readonly jawFlapMat: THREE.ShaderMaterial;
-  private readonly rimTeethMesh: THREE.InstancedMesh;
-  private readonly rimToothMat: THREE.ShaderMaterial;
-  private readonly sinewMesh: THREE.InstancedMesh;
-  private readonly sinewMat: THREE.ShaderMaterial;
-  private readonly parasyteEyesMesh: THREE.InstancedMesh;
-  private readonly parasyteEyeMat: THREE.ShaderMaterial;
 
   private lastRenderedStage = -1;
   private lastAftermath = false;
   private insideTunnelMode = false;
 
-  // 0..1: hairline crack propagation along '(' stroke since last click
+  // 0..1: shock-crack propagation since last click
   private crackRun = 0;
   private readonly impactUv = new THREE.Vector2(0.144, 0.742);
 
@@ -294,14 +86,17 @@ export class BsodScreen {
   constructor() {
     const noiseTex = getSharedNoiseTexture();
 
-    // 1. Pre-bake all 6 BSOD stages + aftermath onto separate GPU-ready CanvasTextures ONCE at boot
-    //    so clicking ':(' during gameplay costs 0.00ms CPU canvas work and 0.00ms gl.texImage2D upload!
+    this.parasyteGroup.visible = false;
+    this.throatTeeth.visible = false;
+    this.root.add(this.parasyteGroup);
+
+    // 1. Pre-bake all 6 BSOD stages + aftermath onto GPU-ready CanvasTextures ONCE at boot
     for (let s = 0; s <= 5; s++) {
       this.stageTextures.push(this.bakeStageTexture(s, false));
     }
     this.aftermathTex = this.bakeStageTexture(0, true);
 
-    // 2. Separate SDF Face Channel Map (R = ':' eyes SDF, G = '(' mouth SDF) at crisp mipmapped 1024x1024
+    // 2. Separate SDF Face Channel Map (R = ':' eyes SDF, G = '(' mouth SDF, B = 0) at crisp 1024x1024
     this.faceCanvas = document.createElement('canvas');
     this.faceCanvas.width = 1024;
     this.faceCanvas.height = 1024;
@@ -313,14 +108,14 @@ export class BsodScreen {
     this.faceTex.generateMipmaps = true;
     this.faceTex.needsUpdate = true;
 
-    // 3. Invisible low-poly raycast plane (2 triangles = 0.001ms raycast!)
+    // 3. Invisible low-poly raycast plane (2 triangles)
     const hitGeo = new THREE.PlaneGeometry(BsodScreen.LOCAL_W, BsodScreen.LOCAL_H, 1, 1);
     const hitMat = new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide });
     this.hitboxMesh = new THREE.Mesh(hitGeo, hitMat);
     this.hitboxMesh.position.z = 0.004;
     this.root.add(this.hitboxMesh);
 
-    // 4. Stencil Aperture Mask (writes stencil=1 on monitor area when jawOpen > 0)
+    // 4. Stencil Aperture Mask (writes stencil=1 on monitor area during suction)
     const maskGeo = new THREE.PlaneGeometry(BsodScreen.LOCAL_W * 0.992, BsodScreen.LOCAL_H * 0.992, 1, 1);
     const maskMat = new THREE.MeshBasicMaterial({
       colorWrite: false,
@@ -335,19 +130,18 @@ export class BsodScreen {
     this.stencilMaskMesh.visible = false;
     this.root.add(this.stencilMaskMesh);
 
-    // 5. Non-Euclidean 3D Abyssal Monitor Throat Tunnel (100% GPU-driven, 0.0ms CPU!)
+    // 5. Non-Euclidean 3D Display-Buffer Tunnel (100% GPU-driven, 0.0ms CPU!)
     this.root.add(this.throatGroup);
     this.throatGroup.visible = false;
+    this.throatGroup.add(this.throatTeeth);
 
-    // Open-fronted tube + back dome starting cleanly at z = -0.02 so front cap never clips camera!
-    const tubeGeo = new THREE.CylinderGeometry(1.42, 5.6, 116, 24, 20, true);
+    const tubeGeo = new THREE.CylinderGeometry(1.42, 5.6, 116, 28, 22, true);
     tubeGeo.rotateX(Math.PI * 0.5);
     tubeGeo.translate(0, 0, -58.02);
-    // Add far portal cap disc at z = -116.02 facing +Z (so with BackSide we flip normal to -Z)
-    const endDisc = new THREE.CircleGeometry(5.6, 24);
-    endDisc.rotateY(Math.PI); // BackSide makes +Z visible when rotated PI!
+    const endDisc = new THREE.CircleGeometry(5.6, 28);
+    endDisc.rotateY(Math.PI);
     endDisc.translate(0, 0, -116.0);
-    // Keep tubeGeo + endDisc as a single merged tunnel mesh
+
     const tPos = tubeGeo.attributes.position.array as Float32Array;
     const tUv = tubeGeo.attributes.uv.array as Float32Array;
     const tIdx = tubeGeo.index!.array;
@@ -399,11 +193,13 @@ export class BsodScreen {
           vec3 p = position;
           vTubePos = position;
           float straighten = 1.0 - smoothstep(0.46, 0.88, uSuction);
-          // Peristaltic swallowing contraction squeezing down the near gullet!
-          float peristalsis = 1.0 - 0.14 * sin(-p.z * 0.48 - uTime * 7.5) * smoothstep(-36.0, -1.0, p.z);
-          p.xy *= peristalsis;
-          float twist = p.z * 0.042 * (0.4 + uMadness) + uTime * 1.35;
-          p.x += sin(twist) * 0.28 * smoothstep(-1.0, -25.0, p.z) * straighten;
+          // Quantized digital sector shear + harmonic tunnel pulse
+          float sector = floor(-p.z * 0.35 + uTime * 6.0);
+          float glitchSnap = step(0.86, fract(sin(sector * 43.17) * 43758.5453)) * 0.12 * straighten;
+          float pulse = 1.0 - 0.10 * sin(-p.z * 0.52 - uTime * 9.0) * smoothstep(-38.0, -1.0, p.z);
+          p.xy *= pulse;
+          float twist = p.z * 0.042 * (0.4 + uMadness) + uTime * 1.45;
+          p.x += (sin(twist) * 0.28 + glitchSnap) * smoothstep(-1.0, -25.0, p.z) * straighten;
           p.y += cos(twist * 0.9) * 0.22 * smoothstep(-1.0, -25.0, p.z) * straighten;
           gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
         }
@@ -419,39 +215,40 @@ export class BsodScreen {
 
         void main() {
           float depthFactor = clamp(-vTubePos.z / 115.0, 0.0, 1.0);
-          float zScroll = vTubePos.z * 0.62 + uScrollPhase;
+          float zScroll = vTubePos.z * 0.68 + uScrollPhase;
 
           float safeTx = (abs(vTubePos.x) < 1e-5 && abs(vTubePos.y) < 1e-5) ? 1e-5 : vTubePos.x;
           float angle = atan(vTubePos.y, safeTx);
-          vec4 nSample = texture2D(uNoiseTex, vec2(angle * 0.3183, vTubePos.z * 0.025 + uTime * 0.18));
+          vec4 nSample = texture2D(uNoiseTex, vec2(angle * 0.3183, vTubePos.z * 0.03 + uTime * 0.22));
 
-          vec2 cell = vec2(angle * 6.366, zScroll);
+          // High-tech cybernetic kernel bus grid + binary data-lanes rushing past
+          vec2 cell = vec2(angle * 7.639, zScroll);
+          vec2 cid = floor(cell);
           vec2 f = fract(cell);
-          float line = smoothstep(0.075, 0.0, min(f.x, 1.0 - f.x)) + smoothstep(0.06, 0.0, min(f.y, 1.0 - f.y));
+          float gridLine = smoothstep(0.08, 0.0, min(f.x, 1.0 - f.x)) + smoothstep(0.06, 0.0, min(f.y, 1.0 - f.y));
+          float packetOn = step(0.68, fract(sin(dot(cid, vec2(12.9898, 78.233))) * 43758.5453));
+          float packetCore = step(0.18, f.x) * step(f.x, 0.82) * step(0.15, f.y) * step(f.y, 0.85) * packetOn;
+
           float helixA = pow(max(0.0, sin(angle * 6.0 + vTubePos.z * 0.22 + uScrollPhase * 0.358)), 8.0);
           float helixB = pow(max(0.0, cos(angle * 10.0 - vTubePos.z * 0.16 + uScrollPhase * 0.265)), 10.0);
-          float shockRing = smoothstep(0.92, 1.0, fract(vTubePos.z * 0.09 + uScrollPhase * 0.146));
+          float shockRing = smoothstep(0.90, 1.0, fract(vTubePos.z * 0.09 + uScrollPhase * 0.146));
 
-          vec3 darkGullet = vec3(0.002, 0.025, 0.095);
-          // Match GlitchWorld's spatial exit conduit palette 1:1 in the deep zone for a 0-cut transition!
+          vec3 nearVoid = vec3(0.002, 0.018, 0.085);
           vec3 sleeveDeep = vec3(0.004, 0.065, 0.28);
           vec3 sleeveMid = vec3(0.008, 0.14, 0.48);
 
-          float ribFold = pow(0.5 + 0.5 * sin(vTubePos.z * 1.45 - uTime * 5.5 + nSample.r * 2.4), 3.0);
-          float horrorZone = smoothstep(0.50, 0.04, depthFactor);
-          float sleeveZone = smoothstep(0.36, 0.70, depthFactor);
+          float nearZone = smoothstep(0.55, 0.04, depthFactor);
+          float sleeveZone = smoothstep(0.32, 0.70, depthFactor);
 
-          // Near half: wet crimson Parasyte esophagus -> Deep half: morphs smoothly into GlitchWorld's cerulean conduit!
-          vec3 sleeveBase = mix(sleeveDeep, sleeveMid, smoothstep(0.55, 0.94, depthFactor));
-          vec3 col = mix(darkGullet, sleeveBase, sleeveZone);
-          col += vec3(0.015, 0.16, 0.44) * ribFold * horrorZone;
-          col += vec3(0.06, 0.38, 0.8) * pow(nSample.a, 2.8) * horrorZone * 0.5;
+          vec3 col = mix(nearVoid, mix(sleeveDeep, sleeveMid, smoothstep(0.55, 0.94, depthFactor)), sleeveZone);
+          // Cyber crimson/cyan bus flashes in the near breach zone, morphing cleanly to cerulean ahead
+          vec3 packetTint = mix(vec3(0.0, 0.78, 1.0), vec3(1.0, 0.16, 0.38), step(0.82, nSample.g) * nearZone);
+          col += packetTint * packetCore * 0.34 * nearZone;
+          col += vec3(0.24, 0.78, 1.0) * gridLine * mix(0.24, 0.48, sleeveZone);
+          col += vec3(0.32, 0.86, 1.0) * (helixA * 0.62 + helixB * 0.48) * mix(0.22, 0.88, sleeveZone);
+          col += vec3(0.74, 0.95, 1.0) * shockRing * mix(0.24, 0.74, sleeveZone);
 
-          col += vec3(0.28, 0.76, 1.0) * line * mix(0.06, 0.46, sleeveZone);
-          col += vec3(0.32, 0.84, 1.0) * (helixA * 0.55 + helixB * 0.45) * mix(0.08, 0.88, sleeveZone);
-          col += vec3(0.70, 0.94, 1.0) * shockRing * mix(0.10, 0.72, sleeveZone);
-
-          // === SEAMLESS TOOTHLESS FAR-END PORTAL VISTA (MATCHING GLITCH WORLD EXIT CONDUIT 1:1) ===
+          // Seamless far-end portal vista matching GlitchWorld exit conduit 1:1
           float portalMask = smoothstep(0.90, 0.992, depthFactor);
           vec2 radialP = vTubePos.xy / 5.6;
           float rimR = length(radialP);
@@ -465,13 +262,11 @@ export class BsodScreen {
           float eyeDist = length(eyeRel);
           float eyeCorona = exp(-eyeDist * 3.2) * 0.65 + exp(-abs(eyeDist - 0.21) * 19.0) * 0.95;
           gwSky += vec3(0.58, 0.90, 1.0) * eyeCorona * (0.45 + 0.55 * uSuction);
-          // Smooth luminous spatial-rift feather into the conduit wall (ZERO teeth at tunnel exit!)
           float riftGlow = exp(-pow((rimR - 0.88) * 6.0, 2.0));
           gwSky += vec3(0.28, 0.78, 1.0) * riftGlow * 0.42;
           gwSky = mix(gwSky, col, smoothstep(0.78, 1.02, rimR));
 
           col = mix(col, gwSky, portalMask);
-
           gl_FragColor = vec4(col, 1.0);
         }
       `,
@@ -481,8 +276,8 @@ export class BsodScreen {
     this.throatGroup.add(this.throatBackCap);
     this.throatMaterials.push(this.throatTubeMat);
 
-    // 5b. 100% GPU-Animated Receding Rectangular BSOD Frame Ribs (1 draw call, 0 CPU loops!)
-    const frameGeo = new THREE.RingGeometry(0.93, 1.0, 4, 1);
+    // 5b. Receding Rectangular BSOD Frame Ribs inside the tunnel
+    const frameGeo = new THREE.RingGeometry(0.92, 1.0, 4, 1);
     frameGeo.rotateZ(Math.PI * 0.25);
     const ringIdxAttr = new Float32Array(THROAT_RING_COUNT);
     for (let i = 0; i < THROAT_RING_COUNT; i++) ringIdxAttr[i] = i / THROAT_RING_COUNT;
@@ -512,32 +307,33 @@ export class BsodScreen {
         uniform float uMadness;
         uniform float uSuction;
         varying float vDepthT;
-        varying float vNearClip;
+        varying float vAccent;
         void main() {
           float zSpan = 112.0;
           float z = -mod(aFrac * zSpan - uScrollPhase * 0.92, zSpan) - 0.45;
           float depthT = -z / zSpan;
           vDepthT = depthT;
-          vNearClip = 1.0;
+          vAccent = step(0.82, fract(aFrac * 13.7));
           float straighten = 1.0 - smoothstep(0.55, 0.96, uSuction);
           float s = 0.74 + depthT * 3.15;
-          float rot = sin(uTime * 1.5 + aFrac * 15.0) * 0.20 * uMadness * straighten;
+          float rot = sin(uTime * 1.8 + aFrac * 17.0) * 0.24 * uMadness * straighten;
           float cr = cos(rot), sr = sin(rot);
           vec2 rp = vec2(position.x * s * 1.45, position.y * s * 0.85);
           vec2 rotP = vec2(rp.x * cr - rp.y * sr, rp.x * sr + rp.y * cr);
           float wx = sin(z * 0.042 + uTime * 1.35) * 0.26 * depthT * straighten;
           float wy = cos(z * 0.038 + uTime * 1.2) * 0.20 * depthT * straighten;
-          vec3 finalP = vec3(rotP.x + wx, rotP.y + wy, z);
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(finalP, 1.0);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(rotP.x + wx, rotP.y + wy, z, 1.0);
         }
       `,
       fragmentShader: /* glsl */ `
         varying float vDepthT;
+        varying float vAccent;
         uniform float uSuction;
         void main() {
-          float alpha = mix(0.14, 0.55, smoothstep(0.04, 0.4, uSuction)) * (1.0 - smoothstep(0.42, 0.66, vDepthT));
+          float alpha = mix(0.18, 0.62, smoothstep(0.04, 0.4, uSuction)) * (1.0 - smoothstep(0.42, 0.68, vDepthT));
           if (alpha < 0.008) discard;
-          gl_FragColor = vec4(0.68, 0.91, 1.0, alpha);
+          vec3 col = mix(vec3(0.45, 0.88, 1.0), vec3(1.0, 0.22, 0.44), vAccent * (1.0 - smoothstep(0.2, 0.55, vDepthT)));
+          gl_FragColor = vec4(col, alpha);
         }
       `,
     });
@@ -547,28 +343,29 @@ export class BsodScreen {
     this.throatGroup.add(this.throatRings);
     this.throatMaterials.push(this.throatRingMat);
 
-    // 5c. 100% GPU-Animated Spiraling Crash Memory Cards inside the throat (0 CPU loops!)
+    // 5c. Spiraling Crash Memory Cards inside the throat
     const cardCanvas = document.createElement('canvas');
     cardCanvas.width = 256;
     cardCanvas.height = 128;
     const cctx = cardCanvas.getContext('2d')!;
-    cctx.fillStyle = 'rgba(0, 56, 128, 0.92)';
+    cctx.fillStyle = 'rgba(0, 42, 112, 0.94)';
     cctx.fillRect(0, 0, 256, 128);
-    cctx.fillStyle = '#cbeaff';
-    cctx.fillRect(0, 0, 256, 18);
-    cctx.fillStyle = '#002b66';
+    cctx.fillStyle = '#8be4ff';
+    cctx.fillRect(0, 0, 256, 20);
+    cctx.fillStyle = '#001e4d';
     cctx.font = 'bold 12px Consolas, monospace';
-    cctx.fillText('0x000000F4 // DUMP_FRAME', 8, 13);
-    cctx.strokeStyle = 'rgba(135, 212, 255, 0.85)';
+    cctx.fillText('RING0 // 0xFFFFF803_0247', 8, 14);
+    cctx.strokeStyle = 'rgba(110, 224, 255, 0.92)';
     cctx.lineWidth = 2;
     cctx.strokeRect(2, 2, 252, 124);
     cctx.fillStyle = '#ffffff';
-    cctx.font = '300 28px "Segoe UI", sans-serif';
-    cctx.fillText(':(', 14, 60);
+    cctx.font = '300 30px "Segoe UI", sans-serif';
+    cctx.fillText(':)', 14, 64);
     cctx.font = '13px Consolas, monospace';
-    cctx.fillStyle = '#9fd8ff';
-    cctx.fillText('PAGE_FAULT_NONPAGED', 62, 56);
-    cctx.fillRect(14, 88, 188, 6);
+    cctx.fillStyle = '#9fe6ff';
+    cctx.fillText('MEM_BREACH // OVERFLOW', 58, 56);
+    cctx.fillStyle = '#ff3864';
+    cctx.fillRect(14, 88, 212, 6);
     const cardTex = new THREE.CanvasTexture(cardCanvas);
     cardTex.colorSpace = THREE.SRGBColorSpace;
     cardTex.minFilter = THREE.LinearFilter;
@@ -579,10 +376,10 @@ export class BsodScreen {
     const shardGeo = new THREE.PlaneGeometry(0.28, 0.14);
     const sSeed = new Float32Array(THROAT_SHARD_COUNT * 4);
     for (let i = 0; i < THROAT_SHARD_COUNT; i++) {
-      sSeed[i * 4 + 0] = Math.random() * Math.PI * 2; // angle
-      sSeed[i * 4 + 1] = 0.38 + Math.random() * 1.65; // radius
-      sSeed[i * 4 + 2] = Math.random(); // z offset 0..1
-      sSeed[i * 4 + 3] = 0.65 + Math.random() * 1.25; // scale & speed seed
+      sSeed[i * 4 + 0] = Math.random() * Math.PI * 2;
+      sSeed[i * 4 + 1] = 0.38 + Math.random() * 1.65;
+      sSeed[i * 4 + 2] = Math.random();
+      sSeed[i * 4 + 3] = 0.65 + Math.random() * 1.25;
     }
     shardGeo.setAttribute('aSeed4', new THREE.InstancedBufferAttribute(sSeed, 4));
 
@@ -617,7 +414,6 @@ export class BsodScreen {
 
           float a = aSeed4.x + uTime * 0.85 + z * 0.045;
           float rad = aSeed4.y * (0.48 + depthT * 1.55);
-          // Tumble in local plane
           float spin = uTime * (1.5 + aSeed4.w * 2.2) + aSeed4.x;
           float cs = cos(spin), sn = sin(spin);
           vec3 lp = position * (0.6 + aSeed4.w * 0.75);
@@ -634,7 +430,7 @@ export class BsodScreen {
         uniform sampler2D uCardTex;
         void main() {
           vec4 c = texture2D(uCardTex, vUv);
-          gl_FragColor = vec4(c.rgb, c.a * 0.86 * vFade);
+          gl_FragColor = vec4(c.rgb, c.a * 0.88 * vFade);
         }
       `,
     });
@@ -644,7 +440,7 @@ export class BsodScreen {
     this.throatGroup.add(this.throatShards);
     this.throatMaterials.push(this.throatShardMat);
 
-    // 5d. 100% GPU-Animated Hyperspace Data-Stream Speed Lines (1 additive draw call, 0 CPU loops!)
+    // 5d. Hyperspace Data-Stream Speed Lines inside tunnel
     const lineGeo = new THREE.BoxGeometry(0.02, 0.02, 1.0);
     const lSeed = new Float32Array(THROAT_LINE_COUNT * 4);
     for (let i = 0; i < THROAT_LINE_COUNT; i++) {
@@ -679,7 +475,6 @@ export class BsodScreen {
         varying float vBright;
         void main() {
           float zSpan = 112.0;
-          // Clamp front bound to -0.45 while outside monitor so lines never poke through solid screen glass!
           float maxZ = mix(-0.45, 2.0, uInside);
           float z = -zSpan + mod(aSeed4.z * zSpan + uScrollPhase * (1.65 + aSeed4.w * 0.95), zSpan + maxZ);
           float depthT = clamp(-z / zSpan, 0.0, 1.0);
@@ -688,7 +483,6 @@ export class BsodScreen {
           float len = (2.6 + aSeed4.w * 4.5) * (0.65 + uSuction * 2.2);
           float thick = 0.7 + uSuction * 0.85;
           vec3 lp = vec3(position.x * thick, position.y * thick, position.z * len);
-          // Prevent front tip of box from crossing z = -0.08 when outside tunnel
           float tipZ = z + lp.z;
           if (uInside < 0.5) tipZ = min(tipZ, -0.08);
           vBright = (0.45 + 0.55 * fract(aSeed4.w * 7.3)) * (1.0 - smoothstep(0.88, 1.0, depthT));
@@ -698,8 +492,8 @@ export class BsodScreen {
       fragmentShader: /* glsl */ `
         varying float vBright;
         void main() {
-          vec3 col = mix(vec3(0.18, 0.68, 1.0), vec3(0.92, 0.98, 1.0), vBright);
-          gl_FragColor = vec4(col, 0.85 * vBright);
+          vec3 col = mix(vec3(0.18, 0.72, 1.0), vec3(0.95, 0.99, 1.0), vBright);
+          gl_FragColor = vec4(col, 0.88 * vBright);
         }
       `,
     });
@@ -709,142 +503,10 @@ export class BsodScreen {
     this.throatGroup.add(this.throatLines);
     this.throatMaterials.push(this.throatLineMat);
 
-    // 5e. Deep Esophageal Swallowing Ribs (only emerge deep inside the tunnel during SUCTION so mouth stays 100% single-row!)
-    const fangGeo = buildParasyteToothGeometry();
-    const tSeed = new Float32Array(THROAT_TOOTH_COUNT * 4);
-    const teethPerRing = 36;
-    for (let i = 0; i < THROAT_TOOTH_COUNT; i++) {
-      const ringIdx = Math.floor(i / teethPerRing); // 0..3 deep esophageal rings
-      const slot = i % teethPerRing;
-      const stagger = (ringIdx % 2) * 0.5;
-      tSeed[i * 4 + 0] = ringIdx;
-      tSeed[i * 4 + 1] = ((slot + stagger) / teethPerRing) * Math.PI * 2;
-      tSeed[i * 4 + 2] = 0.85 + ((i * 0.6180339887) % 1) * 0.65;
-      tSeed[i * 4 + 3] = (i * 2.3999632) % (Math.PI * 2);
-    }
-    fangGeo.setAttribute('aTooth4', new THREE.InstancedBufferAttribute(tSeed, 4));
-
-    this.throatToothMat = new THREE.ShaderMaterial({
-      side: THREE.DoubleSide,
-      depthWrite: true,
-      depthFunc: THREE.LessEqualDepth,
-      stencilWrite: true,
-      stencilWriteMask: 0,
-      stencilRef: 1,
-      stencilFunc: THREE.EqualStencilFunc,
-      uniforms: {
-        uTime: { value: 0 },
-        uMadness: { value: 0 },
-        uJawOpen: { value: 0 },
-        uSuction: { value: 0 },
-        uClickPulse: { value: 0 },
-      },
-      vertexShader: /* glsl */ `
-        attribute vec4 aTooth4;
-        uniform float uTime;
-        uniform float uMadness;
-        uniform float uJawOpen;
-        uniform float uSuction;
-        uniform float uClickPulse;
-        varying float vTip;
-        varying vec3 vNrm;
-        varying vec3 vViewPos;
-        varying float vRing;
-        void main() {
-          float ringIdx = aTooth4.x;
-          float ang = aTooth4.y;
-          float lenScale = aTooth4.z;
-          float phase = aTooth4.w;
-
-          // Hidden during INSPECT_PC (uSuction == 0); strictly confined to near fleshy gullet (-9.5 .. -30.5) when swallowed!
-          float insideVis = smoothstep(0.04, 0.18, uSuction);
-          float ringZ = -9.5 - ringIdx * 7.0;
-          float clampWave = sin(-ringZ * 0.35 - uTime * 8.0) * 0.22;
-          float rad = max(1.38, 2.22 + ringIdx * 0.24 + clampWave + sin(uTime * 16.0 + phase) * 0.05);
-
-          vec2 radialDir = vec2(cos(ang), sin(ang));
-          vec2 tangentDir = vec2(-radialDir.y, radialDir.x);
-
-          // Thick, heavy Parasyte (寄生獣) pharyngeal incisors, molars & wide carnassial blades — shoulder-to-shoulder!
-          float crownY = uv.y;
-          float isCarnassial = step(0.66, fract(phase * 0.3183));
-          float isMolar = (1.0 - isCarnassial) * step(0.52, lenScale - 0.85);
-          float h = mix(1.75, 2.35, isCarnassial) * (0.85 + 0.25 * lenScale) * insideVis;
-          float w = mix(3.35, 2.85, isCarnassial) * insideVis;
-          float dThick = mix(2.85, 2.35, isCarnassial) * insideVis;
-
-          vec3 shapedP = position;
-          if (isCarnassial > 0.5) {
-            // Broad triangular bone-shearing blade (thick base, beveled wide cutting tip — never skinny!)
-            shapedP.x *= mix(1.08, 0.38, pow(crownY, 1.7));
-            shapedP.z *= mix(1.05, 0.32, crownY);
-          } else if (isMolar > 0.5) {
-            // Heavy crushing molar block with twin occlusal cusps
-            shapedP.x *= mix(1.06, 0.96, crownY);
-            shapedP.z *= mix(1.10, 0.88, crownY);
-            shapedP.y += smoothstep(0.75, 1.0, crownY) * abs(position.x) * 0.26;
-          } else {
-            // Broad human-hybrid spade incisor with wide chisel biting edge
-            shapedP.x *= mix(1.04, 0.90, pow(crownY, 1.3));
-            shapedP.z *= mix(1.0, 0.34, pow(crownY, 1.35));
-          }
-
-          vec3 inwardAxis = normalize(vec3(-radialDir, -0.44));
-          vec3 sideAxis = vec3(tangentDir, 0.0);
-          vec3 depthAxis = normalize(cross(inwardAxis, sideAxis));
-
-          vec3 rootPos = vec3(radialDir * rad, ringZ);
-          vec3 worldLocal = rootPos
-                          + sideAxis * (shapedP.x * w)
-                          + inwardAxis * (shapedP.y * h)
-                          + depthAxis * (shapedP.z * dThick);
-          vec3 localNorm = normalize(
-            sideAxis * normal.x + inwardAxis * normal.y + depthAxis * normal.z
-          );
-
-          vec4 mv = modelViewMatrix * vec4(worldLocal, 1.0);
-          vViewPos = -mv.xyz;
-          vNrm = normalize(normalMatrix * localNorm);
-          vTip = uv.y;
-          vRing = ringIdx;
-          gl_Position = projectionMatrix * mv;
-        }
-      `,
-      fragmentShader: /* glsl */ `
-        varying float vTip;
-        varying vec3 vNrm;
-        varying vec3 vViewPos;
-        varying float vRing;
-        void main() {
-          vec3 N = normalize(vNrm);
-          vec3 V = normalize(vViewPos);
-          vec3 L1 = normalize(vec3(0.25, 0.55, 0.80));
-          vec3 H1 = normalize(L1 + V);
-          float diff = 0.28 + 0.72 * max(dot(N, L1), 0.0);
-          float spec = pow(max(dot(N, H1), 0.0), 48.0);
-          float rim = pow(1.0 - abs(dot(N, V)), 2.5);
-
-          vec3 gumRoot = vec3(0.28, 0.016, 0.058);
-          vec3 gumCollar = vec3(0.56, 0.09, 0.16);
-          vec3 boneMid = vec3(0.89, 0.85, 0.77);
-          vec3 razorTip = vec3(0.98, 0.97, 0.94);
-          vec3 col = mix(gumRoot, gumCollar, smoothstep(0.0, 0.14, vTip));
-          col = mix(col, boneMid, smoothstep(0.14, 0.34, vTip));
-          col = mix(col, razorTip, smoothstep(0.38, 0.92, vTip));
-          col *= diff * (1.0 - vRing * 0.10);
-          col += vec3(0.95, 0.98, 1.0) * spec * 1.15;
-          col += vec3(0.22, 0.72, 1.0) * rim * 0.48;
-          gl_FragColor = vec4(col, 1.0);
-        }
-      `,
-    });
-    this.throatTeeth = new THREE.InstancedMesh(fangGeo, this.throatToothMat, THROAT_TOOTH_COUNT);
-    this.throatTeeth.renderOrder = 4;
-    this.throatTeeth.frustumCulled = false;
-    this.throatGroup.add(this.throatTeeth);
-    this.throatMaterials.push(this.throatToothMat);
-
-    // 6. High-Tessellation 112x64 BSOD LCD Surface Shader (SDF Razor-Sharp ':(' + Sub-LCD 3D Visage Relief!)
+    // 6. High-Tessellation 112x64 BSOD LCD Surface Shader:
+    //    - Authentic Windows BSOD at Stage 0
+    //    - True 3D View-Dependent Interior Parallax Hall-of-Mirrors Corridor behind torn scan-sectors
+    //    - Live GPU Hex/Binary Memory Bleed, RGB Chromatic Sub-planes, and Cyber-Optic Singularity Lock-On!
     const screenGeo = new THREE.PlaneGeometry(BsodScreen.LOCAL_W, BsodScreen.LOCAL_H, 112, 64);
     this.screenMat = new THREE.ShaderMaterial({
       transparent: false,
@@ -872,108 +534,73 @@ export class BsodScreen {
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
-        varying float vCaveDepth;
         varying vec3 vLocalPos;
         varying vec3 vWorldPos;
         varying vec3 vWorldNormal;
+        varying vec3 vWorldRight;
+        varying vec3 vWorldUp;
         uniform float uTime;
         uniform float uMadness;
         uniform float uJawOpen;
         uniform float uSuction;
         uniform float uClickPulse;
-        uniform float uCrackRun;
-        uniform float uHover;
-        uniform vec2 uParenC;
-        uniform vec2 uParenSize;
-        uniform vec2 uColonC;
-        uniform vec3 uSpine;
+        uniform vec2 uImpactUv;
 
-        vec4 evalParasyteChewV(float t, float madness, float jawOpen, float suction, float clickPulse) {
-          float openT = clamp(jawOpen, 0.0, 1.0);
-          float baseOpen = pow(openT, 0.68);
-          // A living jaw: slow inhalation interrupted by sharp, irregular involuntary bites.
-          // This exact equation is shared by the screen, gums, teeth, eyes and sinews.
-          float alive = smoothstep(0.17, 0.62, madness) * (1.0 - smoothstep(0.10, 0.48, suction));
-          float inhaleBreath = sin(t * 2.0) * 0.055 * openT;
-          float spasm = pow(max(0.0, sin(t * 3.7 + sin(t * 1.13) * 1.8)), 10.0);
-          float bite = spasm * 0.18 * alive * openT;
-          float clickTear = clickPulse * 0.095 * smoothstep(0.08, 0.32, madness);
-          float swallowUnhinge = smoothstep(0.10, 0.45, suction) * 0.38;
-          float effOpen = clamp(baseOpen + inhaleBreath - bite + clickTear + swallowUnhinge, 0.0, 1.34);
-          return vec4(effOpen, 0.0, 0.0, 0.0);
-        }
-
-        // Unified 4-Quadrant Parasyte Split-Head Rim:
-        // Muscular jaw arches at Right (0), Upper Maxilla (pi/2), Left (pi), Lower Chin (3pi/2);
-        // Deep diagonal split commissures at +-pi/4 and +-3pi/4!
-        float evalMawLobeV(float ang, float openN) {
-          float k = clamp(openN, 0.0, 1.25);
-          float cornerFlare = pow(0.5 - 0.5 * cos(ang * 4.0), 1.55);
-          float archVertical = 0.07 * pow(abs(sin(ang)), 1.4);
-          // Neighbouring lobes strain in different directions instead of pulsing as a perfect ring.
-          float twitch = sin(ang * 3.0 + uTime * 4.3) * 0.045
-                       + sin(ang * 5.0 - uTime * 7.1) * 0.025;
-          return 1.0 + (0.14 * cornerFlare + archVertical + twitch * uMadness) * k;
+        float hash21V(vec2 p) {
+          vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+          p3 += dot(p3, p3.yzx + 33.33);
+          return fract((p3.x + p3.y) * p3.z);
         }
 
         void main() {
           vUv = uv;
           vec3 p = position;
 
-          vec2 mawCenter = mix(vec2(0.144, 0.742), vec2(0.48, 0.48), smoothstep(0.14, 0.88, uMadness));
-          float faceScaleV = max(mix(0.35, 0.84, smoothstep(0.12, 0.90, uMadness)), 0.08);
-          vec4 chewV = evalParasyteChewV(uTime, uMadness, uJawOpen, uSuction, uClickPulse);
-          float openN = chewV.x;
+          vec2 coreCenter = mix(vec2(0.144, 0.742), vec2(0.50, 0.50), smoothstep(0.16, 0.82, uMadness));
+          vec2 coreDelta = (uv - coreCenter) * vec2(1.90566, 1.0);
+          float coreDist = length(coreDelta);
 
-          vec2 fLocV = (uv - mawCenter) * vec2(1.90566, 1.0) / faceScaleV;
+          // Tactile click shockwave + spatial inward warp funnel at high madness
+          vec2 impDelta = (uv - uImpactUv) * vec2(1.90566, 1.0);
+          float impDist = length(impDelta);
+          float ringR = (1.0 - uClickPulse) * 0.78;
+          float clickRipple = sin((impDist - ringR) * 26.0) * exp(-pow((impDist - ringR) * 8.5, 2.0)) * uClickPulse * 0.018;
 
-          vec2 parenLocV = uParenC - vec2(0.5);
-          float parenHalfHV = max(uParenSize.y * 0.5, 0.05);
-          float halfLenV = max(mix(parenHalfHV, 0.43, pow(clamp(openN, 0.0, 1.2), 0.78)), 1e-4);
-          float tvRawV = (fLocV.y - parenLocV.y) / halfLenV;
-          float tvV = clamp(tvRawV, -1.0, 1.0);
-          vec3 spineFV = uSpine - vec3(0.5);
-          float spineHereV = 0.5 * tvV * (tvV - 1.0) * spineFV.x
-                           + (1.0 - tvV * tvV) * spineFV.y
-                           + 0.5 * tvV * (tvV + 1.0) * spineFV.z;
-          float mouthCxV = spineHereV * (1.0 - pow(clamp(openN, 0.0, 1.0), 0.9));
-          vec2 mdV = fLocV - vec2(mouthCxV, parenLocV.y);
+          // Quantized digital scan-slab z-delamination (sectors physically step forward/back!)
+          float slabId = floor(uv.y * 22.0);
+          float tick = floor(uTime * (9.0 + uMadness * 14.0));
+          float slabGlitch = step(0.92 - uMadness * 0.24, hash21V(vec2(slabId, tick))) * (hash21V(vec2(slabId + 7.1, tick)) - 0.35);
+          float zStep = slabGlitch * 0.028 * smoothstep(0.18, 0.85, uMadness);
 
-          float crackGateV = 1.0 - smoothstep(0.04, 0.20, openN);
-          float crackGrownV = smoothstep(1.0 - uCrackRun, 1.02, abs(tvV));
-          float openNcV = openN * mix(1.0, crackGrownV, crackGateV);
-          float safeMdXV = (abs(mdV.x) < 1e-5 && abs(mdV.y) < 1e-5) ? 1e-5 : mdV.x;
-          float polarAngV = atan(mdV.y, safeMdXV);
-          float mawLobeV = evalMawLobeV(polarAngV, openNcV);
-          float lipProfV = pow(max(0.0, 1.0 - pow(min(abs(tvRawV), 1.0), 2.2)), 0.60);
-          float slitGapeV = max(mix(0.0001, 0.24, pow(max(openNcV, 0.0), 1.15)) * lipProfV, 1e-4);
-          float slitDistV = abs(mdV.x) / slitGapeV + max(0.0, abs(tvRawV) - 1.0) * 6.0;
-          float circRadXV = max(mix(0.04, 0.43, pow(max(openNcV, 0.0), 0.85)), 1e-4);
-          float circDistV = length(vec2(mdV.x / circRadXV, mdV.y / halfLenV)) / mawLobeV;
-          float nDist = mix(slitDistV, circDistV, smoothstep(0.06, 0.30, openNcV));
+          // Funnel pull into the singularity just before and during suction
+          float funnel = -exp(-coreDist * coreDist * 6.5) * (smoothstep(0.55, 1.0, uMadness) * 0.065 + uSuction * 0.22);
+          float rimPeel = exp(-pow((coreDist - 0.38) * 6.0, 2.0)) * (uJawOpen * 0.032 + uSuction * 0.045);
 
-          float tearOpenV = smoothstep(0.06, 0.30, openNcV);
-          // Outward-peeling shattered LCD glass collar around mDist = 1.03..1.36 so 3D jaw flesh tucks cleanly behind it!
-          float glassCollar = exp(-pow((nDist - 1.10) * 4.2, 2.0)) * (0.042 * openNcV + 0.018 * uClickPulse) * tearOpenV;
-          // Subtle sub-LCD cranial/visage dome bulge pressing outward from behind the panel at Stages 1-3
-          float subFaceDome = 0.0; // No anatomical relief beneath the display.
-          float clickWave = sin(nDist * 11.0 - (1.0 - uClickPulse) * 13.0) * exp(-nDist * 1.9) * uClickPulse * 0.012;
-          p.z += glassCollar + subFaceDome + clickWave;
+          // Something behind the panel slides across it: a slow pressure bulge under the glass.
+          vec2 bulgeC = vec2(0.5 + 0.30 * sin(uTime * 0.31), 0.5 + 0.22 * cos(uTime * 0.23));
+          float bulge = exp(-pow(length((uv - bulgeC) * vec2(1.90566, 1.0)) * 3.1, 2.0));
+          p.z += bulge * (0.006 + uMadness * 0.018);
 
-          vCaveDepth = smoothstep(1.38, 1.00, nDist) * tearOpenV;
+          p.z += clickRipple + zStep + funnel + rimPeel;
+
           vLocalPos = p;
-          vec4 wpScreen = modelMatrix * vec4(p, 1.0);
-          vWorldPos = wpScreen.xyz;
-          vWorldNormal = normalize(mat3(modelMatrix) * vec3(0.0, 0.0, 1.0));
-          gl_Position = projectionMatrix * viewMatrix * wpScreen;
+          vec4 wp = modelMatrix * vec4(p, 1.0);
+          vWorldPos = wp.xyz;
+          mat3 m3 = mat3(modelMatrix);
+          vWorldRight = normalize(m3 * vec3(1.0, 0.0, 0.0));
+          vWorldUp = normalize(m3 * vec3(0.0, 1.0, 0.0));
+          vWorldNormal = normalize(m3 * vec3(0.0, 0.0, 1.0));
+          gl_Position = projectionMatrix * viewMatrix * wp;
         }
       `,
       fragmentShader: /* glsl */ `
         varying vec2 vUv;
-        varying float vCaveDepth;
         varying vec3 vLocalPos;
         varying vec3 vWorldPos;
         varying vec3 vWorldNormal;
+        varying vec3 vWorldRight;
+        varying vec3 vWorldUp;
+
         uniform sampler2D uBodyTex;
         uniform sampler2D uFaceTex;
         uniform sampler2D uNoiseTex;
@@ -1012,155 +639,118 @@ export class BsodScreen {
           return mat2(c, -s, s, c);
         }
 
-        vec2 faceCenterOf(float m) {
-          return mix(vec2(0.144, 0.742), vec2(0.48, 0.48), smoothstep(0.14, 0.88, m));
-        }
-
-        float faceScaleOf(float m) {
-          return max(mix(0.35, 0.84, smoothstep(0.12, 0.90, m)), 0.08);
-        }
-
-        vec4 evalParasyteChew(float t, float madness, float jawOpen, float suction, float clickPulse) {
-          float openT = clamp(jawOpen, 0.0, 1.0);
-          float baseOpen = pow(openT, 0.68);
-          // A living jaw: slow inhalation interrupted by sharp, irregular involuntary bites.
-          // This exact equation is shared by the screen, gums, teeth, eyes and sinews.
-          float alive = smoothstep(0.17, 0.62, madness) * (1.0 - smoothstep(0.10, 0.48, suction));
-          float inhaleBreath = sin(t * 2.0) * 0.055 * openT;
-          float spasm = pow(max(0.0, sin(t * 3.7 + sin(t * 1.13) * 1.8)), 10.0);
-          float bite = spasm * 0.18 * alive * openT;
-          float clickTear = clickPulse * 0.095 * smoothstep(0.08, 0.32, madness);
-          float swallowUnhinge = smoothstep(0.10, 0.45, suction) * 0.38;
-          float effOpen = clamp(baseOpen + inhaleBreath - bite + clickTear + swallowUnhinge, 0.0, 1.34);
-          return vec4(effOpen, 0.0, 0.0, 0.0);
-        }
-
-        float evalMawLobe(float ang, float openN) {
-          float k = clamp(openN, 0.0, 1.25);
-          float cornerFlare = pow(0.5 - 0.5 * cos(ang * 4.0), 1.55);
-          float archVertical = 0.07 * pow(abs(sin(ang)), 1.4);
-          // Neighbouring lobes strain in different directions instead of pulsing as a perfect ring.
-          float twitch = sin(ang * 3.0 + uTime * 4.3) * 0.045
-                       + sin(ang * 5.0 - uTime * 7.1) * 0.025;
-          return 1.0 + (0.14 * cornerFlare + archVertical + twitch * uMadness) * k;
-        }
-
-        // Analytic fwidth() anti-aliased SDF sampler for 8K vector-crisp ':(' typography at any zoom!
         float sampleSdfGlyph(float rawVal) {
           float sd = rawVal - 0.5;
           float aa = clamp(fwidth(sd) * 0.95, 0.008, 0.085);
           return smoothstep(-aa, aa, sd);
         }
 
-        // Sculpted 3D Sub-LCD Parasyte Visage Heightfield pressing against the inside of the liquid crystal panel!
-        float evalSubLcdVisage(vec2 fPos, vec2 eyeA, vec2 eyeB, vec2 mouthCenter, float madness, float openN) {
-          vec2 hp = fPos - vec2(0.0, 0.04);
-          float skullDome = exp(-dot(hp * vec2(1.15, 0.92), hp * vec2(1.15, 0.92)) * 3.1) * 0.55;
+        // True 3D Ray-Plane Interior Corridor behind the fractured LCD glass!
+        vec3 evalInteriorAbyss(vec2 uv, vec3 viewTan, float madness, float t, vec2 cursorMetric) {
+          vec2 p0 = (uv - 0.5) * vec2(1.90566, 1.0);
+          vec2 ray = -viewTan.xy / max(abs(viewTan.z), 0.22);
+          vec3 acc = vec3(0.002, 0.014, 0.058);
 
-          vec2 browA = (fPos - (eyeA + vec2(0.0, 0.085))) * vec2(2.6, 7.5);
-          vec2 browB = (fPos - (eyeB + vec2(0.0, 0.095))) * vec2(2.3, 7.0);
-          float brows = (exp(-dot(browA, browA)) + exp(-dot(browB, browB)) * 1.15) * 0.42;
+          // 5 receding holographic BSOD corridor planes at physical depths behind the glass
+          for (int i = 1; i <= 5; i++) {
+            float fi = float(i);
+            float depth = fi * 0.26 + fract(-t * (0.45 + madness * 0.55) + fi * 0.2) * 0.26;
+            vec2 planeP = p0 + ray * depth * 0.55;
+            float scale = 1.0 + depth * 1.65;
+            vec2 q = planeP * scale;
 
-          float sockA = exp(-dot((fPos - eyeA) * 5.6, (fPos - eyeA) * 5.6)) * 0.58;
-          float sockB = exp(-dot((fPos - eyeB) * 4.6, (fPos - eyeB) * 4.6)) * 0.65;
+            // Rectangular nested monitor bezel frame
+            vec2 box = abs(q) / vec2(0.88, 0.48);
+            float maxB = max(box.x, box.y);
+            float rim = smoothstep(0.06, 0.0, abs(maxB - 1.0));
+            // Cyber circuit traces along corridor walls
+            float grid = smoothstep(0.04, 0.0, abs(fract(q.x * 6.0) - 0.5)) * step(1.0, maxB) * step(maxB, 1.35);
+            float fade = exp(-depth * 1.15);
+            vec3 tint = mix(vec3(0.06, 0.62, 1.0), vec3(1.0, 0.16, 0.40), step(0.75, fract(fi * 0.37 + madness * 0.5)));
+            acc += tint * (rim * 0.72 + grid * 0.28) * fade;
+          }
 
-          vec2 cheekR = (fPos - vec2(0.34, 0.08)) * vec2(3.4, 2.4);
-          vec2 cheekL = (fPos - vec2(-0.34, 0.08)) * vec2(3.4, 2.4);
-          float cheeks = (exp(-dot(cheekR, cheekR)) + exp(-dot(cheekL, cheekL))) * 0.44;
+          // Deep staring cyber-iris core in the far parallax background tracking your cursor/camera!
+          vec2 deepP = p0 + ray * 0.82 - cursorMetric * 0.22;
+          float rEye = length(deepP * vec2(0.92, 1.28));
+          float outerIris = exp(-abs(rEye - 0.24) * 28.0);
+          float innerPupil = exp(-rEye * 7.5);
+          float scanSpoke = 0.5 + 0.5 * sin(atan(deepP.y, deepP.x + 1e-5) * 12.0 - t * 4.0);
+          acc += mix(vec3(0.18, 0.80, 1.0), vec3(1.0, 0.18, 0.38), smoothstep(0.45, 0.9, madness))
+               * (outerIris * (0.65 + 0.35 * scanSpoke) + innerPupil * 0.55) * smoothstep(0.20, 0.75, madness);
 
-          vec2 mp = fPos - mouthCenter;
-          float rM = length(mp);
-          float angM = atan(mp.y, (abs(mp.x) < 1e-5 && abs(mp.y) < 1e-5) ? 1e-5 : mp.x);
-          float splitGroove = pow(max(0.0, -cos(angM * 4.0)), 6.0) * exp(-rM * 1.8) * smoothstep(0.08, 0.45, madness) * 0.48;
+          // A figure stands in the corridor. Between frames it is closer. Its head is always
+          // angled toward the viewer, and its eyes are two needle-thin pinpricks of light.
+          float stalkAwake = smoothstep(0.30, 0.68, madness);
+          if (stalkAwake > 0.01) {
+            float snapTick = floor(t * (0.7 + madness * 2.4));
+            float snap = hash21(vec2(snapTick, 4.71));
+            float stalkDepth = 0.62 - 0.26 * smoothstep(0.45, 0.95, madness);
+            if (snap > 0.70) stalkDepth *= 0.52;
+            if (snap > 0.93) stalkDepth *= 0.38;
+            vec2 sp = p0 + ray * stalkDepth * 0.55;
+            sp.x += sin(t * 0.53) * 0.018 + (hash21(vec2(snapTick, 9.2)) - 0.5) * 0.06 * madness;
+            float head = 1.0 - smoothstep(0.026, 0.038, length((sp - vec2(0.0, 0.082)) * vec2(1.0, 1.14)));
+            float torso = 1.0 - smoothstep(0.048, 0.082, length((sp - vec2(0.0, -0.03)) * vec2(1.0, 1.55)));
+            float bodyMask = clamp(head + torso, 0.0, 1.0) * stalkAwake;
+            acc = mix(acc, vec3(0.0015, 0.0035, 0.011), bodyMask * 0.97);
+            float eyeA = exp(-length(sp - vec2(-0.012, 0.088)) * 320.0);
+            float eyeB = exp(-length(sp - vec2(0.012, 0.088)) * 320.0);
+            acc += mix(vec3(0.86, 0.94, 1.0), vec3(1.0, 0.10, 0.24), smoothstep(0.45, 0.95, madness))
+                 * (eyeA + eyeB) * bodyMask * (0.55 + 0.45 * step(0.4, sin(t * 1.7)));
+          }
 
-          float lipTension = exp(-pow((rM - (0.16 + openN * 0.28)) * 5.5, 2.0)) * 0.36;
-
-          return (skullDome + brows + cheeks + lipTension - sockA - sockB - splitGroove);
+          return acc;
         }
 
         void main() {
           vec2 uv = vUv;
 
-          // ---------------------------------------------------------------- 1. UNIFIED FACE & PARASYTE MAW COORDINATES
-          vec2 faceCenter = faceCenterOf(uMadness);
-          float faceScale = faceScaleOf(uMadness);
+          // Tangent-space camera view vector for true 3D interior parallax
+          vec3 Vw = normalize(cameraPosition - vWorldPos);
+          vec3 viewTan = vec3(dot(Vw, vWorldRight), dot(Vw, vWorldUp), dot(Vw, vWorldNormal));
 
-          vec2 parenLocal = uParenC - vec2(0.5);
-          vec2 colonLocal = uColonC - vec2(0.5);
-          float parenHalfH = max(uParenSize.y * 0.5, 0.05);
-          float eyeOff = abs(uColonDotOff);
+          // Core center migrates smoothly from top-left ':(' slot (0.144, 0.742) at Stage 0 -> center singularity (0.50, 0.50)
+          float migrate = smoothstep(0.16, 0.78, uMadness);
+          vec2 faceCenter = mix(vec2(0.144, 0.742), vec2(0.50, 0.50), migrate);
+          float faceScale = mix(0.35, 0.78, smoothstep(0.14, 0.88, uMadness));
 
-          vec4 chew = evalParasyteChew(uTime, uMadness, uJawOpen, uSuction, uClickPulse);
-          float openN = chew.x;
-
-          float fastTick = floor(uTime * 36.0);
-          vec2 clickTremor = vec2(hash21(vec2(fastTick, 1.7)) - 0.5, hash21(vec2(fastTick, 9.3)) - 0.5)
-                           * (0.010 * uClickPulse);
-
-          vec2 aspectDelta = (uv - faceCenter + clickTremor) * vec2(1.90566, 1.0);
-          vec2 fLocal = aspectDelta / faceScale;
-
-          float halfLen = max(mix(parenHalfH, 0.43, pow(clamp(openN, 0.0, 1.2), 0.78)), 1e-4);
-          float tvRaw = (fLocal.y - parenLocal.y) / halfLen;
-          float tv0 = clamp(tvRaw, -1.0, 1.0);
-
-          vec3 spineF = uSpine - vec3(0.5);
-          float spineHere = 0.5 * tv0 * (tv0 - 1.0) * spineF.x
-                          + (1.0 - tv0 * tv0) * spineF.y
-                          + 0.5 * tv0 * (tv0 + 1.0) * spineF.z;
-          float mouthCx = mix(spineHere, 0.0, pow(clamp(openN, 0.0, 1.0), 0.9));
-          vec2 md = fLocal - vec2(mouthCx, parenLocal.y);
-          float safeMdX = (abs(md.x) < 1e-5 && abs(md.y) < 1e-5) ? 1e-5 : md.x;
-          float polarAng = atan(md.y, safeMdX);
-
-          float lipProf = pow(max(0.0, 1.0 - pow(min(abs(tvRaw), 1.0), 2.2)), 0.60);
-          float crackGate = 1.0 - smoothstep(0.04, 0.20, openN);
-          float crackGrown = smoothstep(1.0 - uCrackRun, 1.02, abs(tv0));
-          float openNc = openN * mix(1.0, crackGrown, crackGate);
-
-          float slitGape = max(mix(0.0001, 0.24, pow(max(openNc, 0.0), 1.15)) * lipProf, 1e-4);
-          float slitDist = abs(md.x) / slitGape + max(0.0, abs(tvRaw) - 1.0) * 6.0;
-          float circRadX = max(mix(0.04, 0.43, pow(max(openNc, 0.0), 0.85)), 1e-4);
-          float mawWobble = evalMawLobe(polarAng, openNc);
-          float circleDist = length(vec2(md.x / circRadX, md.y / halfLen)) / mawWobble;
-          float mDist = mix(slitDist, circleDist, smoothstep(0.06, 0.30, openNc));
-
-          float mEdge = exp(-pow((mDist - 1.04) * 28.0, 2.0));
-          float mStress = smoothstep(2.0, 1.0, mDist);
-
-          // Discard cleanly inside mDist < 1.03 so the 3D sculpted Parasyte jaws & gum-socketed teeth emerge from behind!
-          float tearOpen = smoothstep(0.06, 0.26, openNc);
+          // Portal hole discard ONLY during active suction (strictly preserves Stage 0..5 screen inspection!)
           float portalOpen = smoothstep(0.03, 0.16, uSuction);
-          if (uAftermath < 0.5 && portalOpen > 0.01 && mDist < portalOpen * 1.03) discard;
+          if (uAftermath < 0.5 && portalOpen > 0.01) {
+            vec2 sDelta = (uv - faceCenter) * vec2(1.90566, 1.0);
+            float angS = atan(sDelta.y, (abs(sDelta.x) < 1e-5 && abs(sDelta.y) < 1e-5) ? 1e-5 : sDelta.x);
+            float jagPortal = 1.0 + 0.08 * sin(angS * 8.0 + uTime * 9.0) + 0.05 * cos(angS * 13.0 - uTime * 14.0);
+            float pDist = length(sDelta) / (0.46 * portalOpen * jagPortal + 1e-4);
+            if (pDist < 1.0) discard;
+          }
 
-          // ---------------------------------------------------------------- 2. LCD PANEL & TACTILE IMPACT REFRACTION
-          vec4 noiseA = texture2D(uNoiseTex, uv * vec2(3.2, 1.8) + vec2(0.0, uTime * 0.04));
-          vec4 noiseB = texture2D(uNoiseTex, uv * vec2(7.5, 4.2) - vec2(uTime * 0.03, 0.0));
+          // ---------------------------------------------------------------- 1. CLICK SHOCKWAVE & BROADCAST SYNC TEARS
+          vec4 noiseA = texture2D(uNoiseTex, uv * vec2(3.2, 1.8) + vec2(0.0, uTime * 0.05));
+          vec4 noiseB = texture2D(uNoiseTex, uv * vec2(8.0, 4.5) - vec2(uTime * 0.04, 0.0));
 
           vec2 impDelta = (uv - uImpactUv) * vec2(1.90566, 1.0);
           float impDist = length(impDelta);
-          float ringRadius = (1.0 - uClickPulse) * 0.68;
-          float impWave = exp(-pow((impDist - ringRadius) * 12.0, 2.0)) * uClickPulse;
+          float ringRadius = (1.0 - uClickPulse) * 0.78;
+          float impWave = exp(-pow((impDist - ringRadius) * 11.5, 2.0)) * uClickPulse;
           vec2 impDir = impDist > 1e-4 ? impDelta / impDist : vec2(0.0, 1.0);
 
-          float tearAmt = uMadness * 0.028 + uClickPulse * 0.040;
-          float band = floor(uv.y * (30.0 + uMadness * 34.0));
-          float tick = floor(uTime * (12.0 + uMadness * 22.0));
-          float bandRnd = hash21(vec2(band, tick));
-          float bandShift = step(0.90 - uMadness * 0.24, bandRnd) * (bandRnd - 0.5) * 2.0 * (tearAmt * 0.38);
+          // Deliberate quantized horizontal scan-slice displacement + datamosh macroblocks
+          float tick = floor(uTime * (12.0 + uMadness * 20.0));
+          float band = floor(uv.y * (24.0 + uMadness * 36.0));
+          float bandPick = hash21(vec2(band, tick));
+          float tearGate = step(0.92 - uMadness * 0.28 - uClickPulse * 0.25, bandPick) * step(0.02, uMadness + uClickPulse);
+          float bandShift = tearGate * (hash21(vec2(band * 2.3, tick + 5.0)) - 0.5) * (0.045 + uMadness * 0.14 + uClickPulse * 0.09);
 
-          vec2 bodyUv = uv + vec2(bandShift, 0.0) + impDir * impWave * 0.014;
+          // Macroblock displacement on higher stages
+          vec2 mCell = floor(uv * vec2(32.0, 18.0));
+          float mPick = hash21(mCell + floor(uTime * 10.0) * 1.37);
+          vec2 mShift = step(0.95 - uMadness * 0.16, mPick) * smoothstep(0.25, 0.85, uMadness)
+                      * (vec2(hash21(mCell + 3.1), hash21(mCell + 8.7)) - 0.5) * 0.06;
 
-          float vortexHalo = exp(-pow(length(md) * 2.4, 2.0)) * smoothstep(0.04, 0.50, openN);
-          if (vortexHalo > 0.002) {
-            vec2 dirLocal = normalize(md + vec2(1e-5, 0.0));
-            vec2 swirlLocal = rot2(0.36 * openN) * dirLocal;
-            vec2 dirUv = normalize(swirlLocal * faceScale * vec2(1.0 / 1.90566, 1.0) + vec2(1e-6, 0.0));
-            bodyUv -= dirUv * (0.048 * vortexHalo * openN + 0.024 * mEdge * openN);
-          }
-          bodyUv = clamp(bodyUv, 0.001, 0.999);
+          vec2 bodyUv = clamp(uv + vec2(bandShift, 0.0) + mShift + impDir * impWave * 0.018, 0.001, 0.999);
 
-          float chr = uMadness * 0.0038 + uClickPulse * 0.009 + mStress * openN * 0.007 + impWave * 0.011;
+          float chr = uMadness * 0.0055 + uClickPulse * 0.012 + impWave * 0.014 + tearGate * 0.008;
           vec3 panel;
           panel.r = texture2D(uBodyTex, clamp(bodyUv + vec2(chr, 0.0), 0.001, 0.999)).r;
           panel.g = texture2D(uBodyTex, bodyUv).g;
@@ -1169,152 +759,243 @@ export class BsodScreen {
           vec3 col = mix(vec3(0.0, 0.4706, 0.8392), panel, clamp(length(panel) * 1.6, 0.0, 1.0));
 
           if (uAftermath < 0.5) {
-            // ---------------------------------------------------------------- 3. SUB-LCD 3D VISAGE RELIEF & SHATTERED GLASS
-            vec3 newton = 0.5 + 0.5 * cos(6.28318 * (impDist * 7.5 - uTime * 2.0 + vec3(0.0, 0.33, 0.67)));
-            col = mix(col, col * (0.58 + 0.68 * newton), impWave * 0.52);
+            // ---------------------------------------------------------------- 2. LIVE GPU HEX-STREAM BLEED & FERROFLUID BRUISING
+            if (uMadness > 0.04 || uClickPulse > 0.02) {
+              // Liquid-crystal rainbow birefringence ring on click impact
+              vec3 newton = 0.5 + 0.5 * cos(6.28318 * (impDist * 8.0 - uTime * 2.5 + vec3(0.0, 0.33, 0.67)));
+              col = mix(col, col * (0.45 + 0.95 * newton), impWave * 0.68);
 
-            float eyeMorph = smoothstep(0.12, 0.46, uMadness);
-            vec2 eyeALocal = mix(colonLocal + vec2(0.0, eyeOff), vec2(0.22, parenLocal.y + halfLen * 0.88 + 0.09), eyeMorph);
-            vec2 eyeBLocal = mix(colonLocal - vec2(0.0, eyeOff), vec2(-0.24, parenLocal.y + halfLen * 0.88 + 0.11), eyeMorph);
-
-            // The face is made of screen signal, not anatomy: displaced scan rows,
-            // duplicated glyphs and a rectangular digital void beneath the glyph.
-            float digitalFace = smoothstep(0.10, 0.45, uMadness);
-            vec2 blockCoord = floor(fLocal * vec2(26.0, 22.0));
-            float blockNoise = hash21(blockCoord + floor(uTime * 8.0));
-            float voidShape = 1.0 - smoothstep(0.82, 1.08, mDist + (blockNoise - 0.5) * 0.14);
-            col = mix(col, vec3(0.002, 0.015, 0.065), voidShape * digitalFace * 0.84);
-            float signalBand = step(0.94 - uMadness * 0.08, blockNoise) * digitalFace;
-            col += vec3(0.08, 0.35, 0.8) * signalBand * 0.3;
-
-            if (uMadness > 0.04) {
-              // Razor-sharp shattered-LCD glass fractures radiating from the splitting face
-              vec2 crackDelta = (uv - faceCenter) * vec2(1.90566, 1.0);
-              float crackDist = length(crackDelta);
-              float safeCx = (abs(crackDelta.x) < 1e-5 && abs(crackDelta.y) < 1e-5) ? 1e-5 : crackDelta.x;
-              float crackAng = atan(crackDelta.y, safeCx);
-              float crackReach = 0.16 + pow(uMadness, 0.80) * 1.10;
-              float webMask = smoothstep(crackReach, crackReach * 0.10, crackDist) * smoothstep(0.03, 0.16, uMadness);
-
-              float jagA = (noiseB.r - 0.5) * 0.36 + (noiseA.g - 0.5) * 0.16;
-              float spoke4 = abs(fract((crackAng * 0.1591549 + 0.375) * 4.0 + jagA * 0.45) - 0.5);
-              float spoke13 = abs(fract((crackAng * 0.1591549 + 0.5) * 13.0 - jagA * 1.1) - 0.5);
-              float ringWeb = abs(fract(crackDist * 7.2 + noiseB.g * 0.75 + sin(crackAng * 4.0) * 0.16) - 0.5);
-
-              float mainCrack = smoothstep(0.015, 0.0025, spoke4) * webMask;
-              float branchCrack = smoothstep(0.013, 0.0025, spoke13) * step(0.42, noiseA.r) * webMask * smoothstep(0.10, 0.42, uMadness);
-              float ringCrack = smoothstep(0.014, 0.0025, ringWeb) * step(0.48, noiseB.b) * webMask * smoothstep(0.18, 0.55, uMadness);
-
-              float crackCore = clamp(max(max(mainCrack, branchCrack), ringCrack), 0.0, 1.0);
-              float crackBruise = clamp((smoothstep(0.048, 0.006, spoke4) * 0.62 + smoothstep(0.040, 0.006, spoke13) * 0.35) * webMask, 0.0, 1.0);
-
-              col *= 1.0 - crackBruise * (0.30 + 0.22 * uMadness);
-              col = mix(col, vec3(0.002, 0.005, 0.016), crackCore * 0.96);
-              float bevelEdge = smoothstep(0.022, 0.014, spoke4) * (1.0 - mainCrack) * webMask;
-              col += vec3(0.16, 0.28, 0.42) * bevelEdge;
+              // Live 60fps scrolling binary/hex memory columns bleeding through the BSOD blue!
+              vec2 hexGrid = uv * vec2(64.0, 38.0) + vec2(0.0, uTime * (3.5 + uMadness * 9.0));
+              vec2 hexId = floor(hexGrid);
+              vec2 hexF = fract(hexGrid);
+              float charBit = step(0.56, hash21(hexId)) * step(0.18, hexF.x) * step(hexF.x, 0.82) * step(0.16, hexF.y) * step(hexF.y, 0.84);
+              float colMask = step(0.72 - uMadness * 0.35, hash21(vec2(hexId.x, floor(uTime * 2.0))));
+              col += vec3(0.28, 0.84, 1.0) * charBit * colMask * smoothstep(0.05, 0.65, uMadness) * 0.22;
             }
 
-            // ---------------------------------------------------------------- 4. ULTRA-CRISP SDF ':(' TYPOGRAPHY -> BIOMECHANICAL SPLIT
-            float idleTick = floor(uTime * 10.0);
-            float stage0Betrayal = step(2.6, uTime) * (1.0 - step(0.06, uMadness))
-                                 * step(0.965 - 0.020 * uHover, hash11(idleTick * 17.31));
-            float stage1Rictus = smoothstep(0.05, 0.13, uMadness) * (1.0 - smoothstep(0.24, 0.38, uMadness))
-                               * step(0.62 - uClickPulse * 0.35, hash11(floor(uTime * 14.0) * 5.77));
-            float smileFlip = clamp(max(stage0Betrayal, stage1Rictus), 0.0, 1.0);
+            // ---------------------------------------------------------------- 3. 3D INTERIOR PARALLAX BREACH SECTORS & RADIAL RIFT
+            vec2 cursorMetric = (uCursorUv - 0.5) * vec2(1.90566, 1.0);
+            vec2 coreDelta = (uv - faceCenter) * vec2(1.90566, 1.0);
+            float coreDist = length(coreDelta);
+            float coreAng = atan(coreDelta.y, (abs(coreDelta.x) < 1e-5 && abs(coreDelta.y) < 1e-5) ? 1e-5 : coreDelta.x);
 
-            vec2 cursorPullF = clamp((uCursorUv - faceCenter) * vec2(1.90566, 1.0), vec2(-0.42), vec2(0.42))
-                             * (0.032 * uHover + 0.055 * uMadness);
-            vec2 eyeUv = vec2(0.5) + (fLocal - cursorPullF);
+            // Rectangular memory-sector delamination windows + jagged central breach opening into 3D interior depth!
+            float depthStage = smoothstep(0.20, 0.88, uMadness);
+            if (depthStage > 0.01) {
+              vec2 secCell = floor(uv * vec2(14.0, 9.0));
+              float secHash = hash21(secCell + floor(uTime * 3.0) * 0.17);
+              float sectorBreach = step(0.90 - depthStage * 0.34, secHash) * smoothstep(0.32, 0.85, uMadness);
 
-            float glyphEyeFade = 1.0;
+              float riftRadius = smoothstep(0.34, 0.95, uMadness) * (0.28 + 0.08 * sin(coreAng * 5.0 - uTime * 3.5) + (noiseB.r - 0.5) * 0.12);
+              float centralRift = smoothstep(riftRadius + 0.035, riftRadius - 0.015, coreDist) * smoothstep(0.36, 0.72, uMadness);
+
+              float abyssMask = clamp(max(sectorBreach * 0.88, centralRift), 0.0, 1.0);
+              if (abyssMask > 0.01) {
+                vec3 abyssCol = evalInteriorAbyss(uv, viewTan, uMadness, uTime, cursorMetric);
+                col = mix(col, abyssCol, abyssMask);
+                // Glowing cyan/crimson torn PCB bezel edge around breached regions
+                float riftRim = smoothstep(0.035, 0.004, abs(coreDist - riftRadius)) * smoothstep(0.36, 0.72, uMadness);
+                col += mix(vec3(0.35, 0.90, 1.0), vec3(1.0, 0.20, 0.42), smoothstep(0.55, 0.95, uMadness)) * riftRim * 1.15;
+              }
+            }
+
+            // Razor-sharp shattered LCD spiderweb cracks with luminous internal refraction!
+            if (uMadness > 0.06) {
+              float crackReach = 0.18 + pow(uMadness, 0.75) * 1.25;
+              float webMask = smoothstep(crackReach, crackReach * 0.08, coreDist) * smoothstep(0.05, 0.20, uMadness);
+              float jag = (noiseB.r - 0.5) * 0.34 + (noiseA.g - 0.5) * 0.16;
+              float spoke7 = abs(fract((coreAng * 0.1591549 + 0.25) * 7.0 + jag * 0.55) - 0.5);
+              float spoke15 = abs(fract((coreAng * 0.1591549 + 0.5) * 15.0 - jag * 1.1) - 0.5);
+              float ringWeb = abs(fract(coreDist * 8.5 + noiseB.g * 0.65) - 0.5);
+
+              float cMain = smoothstep(0.014, 0.002, spoke7) * webMask;
+              float cBranch = smoothstep(0.012, 0.002, spoke15) * step(0.40, noiseA.r) * webMask * smoothstep(0.18, 0.55, uMadness);
+              float cRing = smoothstep(0.013, 0.002, ringWeb) * step(0.45, noiseB.b) * webMask * smoothstep(0.28, 0.68, uMadness);
+              float crackAll = clamp(max(max(cMain, cBranch), cRing), 0.0, 1.0);
+
+              col = mix(col, vec3(0.003, 0.012, 0.038), crackAll * 0.92);
+              float edgeGlint = (smoothstep(0.024, 0.013, spoke7) * (1.0 - cMain) + smoothstep(0.020, 0.011, spoke15) * (1.0 - cBranch) * 0.6) * webMask;
+              col += mix(vec3(0.42, 0.88, 1.0), vec3(1.0, 0.24, 0.44), uMadness * 0.55) * edgeGlint * 0.75;
+            }
+
+            // ---------------------------------------------------------------- 3b. A PALM PRESSED AGAINST THE BACK OF THE GLASS
+            // Something on the far side of the panel pushes a hand flat against it, holds for a
+            // breath, then withdraws. Only at high madness, and never in the same place twice.
+            float palmCycle = fract(uTime * 0.085 + 0.17);
+            float palmVis = smoothstep(0.0, 0.05, palmCycle) * (1.0 - smoothstep(0.30, 0.42, palmCycle))
+                          * smoothstep(0.55, 0.92, uMadness);
+            if (palmVis > 0.01) {
+              vec2 palmC = vec2(0.325 + 0.06 * sin(uTime * 0.31), 0.615);
+              vec2 pc = (uv - palmC) * vec2(1.90566, 1.0);
+              float hd = length(pc * vec2(1.0, 1.22)) - 0.052;
+              for (int i = 0; i < 4; i++) {
+                float fi = float(i);
+                vec2 fb = vec2((fi - 1.5) * 0.028, 0.038 + abs(fi - 1.5) * 0.009);
+                hd = min(hd, length((pc - fb) * vec2(1.0, 0.30)) - 0.015);
+              }
+              hd = min(hd, length((pc - vec2(0.060, -0.018)) * vec2(0.42, 1.0)) - 0.019);
+              float palmMask = (1.0 - smoothstep(-0.006, 0.010, hd)) * palmVis;
+              col = mix(col, col * 0.20 + vec3(0.018, 0.050, 0.095), palmMask * 0.88);
+              col += vec3(0.55, 0.95, 1.0) * smoothstep(0.017, 0.0, abs(hd)) * palmVis * 0.85;
+            }
+
+            // ---------------------------------------------------------------- 3c. THE REFLECTION THAT IS NOT YOU
+            // The glass picks up a figure standing behind the chair. Not every second — and it is
+            // always smiling a little before it vanishes.
+            if (uMadness > 0.42) {
+              float reflTick = floor(uTime * 1.7);
+              float reflGate = smoothstep(0.42, 0.90, uMadness)
+                             * (0.10 + 0.90 * step(0.70, hash21(vec2(reflTick, 3.31))));
+              vec2 rp = (uv - vec2(0.735, 0.295)) * vec2(1.90566, 1.0);
+              float rHead = 1.0 - smoothstep(0.040, 0.055, length((rp - vec2(0.0, 0.105)) * vec2(1.0, 1.16)));
+              float rTorso = 1.0 - smoothstep(0.070, 0.108, length((rp - vec2(0.0, -0.045)) * vec2(1.0, 1.45)));
+              float rMask = clamp(rHead + rTorso, 0.0, 1.0) * reflGate;
+              col = mix(col, col * 0.28 + vec3(0.008, 0.016, 0.040), rMask * 0.80);
+              float rEye = (exp(-length(rp - vec2(-0.017, 0.112)) * 340.0)
+                          + exp(-length(rp - vec2(0.017, 0.112)) * 340.0));
+              col += vec3(1.0, 0.10, 0.20) * rEye * rMask * 1.1;
+              // a hairline grin that is only ever one frame wide
+              float grin = smoothstep(0.006, 0.0, abs((rp.y - 0.072) + 0.020 * cos(rp.x * 58.0)))
+                         * step(abs(rp.x), 0.026) * reflGate * step(0.82, hash21(vec2(reflTick, 7.7)));
+              col += vec3(0.92, 0.22, 0.30) * grin * 0.9;
+            }
+
+            // ---------------------------------------------------------------- 4. CYBER-OPTIC HUD RETICLE & ':(' -> ':)' SINGULARITY
+            // From Stage 2+, concentric rotating cybernetic scanner rings lock around the migrating glyph!
+            float hudWeight = smoothstep(0.26, 0.72, uMadness);
+            if (hudWeight > 0.01) {
+              float r1 = abs(coreDist - 0.29);
+              float r2 = abs(coreDist - 0.37);
+              float dash1 = step(0.35, fract(coreAng * 3.8197 + uTime * 0.65));
+              float dash2 = step(0.55, fract(coreAng * 7.6394 - uTime * 0.95));
+              float ringHud = (smoothstep(0.0045, 0.001, r1) * dash1 + smoothstep(0.0035, 0.001, r2) * dash2);
+              // Cardinal crosshair ticks
+              float crossTick = (smoothstep(0.004, 0.001, abs(coreDelta.x)) + smoothstep(0.004, 0.001, abs(coreDelta.y)))
+                              * step(0.31, coreDist) * step(coreDist, 0.43);
+              vec3 hudCol = mix(vec3(0.45, 0.92, 1.0), vec3(1.0, 0.22, 0.42), smoothstep(0.55, 0.92, uMadness));
+              col += hudCol * (ringHud * 0.78 + crossTick * 0.55) * hudWeight;
+            }
+
+            // Uncanny ':(' typography: crisp & authentic at Stage 0, then rotates/splits into a watching ':)' cyber-entity!
+            vec2 fLocal = (coreDelta / faceScale);
+            // At high madness, subtly rotate ':(' toward -90 deg so ':' sits horizontally like twin eyes above a smiling '(' arc!
+            float rotAngle = -1.5707963 * smoothstep(0.46, 0.86, uMadness);
+            vec2 fRot = rot2(rotAngle) * fLocal;
+
+            // Uncanny micro-betrayal at Stage 0..1 (brief 1-frame ':)' flip), turning permanent/strobing at Stage 3+
+            float idleTick = floor(uTime * 11.0);
+            float briefBetrayal = step(2.4, uTime) * (1.0 - step(0.28, uMadness))
+                                * step(0.962 - 0.025 * uHover, hash11(idleTick * 17.31));
+            float lateSmile = step(0.38 - uMadness * 0.32, hash11(floor(uTime * 15.0) * 7.13)) * smoothstep(0.32, 0.74, uMadness);
+            float smileFlip = clamp(max(briefBetrayal, lateSmile), 0.0, 1.0);
+
+            // ':' pupils actively track the player's cursor!
+            vec2 cursorPull = clamp((uCursorUv - faceCenter) * vec2(1.90566, 1.0), vec2(-0.42), vec2(0.42))
+                            * (0.036 * uHover + 0.085 * uMadness);
+            vec2 cursorPullRot = rot2(rotAngle) * cursorPull;
+
+            vec2 parenLocal = uParenC - vec2(0.5);
+            vec2 colonLocal = uColonC - vec2(0.5);
+            float eyeOff = abs(uColonDotOff);
+
+            // Sample RGB-split chromatic parallax ghost copies behind main ':(' at Stage 1+
+            float ghostAmt = smoothstep(0.08, 0.65, uMadness);
+            if (ghostAmt > 0.01) {
+              vec2 gUvR = vec2(0.5) + fRot - viewTan.xy * 0.06 * ghostAmt + vec2(0.028 * ghostAmt, 0.0);
+              vec2 gUvC = vec2(0.5) + fRot + viewTan.xy * 0.06 * ghostAmt - vec2(0.028 * ghostAmt, 0.0);
+              if (gUvR.x > 0.01 && gUvR.x < 0.99 && gUvR.y > 0.01 && gUvR.y < 0.99) {
+                vec4 gr = texture2D(uFaceTex, gUvR);
+                col += vec3(1.0, 0.16, 0.38) * max(sampleSdfGlyph(gr.r), sampleSdfGlyph(gr.g)) * 0.45 * ghostAmt;
+              }
+              if (gUvC.x > 0.01 && gUvC.x < 0.99 && gUvC.y > 0.01 && gUvC.y < 0.99) {
+                vec4 gc = texture2D(uFaceTex, gUvC);
+                col += vec3(0.12, 0.88, 1.0) * max(sampleSdfGlyph(gc.r), sampleSdfGlyph(gc.g)) * 0.48 * ghostAmt;
+              }
+            }
+
+            vec2 eyeUv = vec2(0.5) + (fRot - cursorPullRot);
             float eyesInk = 0.0;
-            if (glyphEyeFade > 0.005 && eyeUv.x > 0.01 && eyeUv.x < 0.99 && eyeUv.y > 0.01 && eyeUv.y < 0.99) {
-              eyesInk = sampleSdfGlyph(texture2D(uFaceTex, eyeUv).r) * glyphEyeFade;
+            if (eyeUv.x > 0.01 && eyeUv.x < 0.99 && eyeUv.y > 0.01 && eyeUv.y < 0.99) {
+              eyesInk = sampleSdfGlyph(texture2D(uFaceTex, eyeUv).r);
             }
 
-            float jawFade = 1.0;
-            float splitSpread = pow(uMadness, 1.35) * 0.11 + openN * 0.24;
-            float mouthLocalX = mix(fLocal.x, parenLocal.x * 2.0 - fLocal.x, smileFlip);
-            float mouthLocalY = parenLocal.y + (fLocal.y - parenLocal.y) / (1.0 + smoothstep(0.06, 0.32, uMadness) * 0.18);
-
+            float mouthX = mix(fRot.x, parenLocal.x * 2.0 - fRot.x, smileFlip);
+            // Horizontal scan-row glitch jitter on the glyph
+            float gRow = floor(fRot.y * 34.0);
+            float gFrame = floor(uTime * (10.0 + uMadness * 16.0));
+            float gJitter = step(0.84 - uMadness * 0.22, hash21(vec2(gRow, gFrame)))
+                          * (hash21(vec2(gRow + 9.0, gFrame)) - 0.5) * 0.14 * smoothstep(0.08, 0.8, uMadness);
+            vec2 mouthUv = vec2(0.5) + vec2(mouthX + gJitter, fRot.y);
             float mouthInk = 0.0;
-            if (jawFade > 0.005) {
-              vec2 jawUvA = vec2(0.5) + vec2(mouthLocalX + splitSpread, mouthLocalY);
-              if (jawUvA.x > 0.01 && jawUvA.x < 0.99 && jawUvA.y > 0.01 && jawUvA.y < 0.99) {
-                mouthInk = sampleSdfGlyph(texture2D(uFaceTex, jawUvA).g);
-              }
-              float braceWeight = smoothstep(0.10, 0.24, uMadness);
-              if (braceWeight > 0.01) {
-                vec2 jawUvB = vec2(0.5) + vec2((parenLocal.x * 2.0 - fLocal.x) - splitSpread, mouthLocalY);
-                if (jawUvB.x > 0.01 && jawUvB.x < 0.99 && jawUvB.y > 0.01 && jawUvB.y < 0.99) {
-                  mouthInk = max(mouthInk, sampleSdfGlyph(texture2D(uFaceTex, jawUvB).g) * braceWeight);
-                }
-              }
-              mouthInk *= jawFade;
+            if (mouthUv.x > 0.01 && mouthUv.x < 0.99 && mouthUv.y > 0.01 && mouthUv.y < 0.99) {
+              mouthInk = sampleSdfGlyph(texture2D(uFaceTex, mouthUv).g);
             }
 
-            // Horizontal packet loss and offset copies make the original typography
-            // appear to desynchronise and watch the pointer, without becoming an animal.
-            float row = floor(fLocal.y * 30.0);
-            float frame = floor(uTime * (7.0 + uMadness * 8.0));
-            float rowFault = step(0.70, hash21(vec2(row, frame))) * digitalFace;
-            vec2 echoUv = vec2(0.5) + fLocal + vec2((hash21(vec2(row + 4.0, frame)) - 0.5) * 0.16 * uMadness, 0.0);
-            float echoInk = 0.0;
-            if (echoUv.x > 0.01 && echoUv.x < 0.99 && echoUv.y > 0.01 && echoUv.y < 0.99) {
-              vec4 echo = texture2D(uFaceTex, echoUv);
-              echoInk = max(sampleSdfGlyph(echo.r), sampleSdfGlyph(echo.g)) * rowFault;
-            }
             float faceInk = clamp(eyesInk + mouthInk, 0.0, 1.0);
-            col = mix(col, vec3(0.10, 0.85, 1.0), echoInk * 0.65);
-            col = mix(col, vec3(1.0), faceInk);
+            vec3 glyphCol = mix(vec3(1.0), vec3(0.92, 0.98, 1.0), uMadness);
+            col = mix(col, glyphCol, faceInk);
 
-            if (eyesInk > 0.05 && (uHover > 0.05 || uMadness > 0.02 || stage0Betrayal > 0.5)) {
-              float dDotA = length((fLocal - (colonLocal + vec2(0.0, eyeOff)) - cursorPullF * 1.35) * vec2(1.45, 0.90));
-              float dDotB = length((fLocal - (colonLocal - vec2(0.0, eyeOff)) - cursorPullF * 1.35) * vec2(1.45, 0.90));
-              float slitIris = step(min(dDotA, dDotB), 0.014)
-                             * clamp(uHover * 0.28 + uMadness * 2.0 + stage0Betrayal * 0.6, 0.0, 0.8);
-              col = mix(col, vec3(0.005, 0.02, 0.06), slitIris * eyesInk);
+            // Cybernetic target-pupil slits inside the ':' dots when watching you!
+            if (eyesInk > 0.05 && (uHover > 0.05 || uMadness > 0.04 || briefBetrayal > 0.5)) {
+              float dDotA = length((fRot - (colonLocal + vec2(0.0, eyeOff)) - cursorPullRot * 1.25));
+              float dDotB = length((fRot - (colonLocal - vec2(0.0, eyeOff)) - cursorPullRot * 1.25));
+              float pupilCore = smoothstep(0.022, 0.008, min(dDotA, dDotB))
+                              * clamp(uHover * 0.35 + uMadness * 1.8 + briefBetrayal * 0.7, 0.0, 0.95);
+              vec3 pupilCol = mix(vec3(0.004, 0.018, 0.055), vec3(1.0, 0.12, 0.32), smoothstep(0.35, 0.85, uMadness));
+              col = mix(col, pupilCol, pupilCore * eyesInk);
             }
 
-            // ---------------------------------------------------------------- 5. TORN-LCD COLLAR BEVEL AROUND THE 3D JAW BREACH
-            if (openN > 0.004) {
-              float collarShadow = smoothstep(1.42, 1.03, mDist) * tearOpen;
-              col *= mix(1.0, 0.42, collarShadow * 0.82);
-
-              float jaggedGlassRim = exp(-pow((mDist - 1.055 + (noiseB.r - 0.5) * 0.035) * 34.0, 2.0)) * tearOpen;
-              col = mix(col, vec3(0.004, 0.012, 0.032), clamp(mEdge * 0.88, 0.0, 0.92));
-              col += vec3(0.55, 0.86, 1.0) * jaggedGlassRim * 0.58;
+            // The smile finally tears open into a vertical maw. The panel stops displaying a face
+            // and becomes one: glottal dark, wet crimson rim, rows of small uneven teeth.
+            float mawGate = smoothstep(0.62, 0.95, uMadness) * smoothstep(0.30, 0.85, uJawOpen);
+            if (mawGate > 0.01) {
+              vec2 mp = (fRot - vec2(0.0, -0.185)) / vec2(0.085, 0.16 + 0.30 * uJawOpen);
+              float mAng = atan(mp.y, mp.x + 1e-5);
+              float md = length(mp) * (1.0 + 0.12 * sin(mAng * 9.0 + uTime * 3.0));
+              float maw = 1.0 - smoothstep(0.86, 1.0, md);
+              col = mix(col, vec3(0.006, 0.0, 0.010), maw * mawGate);
+              float mawRim = smoothstep(0.15, 0.0, abs(md - 0.95)) * mawGate;
+              col += vec3(0.92, 0.06, 0.16) * mawRim * 1.35;
+              float teeth = step(0.5, fract(mp.y * 9.0 + uTime * 0.25))
+                          * smoothstep(0.42, 0.0, abs(mp.x))
+                          * smoothstep(0.95, 0.45, abs(mp.y));
+              col += vec3(0.80, 0.86, 0.92) * teeth * maw * 0.55;
             }
           } else {
+            // Aftermath haunted phosphor burn-in & hairline diagonal scar
             float scar = smoothstep(0.004, 0.0, abs((uv.y - 0.52) + (uv.x - 0.48) * 0.62 + sin(uv.x * 26.0) * 0.012))
                        * smoothstep(0.32, 0.05, length(uv - vec2(0.48, 0.52)));
-            vec2 ghostEyeA = uv - (vec2(0.148, 0.685) + (uCursorUv - 0.5) * 0.012);
-            vec2 ghostEyeB = uv - (vec2(0.148, 0.618) + (uCursorUv - 0.5) * 0.012);
+            vec2 ghostEyeA = uv - (vec2(0.148, 0.685) + (uCursorUv - 0.5) * 0.014);
+            vec2 ghostEyeB = uv - (vec2(0.148, 0.618) + (uCursorUv - 0.5) * 0.014);
             float ghostGlint = (exp(-length(ghostEyeA * vec2(1.9, 1.0)) * 95.0) + exp(-length(ghostEyeB * vec2(1.9, 1.0)) * 95.0))
                              * (0.35 + 0.65 * pow(0.5 + 0.5 * sin(uTime * 1.4), 4.0));
-            col += vec3(0.45, 0.80, 1.0) * scar * 0.42 + vec3(0.95, 0.18, 0.32) * ghostGlint * 0.48;
+            col += vec3(0.45, 0.80, 1.0) * scar * 0.45 + vec3(0.95, 0.18, 0.32) * ghostGlint * 0.52;
           }
 
+          // Realistic IPS LCD glass specular & off-axis glow
           float glassSheen = pow(max(0.0, 1.0 - length((uv - vec2(0.74, 0.68)) * vec2(1.2, 1.0))), 3.0) * 0.035;
           col += vec3(0.45, 0.65, 0.95) * glassSheen * (1.0 - uMadness * 0.6);
 
-          // Realistic IPS LCD off-axis polarizer contrast shift (clean optical glass behavior — zero crude ghost face!)
-          vec3 viewDirW = normalize(cameraPosition - vWorldPos);
-          float ndvScreen = clamp(abs(dot(normalize(vWorldNormal), viewDirW)), 0.0, 1.0);
+          float ndvScreen = clamp(abs(viewTan.z), 0.0, 1.0);
           float offAxis = smoothstep(0.68, 0.18, ndvScreen);
           if (offAxis > 0.01) {
-            vec3 ipsGlow = vec3(0.05, 0.16, 0.34) * offAxis;
-            col = col * mix(1.0, 0.86, offAxis) + ipsGlow * 0.28;
+            col = col * mix(1.0, 0.86, offAxis) + vec3(0.05, 0.16, 0.34) * offAxis * 0.28;
           }
+
+          // Subliminal full-panel negative inversion: never long enough to be sure you saw it.
+          float invTick = floor(uTime * (6.0 + uMadness * 11.0));
+          float inv = step(0.972 - uMadness * 0.048, hash21(vec2(invTick, 13.7))) * smoothstep(0.55, 0.92, uMadness);
+          col = mix(col, vec3(1.0) - clamp(col, 0.0, 1.0), inv * 0.85);
 
           vec2 px = uv * vec2(1920.0, 1080.0);
           float subpx = 0.976 + 0.024 * sin(px.x * 3.14159);
-          float scan = 0.986 + 0.014 * sin(px.y * 3.14159);
+          float scan = 0.984 + 0.016 * sin(px.y * 3.14159);
           col *= subpx * scan;
 
           vec2 vigUv = uv * (1.0 - uv.yx);
           float vig = pow(clamp(vigUv.x * vigUv.y * 18.0, 0.0, 1.0), 0.16);
-          col *= mix(0.78, 0.99, vig);
+          col *= mix(0.76, 0.99, vig);
 
           gl_FragColor = vec4(clamp(col, 0.0, 4.0), 1.0);
         }
@@ -1325,927 +1006,185 @@ export class BsodScreen {
     this.screenMesh.renderOrder = 5;
     this.root.add(this.screenMesh);
 
-    // 6a. TRUE 3D PARASYTE-STYLE SCULPTED JAW, SOCKETED DENTITION & ORBITAL EYE RIG
-    this.parasyteGroup.visible = false;
-    this.root.add(this.parasyteGroup);
+    // 7. 3D OUT-OF-MONITOR HOLOGRAPHIC BREACH RIG (Extrudes +Z into the Bedroom at Click 2+!)
+    this.holoBreachGroup.visible = false;
+    this.root.add(this.holoBreachGroup);
 
-    const rimToothGeo = buildParasyteToothGeometry();
-    const rimSeed = new Float32Array(RIM_TOOTH_COUNT * 4);
-    for (let i = 0; i < RIM_TOOTH_COUNT; i++) {
-      // Each of the 52 teeth is seated in its own anatomical alveolar gum socket around the 4 jaw lobes!
-      const jitterAng = (((i * 0.75487766) % 1) - 0.5) * (0.14 / RIM_TOOTH_COUNT) * Math.PI * 2;
-      rimSeed[i * 4 + 0] = ((i + 0.5) / RIM_TOOTH_COUNT) * Math.PI * 2 + jitterAng;
-      rimSeed[i * 4 + 1] = i / RIM_TOOTH_COUNT;
-      rimSeed[i * 4 + 2] = (i * 0.61803398875) % 1;
-      rimSeed[i * 4 + 3] = (i * 2.39996323) % 1;
+    const holoCanvas = document.createElement('canvas');
+    holoCanvas.width = 512;
+    holoCanvas.height = 192;
+    const hctx = holoCanvas.getContext('2d')!;
+    hctx.fillStyle = 'rgba(0, 32, 88, 0.88)';
+    hctx.fillRect(0, 0, 512, 192);
+    hctx.fillStyle = '#7be6ff';
+    hctx.fillRect(0, 0, 512, 28);
+    hctx.fillStyle = '#00163a';
+    hctx.font = 'bold 18px Consolas, monospace';
+    hctx.fillText('KERNEL_BREACH // 0xFFFFF803_0078D7', 12, 20);
+    hctx.fillStyle = '#ff2952';
+    hctx.fillRect(468, 4, 38, 20);
+    hctx.strokeStyle = '#6fe2ff';
+    hctx.lineWidth = 3;
+    hctx.strokeRect(3, 3, 506, 186);
+    hctx.fillStyle = '#ffffff';
+    hctx.font = '20px Consolas, monospace';
+    hctx.fillText('FATAL: DISPLAY_BOUNDARY_OVERFLOW', 18, 72);
+    hctx.fillStyle = '#9ce8ff';
+    hctx.font = '17px Consolas, monospace';
+    hctx.fillText('GAZE_LOCK=TRUE   DMA_TARGET=OPTIC_CHIASM', 18, 108);
+    hctx.fillStyle = '#ff476e';
+    hctx.fillText('>> DO NOT LOOK AWAY FROM THE BUFFER <<', 18, 148);
+    this.holoTex = new THREE.CanvasTexture(holoCanvas);
+    this.holoTex.colorSpace = THREE.SRGBColorSpace;
+    this.holoTex.minFilter = THREE.LinearFilter;
+    this.holoTex.generateMipmaps = false;
+
+    const holoPaneGeo = new THREE.PlaneGeometry(0.42, 0.16);
+    const hSeed = new Float32Array(HOLO_PANE_COUNT * 4);
+    for (let i = 0; i < HOLO_PANE_COUNT; i++) {
+      // Spiral ring around perimeter so central gaze stays framed & dramatic!
+      const ang = (i / HOLO_PANE_COUNT) * Math.PI * 2 + (i % 3) * 0.21;
+      const rad = 0.24 + ((i * 0.618034) % 1) * 0.56;
+      hSeed[i * 4 + 0] = ang;
+      hSeed[i * 4 + 1] = rad;
+      hSeed[i * 4 + 2] = (i + 0.5) / HOLO_PANE_COUNT; // depth stagger 0..1
+      hSeed[i * 4 + 3] = 0.55 + ((i * 0.381966) % 1) * 0.85; // scale & glitch phase
     }
-    rimToothGeo.setAttribute('aRimTooth4', new THREE.InstancedBufferAttribute(rimSeed, 4));
+    holoPaneGeo.setAttribute('aHolo4', new THREE.InstancedBufferAttribute(hSeed, 4));
 
-    this.rimToothMat = new THREE.ShaderMaterial({
-      side: THREE.DoubleSide,
-      depthTest: true,
-      depthWrite: true,
-      uniforms: {
-        uTime: { value: 0 },
-        uMadness: { value: 0 },
-        uJawOpen: { value: 0 },
-        uSuction: { value: 0 },
-        uClickPulse: { value: 0 },
-        uCrackRun: { value: 0 },
-        uParenC: { value: this.parenC.clone() },
-        uParenSize: { value: this.parenSize.clone() },
-        uSpine: { value: this.spine.clone() },
-      },
-      vertexShader: /* glsl */ `
-        attribute vec4 aRimTooth4;
-        uniform float uTime;
-        uniform float uMadness;
-        uniform float uJawOpen;
-        uniform float uSuction;
-        uniform float uClickPulse;
-        uniform float uCrackRun;
-        uniform vec2 uParenC;
-        uniform vec2 uParenSize;
-        uniform vec3 uSpine;
-        varying float vCrown;
-        varying float vSideU;
-        varying float vMorph;
-        varying vec3 vNrm;
-        varying vec3 vViewPos;
-
-        vec4 evalParasyteChewT(float t, float madness, float jawOpen, float suction, float clickPulse) {
-          float openT = clamp(jawOpen, 0.0, 1.0);
-          float baseOpen = pow(openT, 0.68);
-          // A living jaw: slow inhalation interrupted by sharp, irregular involuntary bites.
-          // This exact equation is shared by the screen, gums, teeth, eyes and sinews.
-          float alive = smoothstep(0.17, 0.62, madness) * (1.0 - smoothstep(0.10, 0.48, suction));
-          float inhaleBreath = sin(t * 2.0) * 0.055 * openT;
-          float spasm = pow(max(0.0, sin(t * 3.7 + sin(t * 1.13) * 1.8)), 10.0);
-          float bite = spasm * 0.18 * alive * openT;
-          float clickTear = clickPulse * 0.095 * smoothstep(0.08, 0.32, madness);
-          float swallowUnhinge = smoothstep(0.10, 0.45, suction) * 0.38;
-          float effOpen = clamp(baseOpen + inhaleBreath - bite + clickTear + swallowUnhinge, 0.0, 1.34);
-          return vec4(effOpen, 0.0, 0.0, 0.0);
-        }
-
-        float evalMawLobeT(float ang, float openN) {
-          float k = clamp(openN, 0.0, 1.25);
-          float cornerFlare = pow(0.5 - 0.5 * cos(ang * 4.0), 1.55);
-          float archVertical = 0.07 * pow(abs(sin(ang)), 1.4);
-          // Neighbouring lobes strain in different directions instead of pulsing as a perfect ring.
-          float twitch = sin(ang * 3.0 + uTime * 4.3) * 0.045
-                       + sin(ang * 5.0 - uTime * 7.1) * 0.025;
-          return 1.0 + (0.14 * cornerFlare + archVertical + twitch * uMadness) * k;
-        }
-
-        void main() {
-          float ang = aRimTooth4.x;
-          float morph = aRimTooth4.z;
-          float phase = aRimTooth4.w;
-
-          vec2 mawCenter = mix(vec2(0.144, 0.742), vec2(0.48, 0.48), smoothstep(0.14, 0.88, uMadness));
-          float faceScale = max(mix(0.35, 0.84, smoothstep(0.12, 0.90, uMadness)), 0.08);
-          vec4 chew = evalParasyteChewT(uTime, uMadness, uJawOpen, uSuction, uClickPulse);
-          float openN = chew.x;
-
-          vec2 parenLoc = uParenC - vec2(0.5);
-          float parenHalfH = max(uParenSize.y * 0.5, 0.05);
-          float halfLen = max(mix(parenHalfH, 0.43, pow(clamp(openN, 0.0, 1.2), 0.78)), 1e-4);
-          vec2 dir2 = vec2(cos(ang), sin(ang));
-          float tv = clamp(dir2.y, -1.0, 1.0);
-          vec3 spineF = uSpine - vec3(0.5);
-          float spineHere = 0.5 * tv * (tv - 1.0) * spineF.x
-                          + (1.0 - tv * tv) * spineF.y
-                          + 0.5 * tv * (tv + 1.0) * spineF.z;
-          float mouthCx = spineHere * (1.0 - pow(clamp(openN, 0.0, 1.0), 0.9));
-
-          float crackGate = 1.0 - smoothstep(0.04, 0.20, openN);
-          float crackGrown = smoothstep(1.0 - uCrackRun, 1.02, abs(tv));
-          float openNc = openN * mix(1.0, crackGrown, crackGate);
-          float emerge = smoothstep(0.06, 0.24, openNc);
-          float circRadX = max(mix(0.04, 0.43, pow(max(openNc, 0.0), 0.85)), 1e-4);
-          float mawLobe = evalMawLobeT(ang, openNc);
-
-          // Seated directly inside the v = 0.34 alveolar gum crest of jawFlapsMesh (radFactor = 0.955)!
-          vec2 mdRoot = vec2(dir2.x * circRadX, dir2.y * halfLen) * (mawLobe * 0.955);
-          vec2 fRoot = vec2(mouthCx, parenLoc.y) + mdRoot;
-          vec2 posXY = (mawCenter - 0.5) * vec2(1.90566, 1.0) + fRoot * faceScale;
-
-          float lobeArch = 0.52 + 0.48 * (0.5 + 0.5 * cos(ang * 4.0));
-          float gumCrestZ = (0.158 * clamp(openNc, 0.0, 1.25) + uClickPulse * 0.032) * lobeArch * emerge;
-          vec3 rootPos = vec3(posXY, gumCrestZ - 0.014 * emerge);
-
-          // Parasyte (寄生獣) anatomical dental arch differentiation:
-          // - Split-jaw commissures (cos(4*ang) < 0): thick, wide bone-shearing carnassial blades!
-          // - Upper/lower central arches (|sin(ang)| > 0.74): iconic thick human-hybrid flat spade incisors!
-          // - Lateral mandible arches: heavy crushing bicuspid/molar crowns!
-          float splitCorner = pow(0.5 - 0.5 * cos(ang * 4.0), 2.0);
-          float isCarnassial = step(0.56, splitCorner);
-          float isCentralIncisor = (1.0 - isCarnassial) * step(0.74, abs(dir2.y));
-          float isMolar = (1.0 - isCarnassial) * (1.0 - isCentralIncisor);
-          float grow = emerge * smoothstep(0.02, 0.20, clamp(uJawOpen * 1.4 + uMadness * 0.22, 0.0, 1.0));
-
-          float crownY = uv.y;
-          vec3 shapedPos = position;
-          if (isCarnassial > 0.5) {
-            // Thick, wide Parasyte shearing fang at the 4 jaw-split corners (broad root & mid-blade, never thin!)
-            shapedPos.x *= mix(1.10, 0.38, pow(crownY, 1.70));
-            shapedPos.z *= mix(1.12, 0.32, crownY);
-          } else if (isMolar > 0.5) {
-            // Heavy lateral molar with broad labio-lingual bulk & bicuspid occlusal saddle
-            shapedPos.x *= mix(1.08, 0.96, crownY);
-            shapedPos.z *= mix(1.16, 0.88, crownY);
-            shapedPos.y += smoothstep(0.68, 1.0, crownY) * abs(sin(uv.x * 6.28318)) * 0.012;
-          } else {
-            // Iconic Parasyte oversized human-hybrid spade incisor — thick root & broad chisel edge!
-            shapedPos.x *= mix(1.06, 0.94, pow(crownY, 1.35));
-            shapedPos.z *= mix(1.06, 0.34, pow(crownY, 1.25));
-          }
-
-          float wScale = mix(mix(1.32, 1.40, isMolar), 1.28, isCarnassial) * faceScale * (0.62 + 0.38 * grow) * step(0.01, grow);
-          float dScale = mix(mix(1.22, 1.38, isMolar), 1.26, isCarnassial) * faceScale * (0.62 + 0.38 * grow) * step(0.01, grow);
-          float hScale = mix(mix(0.56 + morph * 0.10, 0.48 + morph * 0.08, isMolar), 0.78 + morph * 0.20, isCarnassial) * faceScale * grow;
-
-          float microTremor = sin(uTime * 17.0 + phase * 6.283) * 0.008 * uMadness;
-          float inwardAmt = 0.50 + microTremor;
-          float forwardZ = 0.76;
-          float cant = (morph - 0.5) * 0.08;
-          vec2 tang2 = vec2(-dir2.y, dir2.x);
-          vec3 toothAxis = normalize(vec3(-dir2 * inwardAmt + tang2 * cant, forwardZ));
-          vec3 sideAxis = normalize(vec3(tang2, -cant * 0.2));
-          vec3 hookAxis = normalize(cross(sideAxis, toothAxis));
-
-          vec3 localPos = rootPos
-                        + sideAxis * (shapedPos.x * wScale)
-                        + toothAxis * (shapedPos.y * hScale)
-                        + hookAxis * (shapedPos.z * dScale);
-          vec3 localNorm = normalize(
-            sideAxis * normal.x + toothAxis * normal.y + hookAxis * normal.z
-          );
-
-          vec4 mv = modelViewMatrix * vec4(localPos, 1.0);
-          vViewPos = -mv.xyz;
-          vNrm = normalize(normalMatrix * localNorm);
-          vCrown = uv.y;
-          vSideU = uv.x;
-          vMorph = morph;
-          gl_Position = projectionMatrix * mv;
-        }
-      `,
-      fragmentShader: /* glsl */ `
-        varying float vCrown;
-        varying float vSideU;
-        varying float vMorph;
-        varying vec3 vNrm;
-        varying vec3 vViewPos;
-
-        void main() {
-          vec3 N = normalize(gl_FrontFacing ? vNrm : -vNrm);
-          vec3 V = normalize(vViewPos);
-          vec3 Lkey = normalize(vec3(0.28, 0.58, 0.76));
-          vec3 Lfill = normalize(vec3(-0.48, -0.22, 0.85));
-          vec3 Lrim = normalize(vec3(0.0, 0.15, -0.98));
-          vec3 H = normalize(Lkey + V);
-          vec3 H2 = normalize(Lfill + V);
-
-          // Subsurface enamel/dentin wrap diffuse + interproximal & gingival sulcus ambient occlusion!
-          float ndl = dot(N, Lkey);
-          float wrapDiff = clamp((ndl + 0.35) / 1.35, 0.0, 1.0);
-          float fillDiff = max(dot(N, Lfill), 0.0) * 0.26;
-          float backScatter = pow(max(dot(-N, Lrim), 0.0), 1.6) * smoothstep(0.35, 0.98, vCrown);
-
-          // Interproximal contact shadow at mesial/distal edges of the tooth crown
-          float interprox = abs(sin(vSideU * 6.2831853));
-          float aoSulcus = smoothstep(0.0, 0.22, vCrown);
-          float aoInterprox = mix(0.62, 1.0, 1.0 - pow(interprox, 3.0) * (1.0 - smoothstep(0.15, 0.78, vCrown)));
-          float ao = (0.38 + 0.62 * aoSulcus) * aoInterprox;
-
-          // Subtle vertical perikymata/enamel developmental flutes
-          float enamelFlutes = 0.97 + 0.03 * sin(vSideU * 62.8318);
-
-          // Inflamed gingival sulcus -> organic warm root cementum/dentin -> translucent pearlescent incisal enamel!
-          vec3 sulcusDark = vec3(0.16, 0.008, 0.028);
-          vec3 cervicalGingiva = vec3(0.48, 0.08, 0.14);
-          vec3 warmDentin = mix(vec3(0.84, 0.78, 0.66), vec3(0.88, 0.84, 0.76), vMorph * 0.5);
-          vec3 crownEnamel = vec3(0.95, 0.95, 0.93) * enamelFlutes;
-          vec3 incisalTranslucent = vec3(0.82, 0.90, 0.98);
-
-          vec3 albedo = mix(sulcusDark, cervicalGingiva, smoothstep(0.0, 0.10, vCrown));
-          albedo = mix(albedo, warmDentin, smoothstep(0.09, 0.28, vCrown));
-          albedo = mix(albedo, crownEnamel, smoothstep(0.28, 0.72, vCrown));
-          albedo = mix(albedo, incisalTranslucent, smoothstep(0.80, 1.0, vCrown) * 0.45);
-
-          float wetSpec = pow(max(dot(N, H), 0.0), 88.0) * 1.55 + pow(max(dot(N, H2), 0.0), 36.0) * 0.42;
-          float fresnel = pow(1.0 - abs(dot(N, V)), 3.2);
-
-          vec3 col = albedo * (0.18 + 0.82 * wrapDiff + fillDiff) * ao;
-          col += vec3(0.96, 0.99, 1.0) * wetSpec * (0.55 + 0.45 * vCrown);
-          col += vec3(0.32, 0.78, 1.0) * (fresnel * 0.34 + backScatter * 0.32);
-          gl_FragColor = vec4(col, 1.0);
-        }
-      `,
-    });
-    this.rimTeethMesh = new THREE.InstancedMesh(rimToothGeo, this.rimToothMat, RIM_TOOTH_COUNT);
-    this.rimTeethMesh.renderOrder = 7;
-    this.rimTeethMesh.frustumCulled = false;
-    this.parasyteGroup.add(this.rimTeethMesh);
-
-    // 6a-2. 32 Wet Mucosa & Saliva Strands stretched across the 4 diagonal jaw-split commissures!
-    const sinewGeo = new THREE.CylinderGeometry(0.0046, 0.0046, 1.0, 6, 14);
-    const sinSeed = new Float32Array(SINEW_COUNT * 4);
-    for (let i = 0; i < SINEW_COUNT; i++) {
-      // Cluster strands across the 4 diagonal Parasyte split clefts (+-pi/4, +-3pi/4) so they stretch between adjacent jaw lobes!
-      const cleftIdx = i % 4;
-      const cleftCenter = (cleftIdx + 0.5) * Math.PI * 0.5;
-      const rank = Math.floor(i / 4) / Math.max(1, SINEW_COUNT / 4 - 1);
-      const halfSpan = 0.14 + rank * 0.42 + (((i * 0.618034) % 1) - 0.5) * 0.06;
-      sinSeed[i * 4 + 0] = cleftCenter - halfSpan;
-      sinSeed[i * 4 + 1] = cleftCenter + halfSpan;
-      sinSeed[i * 4 + 2] = 0.25 + rank * 0.65;
-      sinSeed[i * 4 + 3] = (i * 0.754877) % 1;
-    }
-    sinewGeo.setAttribute('aSinew4', new THREE.InstancedBufferAttribute(sinSeed, 4));
-
-    this.sinewMat = new THREE.ShaderMaterial({
+    this.holoCascadeMat = new THREE.ShaderMaterial({
       transparent: true,
-      depthTest: true,
       depthWrite: false,
       side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
       uniforms: {
+        uTex: { value: this.holoTex },
         uTime: { value: 0 },
         uMadness: { value: 0 },
-        uJawOpen: { value: 0 },
-        uSuction: { value: 0 },
         uClickPulse: { value: 0 },
-        uCrackRun: { value: 0 },
-        uParenC: { value: this.parenC.clone() },
-        uParenSize: { value: this.parenSize.clone() },
-        uSpine: { value: this.spine.clone() },
+        uSuction: { value: 0 },
       },
       vertexShader: /* glsl */ `
-        attribute vec4 aSinew4;
+        attribute vec4 aHolo4;
         uniform float uTime;
         uniform float uMadness;
-        uniform float uJawOpen;
-        uniform float uSuction;
         uniform float uClickPulse;
-        uniform float uCrackRun;
-        uniform vec2 uParenC;
-        uniform vec2 uParenSize;
-        uniform vec3 uSpine;
-        varying float vAlong;
-        varying vec3 vNrm;
-        varying vec3 vViewPos;
+        uniform float uSuction;
+        varying vec2 vUv;
         varying float vAlpha;
-
-        vec4 evalParasyteChewS(float t, float madness, float jawOpen, float suction, float clickPulse) {
-          float openT = clamp(jawOpen, 0.0, 1.0);
-          float baseOpen = pow(openT, 0.68);
-          // A living jaw: slow inhalation interrupted by sharp, irregular involuntary bites.
-          // This exact equation is shared by the screen, gums, teeth, eyes and sinews.
-          float alive = smoothstep(0.17, 0.62, madness) * (1.0 - smoothstep(0.10, 0.48, suction));
-          float inhaleBreath = sin(t * 2.0) * 0.055 * openT;
-          float spasm = pow(max(0.0, sin(t * 3.7 + sin(t * 1.13) * 1.8)), 10.0);
-          float bite = spasm * 0.18 * alive * openT;
-          float clickTear = clickPulse * 0.095 * smoothstep(0.08, 0.32, madness);
-          float swallowUnhinge = smoothstep(0.10, 0.45, suction) * 0.38;
-          float effOpen = clamp(baseOpen + inhaleBreath - bite + clickTear + swallowUnhinge, 0.0, 1.34);
-          return vec4(effOpen, 0.0, 0.0, 0.0);
-        }
-
-        float evalMawLobeS(float ang, float openN) {
-          float k = clamp(openN, 0.0, 1.25);
-          float cornerFlare = pow(0.5 - 0.5 * cos(ang * 4.0), 1.55);
-          float archVertical = 0.07 * pow(abs(sin(ang)), 1.4);
-          // Neighbouring lobes strain in different directions instead of pulsing as a perfect ring.
-          float twitch = sin(ang * 3.0 + uTime * 4.3) * 0.045
-                       + sin(ang * 5.0 - uTime * 7.1) * 0.025;
-          return 1.0 + (0.14 * cornerFlare + archVertical + twitch * uMadness) * k;
-        }
-
-        vec3 anchorOnJaw(float ang, float radialMul, float openN, vec2 mawCenter, float faceScale, vec2 parenLoc, float halfLen) {
-          vec2 dir = vec2(cos(ang), sin(ang));
-          float tv = clamp(dir.y, -1.0, 1.0);
-          vec3 spineF = uSpine - vec3(0.5);
-          float spineHere = 0.5 * tv * (tv - 1.0) * spineF.x
-                          + (1.0 - tv * tv) * spineF.y
-                          + 0.5 * tv * (tv + 1.0) * spineF.z;
-          float mouthCx = spineHere * (1.0 - pow(clamp(openN, 0.0, 1.0), 0.9));
-          float crackGate = 1.0 - smoothstep(0.04, 0.20, openN);
-          float crackGrown = smoothstep(1.0 - uCrackRun, 1.02, abs(tv));
-          float openNc = openN * mix(1.0, crackGrown, crackGate);
-          float emerge = smoothstep(0.06, 0.24, openNc);
-          float circRadX = max(mix(0.04, 0.43, pow(max(openNc, 0.0), 0.85)), 1e-4);
-          float lobe = evalMawLobeS(ang, openNc);
-          vec2 fPos = vec2(mouthCx, parenLoc.y) + vec2(dir.x * circRadX, dir.y * halfLen) * (lobe * radialMul);
-          vec2 xy = (mawCenter - 0.5) * vec2(1.90566, 1.0) + fPos * faceScale;
-          float lobeArch = 0.52 + 0.48 * (0.5 + 0.5 * cos(ang * 4.0));
-          float z = (0.145 * clamp(openNc, 0.0, 1.25)) * lobeArch * emerge;
-          return vec3(xy, z);
-        }
-
+        varying float vCrimson;
         void main() {
-          float angA = aSinew4.x;
-          float angB = aSinew4.y;
-          float sagSeed = aSinew4.z;
-          float snapSeed = aSinew4.w;
+          vUv = uv;
+          float ang = aHolo4.x + sin(uTime * 0.8 + aHolo4.w * 6.0) * 0.08;
+          float emerge = smoothstep(0.24, 0.88, uMadness) * (1.0 - smoothstep(0.12, 0.45, uSuction));
+          float stagger = smoothstep(aHolo4.z * 0.55, aHolo4.z * 0.55 + 0.35, emerge);
 
-          vec2 mawCenter = mix(vec2(0.144, 0.742), vec2(0.48, 0.48), smoothstep(0.14, 0.88, uMadness));
-          float faceScale = max(mix(0.35, 0.84, smoothstep(0.12, 0.90, uMadness)), 0.08);
-          vec4 chew = evalParasyteChewS(uTime, uMadness, uJawOpen, uSuction, uClickPulse);
-          float openN = chew.x;
-          vec2 parenLoc = uParenC - vec2(0.5);
-          float halfLen = max(mix(max(uParenSize.y * 0.5, 0.05), 0.43, pow(clamp(openN, 0.0, 1.2), 0.78)), 1e-4);
+          // Extrude +Z right out of the monitor screen toward the player's eyes!
+          float zOut = 0.025 + stagger * (0.06 + aHolo4.z * 0.58) + uClickPulse * 0.06;
+          float rx = aHolo4.y * 1.18 * (0.75 + 0.35 * stagger);
+          float ry = aHolo4.y * 0.68 * (0.75 + 0.35 * stagger);
 
-          float radMul = mix(0.92, 1.02, sagSeed);
-          vec3 pA = anchorOnJaw(angA, radMul, openN, mawCenter, faceScale, parenLoc, halfLen);
-          vec3 pB = anchorOnJaw(angB, radMul, openN, mawCenter, faceScale, parenLoc, halfLen);
+          // Quantized glitch snap sideways
+          float tick = floor(uTime * 15.0 + aHolo4.w * 9.0);
+          float snap = step(0.86 - uMadness * 0.18, fract(sin(tick * 31.7 + aHolo4.z * 91.3) * 43758.5));
+          float gx = snap * (fract(aHolo4.w * 13.7) - 0.5) * 0.22;
 
-          float sAlong = clamp(position.y + 0.5, 0.0, 1.0);
-          vAlong = sAlong;
-          float intact = 1.0 - smoothstep(0.08 + snapSeed * 0.18, 0.22 + snapSeed * 0.22, uSuction);
-          float vis = smoothstep(0.12, 0.32, openN) * intact;
-          vAlpha = vis;
+          float sc = (0.55 + aHolo4.w * 0.52) * stagger;
+          vec3 lp = vec3(position.x * sc, position.y * sc, position.z);
+          // Slight inward cant toward camera axis
+          float yaw = -cos(ang) * 0.28;
+          float cy = cos(yaw), sy = sin(yaw);
+          vec3 rotP = vec3(lp.x * cy + lp.z * sy, lp.y, -lp.x * sy + lp.z * cy);
 
-          vec3 chord = pB - pA;
-          float chordLen = max(length(chord), 1e-4);
-          vec3 axisY = chord / chordLen;
-          vec3 axisX = normalize(cross(axisY, vec3(0.0, 0.0, 1.0)) + vec3(1e-5, 0.0, 0.0));
-          vec3 axisZ = normalize(cross(axisX, axisY));
-
-          // Surface-tension meniscus flare at attachment roots + glistening saliva droplets along middle!
-          float midPinch = mix(0.22, 1.65, pow(abs(sAlong - 0.5) * 2.0, 2.2));
-          float droplet = 1.0 + 0.55 * pow(0.5 + 0.5 * sin(sAlong * 25.0 - uTime * 4.5 + snapSeed * 15.0), 4.0) * sin(sAlong * 3.14159);
-          float radScale = midPinch * droplet * vis * (0.55 + 0.55 * sagSeed);
-
-          float catenarySag = sin(sAlong * 3.14159) * (0.018 + 0.032 * sagSeed) * clamp(openN, 0.0, 1.2);
-          float tremor = sin(sAlong * 6.283 + uTime * 34.0 + snapSeed * 20.0) * 0.0025 * uMadness * sin(sAlong * 3.14159);
-
-          vec3 centerLine = mix(pA, pB, sAlong) + axisX * tremor + vec3(0.0, -catenarySag, -catenarySag * 0.45);
-          vec3 finalPos = centerLine + (axisX * position.x + axisZ * position.z) * radScale;
-          vec3 finalNorm = normalize(axisX * normal.x + axisY * normal.y + axisZ * normal.z);
-
-          vec4 mv = modelViewMatrix * vec4(finalPos, 1.0);
-          vViewPos = -mv.xyz;
-          vNrm = normalize(normalMatrix * finalNorm);
-          gl_Position = projectionMatrix * mv;
+          vCrimson = step(0.72, fract(aHolo4.w * 7.9 + snap * 0.5));
+          vAlpha = stagger * (0.38 + 0.44 * uMadness);
+          vec3 center = vec3(cos(ang) * rx + gx, sin(ang) * ry, zOut);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(center + rotP, 1.0);
         }
       `,
       fragmentShader: /* glsl */ `
-        varying float vAlong;
-        varying vec3 vNrm;
-        varying vec3 vViewPos;
+        varying vec2 vUv;
         varying float vAlpha;
+        varying float vCrimson;
+        uniform sampler2D uTex;
+        uniform float uTime;
         void main() {
-          if (vAlpha < 0.02) discard;
-          vec3 N = normalize(gl_FrontFacing ? vNrm : -vNrm);
-          vec3 V = normalize(vViewPos);
-          vec3 H = normalize(normalize(vec3(0.28, 0.58, 0.78)) + V);
-          float spec = pow(max(dot(N, H), 0.0), 72.0);
-          float fres = pow(1.0 - abs(dot(N, V)), 2.2);
-          float centerSpan = sin(vAlong * 3.14159);
-          vec3 rootMucosa = vec3(0.34, 0.03, 0.08);
-          vec3 clearSaliva = vec3(0.45, 0.78, 0.98);
-          vec3 strandCol = mix(rootMucosa, clearSaliva, smoothstep(0.15, 0.85, centerSpan));
-          strandCol += vec3(0.96, 0.99, 1.0) * (spec * 1.65 + fres * 0.42);
-          gl_FragColor = vec4(strandCol, clamp(vAlpha * (0.42 + (1.0 - centerSpan) * 0.32 + spec * 0.48), 0.0, 0.92));
+          if (vAlpha < 0.01) discard;
+          vec4 t = texture2D(uTex, vUv);
+          float scan = 0.82 + 0.18 * sin(vUv.y * 80.0 - uTime * 16.0);
+          vec3 col = mix(t.rgb, vec3(1.0, 0.18, 0.38) * (0.4 + t.g), vCrimson * 0.65) * scan;
+          gl_FragColor = vec4(col, t.a * vAlpha * 0.72);
         }
       `,
     });
-    this.sinewMesh = new THREE.InstancedMesh(sinewGeo, this.sinewMat, SINEW_COUNT);
-    this.sinewMesh.renderOrder = 8;
-    this.sinewMesh.frustumCulled = false;
-    this.parasyteGroup.add(this.sinewMesh);
+    this.holoCascadeMesh = new THREE.InstancedMesh(holoPaneGeo, this.holoCascadeMat, HOLO_PANE_COUNT);
+    this.holoCascadeMesh.renderOrder = 7;
+    this.holoCascadeMesh.frustumCulled = false;
+    this.holoBreachGroup.add(this.holoCascadeMesh);
 
-    // 6a-2b. 4 Sculpted 3D Parasyte Splitting Jaw Quadrants (Right, Upper Maxilla, Left, Lower Chin)
-    // Continuous anatomical cross-section: deep -Z pharynx -> +Z 52-socket gum crest -> striated cheek muscle -> sub-LCD margin!
-    const flapGeo = buildParasyteMandibleGeometry();
-    const flapSeed = new Float32Array(JAW_FLAP_COUNT * 4);
-    for (let i = 0; i < JAW_FLAP_COUNT; i++) {
-      // Exact 4 cardinal jaw quadrants: 0 (Right), pi/2 (Upper), pi (Left), 3pi/2 (Lower), splitting along +-pi/4 & +-3pi/4!
-      const lobeAng = i * Math.PI * 0.5;
-      flapSeed[i * 4 + 0] = lobeAng;
-      flapSeed[i * 4 + 1] = i;
-      flapSeed[i * 4 + 2] = i === 1 ? 1.03 : i === 3 ? 1.05 : 0.99;
-      flapSeed[i * 4 + 3] = i * 1.5707963;
-    }
-    flapGeo.setAttribute('aFlap4', new THREE.InstancedBufferAttribute(flapSeed, 4));
+    // 7b. Counter-Rotating 3D Holographic Cyber-Containment Rings projecting out of the bezel
+    const holoRingGeo = new THREE.RingGeometry(0.44, 0.465, 48, 1);
+    const rSeed = new Float32Array(HOLO_RING_COUNT);
+    for (let i = 0; i < HOLO_RING_COUNT; i++) rSeed[i] = i / HOLO_RING_COUNT;
+    holoRingGeo.setAttribute('aRingIdx', new THREE.InstancedBufferAttribute(rSeed, 1));
 
-    this.jawFlapMat = new THREE.ShaderMaterial({
+    this.holoRingsMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
       side: THREE.DoubleSide,
-      depthTest: true,
-      depthWrite: true,
+      blending: THREE.AdditiveBlending,
       uniforms: {
         uTime: { value: 0 },
         uMadness: { value: 0 },
-        uJawOpen: { value: 0 },
-        uSuction: { value: 0 },
         uClickPulse: { value: 0 },
-        uCrackRun: { value: 0 },
-        uParenC: { value: this.parenC.clone() },
-        uParenSize: { value: this.parenSize.clone() },
-        uSpine: { value: this.spine.clone() },
+        uSuction: { value: 0 },
       },
       vertexShader: /* glsl */ `
-        attribute vec4 aFlap4;
+        attribute float aRingIdx;
         uniform float uTime;
         uniform float uMadness;
-        uniform float uJawOpen;
-        uniform float uSuction;
         uniform float uClickPulse;
-        uniform float uCrackRun;
-        uniform vec2 uParenC;
-        uniform vec2 uParenSize;
-        uniform vec3 uSpine;
-        varying vec2 vFlapUv;
-        varying vec3 vNrm;
-        varying vec3 vViewPos;
-        varying float vFlapId;
-        varying float vSpanAng;
-
-        vec4 evalParasyteChewF(float t, float madness, float jawOpen, float suction, float clickPulse) {
-          float openT = clamp(jawOpen, 0.0, 1.0);
-          float baseOpen = pow(openT, 0.68);
-          // A living jaw: slow inhalation interrupted by sharp, irregular involuntary bites.
-          // This exact equation is shared by the screen, gums, teeth, eyes and sinews.
-          float alive = smoothstep(0.17, 0.62, madness) * (1.0 - smoothstep(0.10, 0.48, suction));
-          float inhaleBreath = sin(t * 2.0) * 0.055 * openT;
-          float spasm = pow(max(0.0, sin(t * 3.7 + sin(t * 1.13) * 1.8)), 10.0);
-          float bite = spasm * 0.18 * alive * openT;
-          float clickTear = clickPulse * 0.095 * smoothstep(0.08, 0.32, madness);
-          float swallowUnhinge = smoothstep(0.10, 0.45, suction) * 0.38;
-          float effOpen = clamp(baseOpen + inhaleBreath - bite + clickTear + swallowUnhinge, 0.0, 1.34);
-          return vec4(effOpen, 0.0, 0.0, 0.0);
-        }
-
-        float evalMawLobeF(float ang, float openN) {
-          float k = clamp(openN, 0.0, 1.25);
-          float cornerFlare = pow(0.5 - 0.5 * cos(ang * 4.0), 1.55);
-          float archVertical = 0.07 * pow(abs(sin(ang)), 1.4);
-          // Neighbouring lobes strain in different directions instead of pulsing as a perfect ring.
-          float twitch = sin(ang * 3.0 + uTime * 4.3) * 0.045
-                       + sin(ang * 5.0 - uTime * 7.1) * 0.025;
-          return 1.0 + (0.14 * cornerFlare + archVertical + twitch * uMadness) * k;
-        }
-
-        vec3 evalJawPoint(
-          float uCoord,
-          float vCoord,
-          float centerAng,
-          float asym,
-          float openN,
-          vec2 mawCenter,
-          float faceScale,
-          vec2 parenLoc,
-          float halfLen
-        ) {
-          float spanAng = centerAng + uCoord * 1.62;
-          vec2 dir = vec2(cos(spanAng), sin(spanAng));
-          float tv = clamp(dir.y, -1.0, 1.0);
-          vec3 spineF = uSpine - vec3(0.5);
-          float spineHere = 0.5 * tv * (tv - 1.0) * spineF.x
-                          + (1.0 - tv * tv) * spineF.y
-                          + 0.5 * tv * (tv + 1.0) * spineF.z;
-          float mouthCx = spineHere * (1.0 - pow(clamp(openN, 0.0, 1.0), 0.9));
-
-          float crackGate = 1.0 - smoothstep(0.04, 0.20, openN);
-          float crackGrown = smoothstep(1.0 - uCrackRun, 1.02, abs(tv));
-          float openNc = openN * mix(1.0, crackGrown, crackGate);
-          float emerge = smoothstep(0.06, 0.24, openNc);
-          float circRadX = max(mix(0.04, 0.43, pow(max(openNc, 0.0), 0.85)), 1e-4);
-          float mawLobe = evalMawLobeF(spanAng, openNc);
-
-          // Continuous 3-zone anatomical cross-section along v in [0..1]:
-          // v = 0.00 -> deep inner pharynx wall (rad = 0.72, z = -0.26) plunging seamlessly into the throat tunnel
-          // v = 0.34 -> swollen 52-socket alveolar gum crest (rad = 0.96, z = +0.165) where rimTeethMesh roots embed
-          // v = 0.58 -> muscular Parasyte cheek/brow/chin ridge (rad = 1.06, z = +0.105)
-          // v = 1.00 -> sub-LCD attachment margin (rad = 1.38, z = -0.036) cleanly occluded behind screenMesh!
-          float radInner = mix(0.72, 0.96, smoothstep(0.0, 0.34, vCoord));
-          float radOuter = mix(radInner, 1.38, pow(smoothstep(0.34, 1.0, vCoord), 0.92));
-          float radMul = radOuter * mawLobe * asym;
-
-          // 52 sculpted alveolar tooth sockets & gingival papillae along the v = 0.34 gum crest!
-          float gumBand = exp(-pow((vCoord - 0.34) * 9.5, 2.0));
-          float papilla = cos(spanAng * 52.0);
-          radMul += papilla * 0.012 * gumBand * emerge;
-
-          // Deep V-cleft commissure crease where adjacent jaw flaps meet at +-pi/4 & +-3pi/4
-          float cleftCrease = smoothstep(0.34, 0.50, abs(uCoord));
-          float lobeArch = (0.52 + 0.48 * (0.5 + 0.5 * cos(spanAng * 4.0))) * (1.0 - 0.42 * cleftCrease);
-
-          float pharynxZ = -0.26 * pow(1.0 - smoothstep(0.0, 0.30, vCoord), 1.45) * emerge;
-          float gumCrestZ = (0.165 * clamp(openNc, 0.0, 1.25) + uClickPulse * 0.035) * lobeArch
-                          * exp(-pow((vCoord - 0.35) * 3.8, 2.0)) * emerge;
-          float muscleRidgeZ = (0.105 * clamp(openNc, 0.0, 1.25)) * lobeArch
-                             * exp(-pow((vCoord - 0.62) * 3.2, 2.0)) * emerge;
-          float muscleStriation = sin(uCoord * 34.0) * 0.0045 * faceScale * smoothstep(0.22, 0.55, vCoord) * (1.0 - smoothstep(0.75, 1.0, vCoord)) * emerge;
-          float papillaZ = papilla * 0.008 * faceScale * gumBand * emerge;
-          float outerTuckZ = -0.038 * smoothstep(0.72, 1.0, vCoord);
-          float cleftTuckZ = -0.045 * cleftCrease * smoothstep(0.15, 0.85, vCoord) * emerge;
-
-          vec2 fPos = vec2(mouthCx, parenLoc.y) + vec2(dir.x * circRadX, dir.y * halfLen) * radMul;
-          vec2 worldXY = (mawCenter - 0.5) * vec2(1.90566, 1.0) + fPos * faceScale * emerge
-                       + (1.0 - emerge) * ((mawCenter - 0.5) * vec2(1.90566, 1.0));
-          float worldZ = pharynxZ + gumCrestZ + muscleRidgeZ + muscleStriation + papillaZ + outerTuckZ + cleftTuckZ;
-          return vec3(worldXY, worldZ);
-        }
-
+        uniform float uSuction;
+        varying float vAng;
+        varying float vAlpha;
+        varying float vIdx;
         void main() {
-          vFlapUv = uv;
-          vFlapId = aFlap4.y;
-          float centerAng = aFlap4.x;
-          float asym = aFlap4.z;
-
-          vec2 mawCenter = mix(vec2(0.144, 0.742), vec2(0.48, 0.48), smoothstep(0.14, 0.88, uMadness));
-          float faceScale = max(mix(0.35, 0.84, smoothstep(0.12, 0.90, uMadness)), 0.08);
-          vec4 chew = evalParasyteChewF(uTime, uMadness, uJawOpen, uSuction, uClickPulse);
-          float openN = chew.x;
-
-          vec2 parenLoc = uParenC - vec2(0.5);
-          float halfLen = max(mix(max(uParenSize.y * 0.5, 0.05), 0.43, pow(clamp(openN, 0.0, 1.2), 0.78)), 1e-4);
-
-          float uC = position.x;
-          float vC = clamp(position.y, 0.0, 1.0);
-          vSpanAng = centerAng + uC * 1.62;
-
-          vec3 p0 = evalJawPoint(uC, vC, centerAng, asym, openN, mawCenter, faceScale, parenLoc, halfLen);
-          float du = 0.016;
-          float dv = 0.016;
-          vec3 pU = evalJawPoint(uC + du, vC, centerAng, asym, openN, mawCenter, faceScale, parenLoc, halfLen) - p0;
-          vec3 pV = evalJawPoint(uC, min(1.0, vC + dv), centerAng, asym, openN, mawCenter, faceScale, parenLoc, halfLen)
-                  - evalJawPoint(uC, max(0.0, vC - dv), centerAng, asym, openN, mawCenter, faceScale, parenLoc, halfLen);
-
-          // Exact analytical surface normal: +v (radial outward) x +u (CCW tangent) = +Z outward toward viewer!
-          vec3 surfN = cross(pV, pU);
-          float nLen = length(surfN);
-          vec3 finalNorm = nLen > 1e-7 ? surfN / nLen : vec3(0.0, 0.0, 1.0);
-
-          vec4 mv = modelViewMatrix * vec4(p0, 1.0);
-          vViewPos = -mv.xyz;
-          vNrm = normalize(normalMatrix * finalNorm);
-          gl_Position = projectionMatrix * mv;
+          vIdx = aRingIdx;
+          float emerge = smoothstep(0.36, 0.92, uMadness) * (1.0 - smoothstep(0.15, 0.50, uSuction));
+          float dir = mod(floor(aRingIdx * 8.0), 2.0) > 0.5 ? 1.0 : -1.0;
+          float spin = uTime * (1.2 + aRingIdx * 1.8) * dir;
+          float cs = cos(spin), sn = sin(spin);
+          float radScale = (0.52 + aRingIdx * 0.95) * (0.8 + 0.25 * emerge);
+          vec2 rp = position.xy * radScale;
+          vec2 rotP = vec2(rp.x * cs - rp.y * sn, rp.x * sn + rp.y * cs);
+          vAng = atan(position.y, position.x + 1e-5);
+          vAlpha = emerge * (0.55 - aRingIdx * 0.30 + uClickPulse * 0.25);
+          float zOut = 0.018 + aRingIdx * 0.42 * emerge + uClickPulse * 0.04;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(rotP, zOut, 1.0);
         }
       `,
       fragmentShader: /* glsl */ `
-        varying vec2 vFlapUv;
-        varying vec3 vNrm;
-        varying vec3 vViewPos;
-        varying float vFlapId;
-        varying float vSpanAng;
+        varying float vAng;
+        varying float vAlpha;
+        varying float vIdx;
         uniform float uTime;
         uniform float uMadness;
-
         void main() {
-          vec3 N = normalize(gl_FrontFacing ? vNrm : -vNrm);
-          vec3 V = normalize(vViewPos);
-          vec3 Lkey = normalize(vec3(0.28, 0.56, 0.78));
-          vec3 Lfill = normalize(vec3(-0.42, -0.30, 0.86));
-          vec3 H = normalize(Lkey + V);
-          vec3 H2 = normalize(Lfill + V);
-
-          // Organic subsurface-scattered wrap lighting across wet gum & muscle bundles
-          float ndl = dot(N, Lkey);
-          float wrapDiff = clamp((ndl + 0.42) / 1.42, 0.0, 1.0);
-          float sssBand = pow(clamp(1.0 - abs(ndl), 0.0, 1.0), 2.2) * 0.28;
-          float spec = pow(max(dot(N, H), 0.0), 76.0) * 1.35 + pow(max(dot(N, H2), 0.0), 28.0) * 0.35;
-          float rim = pow(1.0 - abs(dot(N, V)), 2.8);
-
-          float v = vFlapUv.y;
-          // 1) Deep inner pharynx mucosa (v = 0..0.28) — dark wet abyss matching throatTubeMat
-          vec3 pharynxMeat = vec3(0.055, 0.004, 0.016);
-
-          // 2) Swollen 52-socket alveolar gingiva (v = 0.26..0.44) — warm vascular coral-crimson gum tissue
-          float socketWave = 0.5 + 0.5 * cos(vSpanAng * 52.0);
-          vec3 socketSulcus = vec3(0.22, 0.018, 0.048);
-          vec3 swollenGum = vec3(0.56, 0.11, 0.18);
-          vec3 gingivaCol = mix(socketSulcus, swollenGum, 0.35 + 0.65 * socketWave);
-
-          // 3) Striated orbicularis/zygomatic muscle bundles (v = 0.44..0.82)
-          float fiber = 0.5 + 0.5 * sin((vFlapUv.x - 0.5) * 44.0 + sin(v * 16.0 + vFlapId) * 0.9);
-          float fascia = pow(max(0.0, sin((vFlapUv.x - 0.5) * 22.0 + 0.7)), 6.0);
-          vec3 muscleCol = mix(vec3(0.20, 0.012, 0.038), vec3(0.46, 0.048, 0.095), fiber * 0.78);
-          muscleCol = mix(muscleCol, vec3(0.62, 0.34, 0.38), fascia * 0.28);
-
-          // 4) Outer sub-LCD delaminated cerulean skin margin (v = 0.78..1.0)
-          vec3 subLcdBruise = vec3(0.02, 0.18, 0.44);
-
-          vec3 albedo = mix(pharynxMeat, gingivaCol, smoothstep(0.14, 0.31, v));
-          albedo = mix(albedo, muscleCol, smoothstep(0.40, 0.54, v));
-          albedo = mix(albedo, subLcdBruise, smoothstep(0.76, 0.94, v));
-
-          // Deep V-cleft commissure ambient occlusion where the 4 jaws tear apart
-          float cleftAo = 1.0 - 0.58 * smoothstep(0.34, 0.50, abs(vFlapUv.x - 0.5));
-          float throatAo = smoothstep(0.0, 0.24, v);
-          float ao = (0.22 + 0.78 * throatAo) * cleftAo;
-
-          // Subtle cyan bio-electric optic nerve capillaries pulsing inside the torn jaw muscle
-          float nerve = pow(max(0.0, 1.0 - abs(sin(vSpanAng * 9.0 + sin(v * 14.0) * 1.4))), 16.0)
-                      * smoothstep(0.28, 0.52, v) * (1.0 - smoothstep(0.75, 0.95, v))
-                      * (0.55 + 0.45 * sin(uTime * 6.5 - v * 8.0));
-
-          vec3 col = albedo * (0.20 + 0.80 * wrapDiff) * ao + vec3(0.55, 0.04, 0.10) * sssBand * ao;
-          col += vec3(0.10, 0.58, 1.0) * nerve * 0.32 * uMadness;
-          col += vec3(0.94, 0.98, 1.0) * spec * smoothstep(0.10, 0.32, v) * (1.0 - smoothstep(0.80, 0.98, v));
-          col += vec3(0.18, 0.58, 0.96) * rim * 0.20 * ao;
-          gl_FragColor = vec4(col, 1.0);
+          if (vAlpha < 0.01) discard;
+          float seg = step(0.32, fract(vAng * 1.90986 + vIdx * 3.0));
+          if (seg < 0.5) discard;
+          vec3 col = mix(vec3(0.30, 0.88, 1.0), vec3(1.0, 0.20, 0.44), step(0.6, vIdx) * smoothstep(0.5, 0.9, uMadness));
+          gl_FragColor = vec4(col, clamp(vAlpha, 0.0, 0.85));
         }
       `,
     });
-    this.jawFlapsMesh = new THREE.InstancedMesh(flapGeo, this.jawFlapMat, JAW_FLAP_COUNT);
-    this.jawFlapsMesh.renderOrder = 6;
-    this.jawFlapsMesh.frustumCulled = false;
-    this.parasyteGroup.add(this.jawFlapsMesh);
+    this.holoRingsMesh = new THREE.InstancedMesh(holoRingGeo, this.holoRingsMat, HOLO_RING_COUNT);
+    this.holoRingsMesh.renderOrder = 7;
+    this.holoRingsMesh.frustumCulled = false;
+    this.holoBreachGroup.add(this.holoRingsMesh);
 
-    // 6a-3. 11 Socketed & Blinking 3D Parasyte Eyes (uv.y < 0.5 = refractive eyeball; uv.y >= 0.5 = 3D fleshy orbital eyelids!)
-    const socketedEyeGeo = buildParasyteSocketedEyeGeometry();
-    // [polarAngRad, jawRadialMul, baseRadius, eyeIdx + appearThreshold] — single vec4 attribute (WebGL1 <= 8 attribs safe!)
-    const eyeLayout: Array<[number, number, number, number]> = [
-      [1.14, 1.24, 0.068, 0.14],   // 0: Primary mutated ':' eye R (upper-right supraorbital ridge)
-      [1.98, 1.26, 0.102, 0.14],   // 1: Primary mutated ':' eye L (monstrously swollen asymmetric primary eye!)
-      [0.34, 1.26, 0.060, 0.24],   // 2: Right zygomatic mandible cluster — large eye
-      [0.10, 1.34, 0.035, 0.30],   // 3: Right mandible cluster — frantic tiny satellite eye
-      [2.84, 1.28, 0.064, 0.28],   // 4: Left zygomatic mandible eye
-      [-0.52, 1.26, 0.055, 0.38],  // 5: Lower-right jaw eye
-      [-2.54, 1.28, 0.048, 0.42],  // 6: Lower-left jaw eye
-      [-2.86, 1.36, 0.032, 0.48],  // 7: Lower-left tiny satellite twin eye
-      [1.56, 1.34, 0.044, 0.52],   // 8: Dorsal frontal-brow crown eye
-      [3.12, 1.32, 0.040, 0.58],   // 9: Far-left lateral cheek eye
-      [-1.54, 1.30, 0.046, 0.62],  // 10: Mental chin-lobe eye
-    ];
-    const eyeAttr = new Float32Array(PARASYTE_EYE_COUNT * 4);
-    for (let i = 0; i < PARASYTE_EYE_COUNT; i++) {
-      const [eAng, eRadMul, er, eth] = eyeLayout[i];
-      eyeAttr[i * 4 + 0] = eAng;
-      eyeAttr[i * 4 + 1] = eRadMul;
-      eyeAttr[i * 4 + 2] = er;
-      eyeAttr[i * 4 + 3] = i + eth; // floor = eye index [0..10], fract = madness threshold!
-    }
-    socketedEyeGeo.setAttribute('aEye4', new THREE.InstancedBufferAttribute(eyeAttr, 4));
-
-    this.parasyteEyeMat = new THREE.ShaderMaterial({
-      side: THREE.DoubleSide,
-      depthTest: true,
-      depthWrite: true,
-      uniforms: {
-        uTime: { value: 0 },
-        uMadness: { value: 0 },
-        uJawOpen: { value: 0 },
-        uSuction: { value: 0 },
-        uClickPulse: { value: 0 },
-        uCrackRun: { value: 0 },
-        uHover: { value: 0 },
-        uCursorUv: { value: new THREE.Vector2(0.5, 0.5) },
-        uParenC: { value: this.parenC.clone() },
-        uParenSize: { value: this.parenSize.clone() },
-        uSpine: { value: this.spine.clone() },
-      },
-      vertexShader: /* glsl */ `
-        attribute vec4 aEye4;
-        uniform float uTime;
-        uniform float uMadness;
-        uniform float uJawOpen;
-        uniform float uSuction;
-        uniform float uClickPulse;
-        uniform float uCrackRun;
-        uniform float uHover;
-        uniform vec2 uCursorUv;
-        uniform vec2 uParenC;
-        uniform vec2 uParenSize;
-        uniform vec3 uSpine;
-        varying vec3 vSpherePos;
-        varying vec2 vPartUv;
-        varying vec3 vNrm;
-        varying vec3 vViewPos;
-        varying float vEyeId;
-        varying float vBlink;
-
-        float hash1(float n) { return fract(sin(n) * 43758.5453); }
-
-        vec4 evalParasyteChewE(float t, float madness, float jawOpen, float suction, float clickPulse) {
-          float openT = clamp(jawOpen, 0.0, 1.0);
-          float baseOpen = pow(openT, 0.68);
-          // A living jaw: slow inhalation interrupted by sharp, irregular involuntary bites.
-          // This exact equation is shared by the screen, gums, teeth, eyes and sinews.
-          float alive = smoothstep(0.17, 0.62, madness) * (1.0 - smoothstep(0.10, 0.48, suction));
-          float inhaleBreath = sin(t * 2.0) * 0.055 * openT;
-          float spasm = pow(max(0.0, sin(t * 3.7 + sin(t * 1.13) * 1.8)), 10.0);
-          float bite = spasm * 0.18 * alive * openT;
-          float clickTear = clickPulse * 0.095 * smoothstep(0.08, 0.32, madness);
-          float swallowUnhinge = smoothstep(0.10, 0.45, suction) * 0.38;
-          float effOpen = clamp(baseOpen + inhaleBreath - bite + clickTear + swallowUnhinge, 0.0, 1.34);
-          return vec4(effOpen, 0.0, 0.0, 0.0);
-        }
-
-        float evalMawLobeE(float ang, float openN) {
-          float k = clamp(openN, 0.0, 1.25);
-          float cornerFlare = pow(0.5 - 0.5 * cos(ang * 4.0), 1.55);
-          float archVertical = 0.07 * pow(abs(sin(ang)), 1.4);
-          // Neighbouring lobes strain in different directions instead of pulsing as a perfect ring.
-          float twitch = sin(ang * 3.0 + uTime * 4.3) * 0.045
-                       + sin(ang * 5.0 - uTime * 7.1) * 0.025;
-          return 1.0 + (0.14 * cornerFlare + archVertical + twitch * uMadness) * k;
-        }
-
-        void main() {
-          vPartUv = uv;
-          float eyeId = floor(aEye4.w + 1e-4);
-          float appearTh = fract(aEye4.w);
-          vEyeId = eyeId;
-
-          vec2 mawCenter = mix(vec2(0.144, 0.742), vec2(0.48, 0.48), smoothstep(0.14, 0.88, uMadness));
-          float faceScale = max(mix(0.35, 0.84, smoothstep(0.12, 0.90, uMadness)), 0.08);
-          vec4 chew = evalParasyteChewE(uTime, uMadness, uJawOpen, uSuction, uClickPulse);
-          float openN = chew.x;
-
-          float emerge = smoothstep(appearTh, appearTh + 0.13, uMadness);
-          float rad = aEye4.z * faceScale * emerge * (1.0 + 0.09 * sin(uTime * 11.0 + eyeId * 2.7) * uMadness);
-
-          // Anchor each orbital socket directly onto the expanding 3D Parasyte jaw lobes!
-          float ang = aEye4.x;
-          float radMulBase = aEye4.y;
-          vec2 dir = vec2(cos(ang), sin(ang));
-          vec2 parenLoc = uParenC - vec2(0.5);
-          float halfLen = max(mix(max(uParenSize.y * 0.5, 0.05), 0.43, pow(clamp(openN, 0.0, 1.2), 0.78)), 1e-4);
-          float tv = clamp(dir.y, -1.0, 1.0);
-          vec3 spineF = uSpine - vec3(0.5);
-          float spineHere = 0.5 * tv * (tv - 1.0) * spineF.x
-                          + (1.0 - tv * tv) * spineF.y
-                          + 0.5 * tv * (tv + 1.0) * spineF.z;
-          float mouthCx = spineHere * (1.0 - pow(clamp(openN, 0.0, 1.0), 0.9));
-          float crackGate = 1.0 - smoothstep(0.04, 0.20, openN);
-          float crackGrown = smoothstep(1.0 - uCrackRun, 1.02, abs(tv));
-          float openNc = openN * mix(1.0, crackGrown, crackGate);
-          float circRadX = max(mix(0.04, 0.39, pow(max(openNc, 0.0), 0.85)), 1e-4);
-          float mawLobe = evalMawLobeE(ang, openNc);
-
-          // Smoothly transition from initial ':' eye cluster before jaw tear into full polar jaw-mounted orbit!
-          vec2 fEyePolar = vec2(mouthCx, parenLoc.y) + vec2(dir.x * max(circRadX, 0.18), dir.y * max(halfLen, 0.26)) * (mawLobe * radMulBase);
-          vec2 eyeScreenUv = mawCenter + fEyePolar * faceScale * vec2(1.0 / 1.90566, 1.0);
-          vec2 centerXY = (mawCenter - 0.5) * vec2(1.90566, 1.0) + fEyePolar * faceScale;
-
-          float lobeArch = 0.52 + 0.48 * (0.5 + 0.5 * cos(ang * 4.0));
-          float jawSurfaceZ = (0.095 * clamp(openNc, 0.0, 1.25)) * lobeArch + 0.032 * emerge;
-          float bulgeZ = jawSurfaceZ + rad * (0.62 + 0.18 * sin(uTime * 2.8 + eyeId * 1.7)) + uClickPulse * 0.055 * emerge;
-
-          // Asynchronous wet Parasyte eyelid blink (each eye blinks on its own organic cycle!)
-          float blinkPeriod = 3.1 + mod(eyeId * 0.73, 2.4);
-          float blinkPhase = fract((uTime + eyeId * 1.19) / blinkPeriod);
-          float blinkPulse = smoothstep(0.0, 0.035, blinkPhase) * (1.0 - smoothstep(0.035, 0.11, blinkPhase));
-          float blinkAmt = clamp(blinkPulse * (1.0 - uClickPulse * 0.8), 0.0, 0.94);
-          vBlink = blinkAmt;
-
-          // Saccadic 3D eyeball rotation that snaps dead-on to the player's cursor / gaze!
-          vec2 toCursor = clamp((uCursorUv - eyeScreenUv) * vec2(1.9, 1.0) * 1.55, vec2(-0.68), vec2(0.68));
-          float sacTick = floor(uTime * (5.5 + mod(eyeId, 4.0) * 2.1));
-          vec2 saccade = vec2(hash1(sacTick + eyeId * 11.3) - 0.5, hash1(sacTick * 1.7 + eyeId * 5.9) - 0.5)
-                       * 0.42 * (1.0 - clamp(uClickPulse * 1.4 + uHover * 0.70, 0.0, 1.0));
-          vec2 aim = clamp(toCursor + saccade, vec2(-0.72), vec2(0.72));
-
-          bool isSocket = uv.y >= 0.5;
-          vec3 localP = position;
-          vec3 localN = normal;
-
-          if (isSocket) {
-            // 3D fleshy almond eyelids & orbital socket (uv.y in [0.55..1.00]):
-            // Inner margin (sT -> 0) pinches shut vertically during blinkAmt and tracks gaze slightly!
-            float sT = clamp((uv.y - 0.55) / 0.45, 0.0, 1.0);
-            float innerWeight = 1.0 - smoothstep(0.0, 0.68, sT);
-            localP.y *= mix(1.0, 0.06, blinkAmt * innerWeight);
-            localP.z += blinkAmt * innerWeight * 0.22;
-            localP.xy += aim * 0.16 * innerWeight;
-            // Cant the almond palpebral fissure slightly along the jaw lobe tangent for organic anatomy
-            float cantAng = sin(ang * 2.0) * 0.22;
-            float cc = cos(cantAng), sc = sin(cantAng);
-            localP.xy = mat2(cc, -sc, sc, cc) * localP.xy;
-            localN.xy = mat2(cc, -sc, sc, cc) * localN.xy;
-            vSpherePos = localP;
-          } else {
-            // 3D Eyeball (uv.y in [0.00..0.45]): rotates cleanly inside the stationary fleshy eyelid socket!
-            float yaw = aim.x;
-            float pitch = -aim.y;
-            float cy = cos(yaw), sy = sin(yaw);
-            float cp = cos(pitch), sp = sin(pitch);
-            vec3 p1 = vec3(localP.x, localP.y * cp - localP.z * sp, localP.y * sp + localP.z * cp);
-            localP = vec3(p1.x * cy + p1.z * sy, p1.y, -p1.x * sy + p1.z * cy);
-            vec3 n1 = vec3(localN.x, localN.y * cp - localN.z * sp, localN.y * sp + localN.z * cp);
-            localN = vec3(n1.x * cy + n1.z * sy, n1.y, -n1.x * sy + n1.z * cy);
-            vSpherePos = position;
-          }
-
-          vec3 worldLocal = vec3(centerXY, bulgeZ) + localP * rad;
-          vec4 mv = modelViewMatrix * vec4(worldLocal, 1.0);
-          vViewPos = -mv.xyz;
-          vNrm = normalize(normalMatrix * localN);
-          gl_Position = projectionMatrix * mv;
-        }
-      `,
-      fragmentShader: /* glsl */ `
-        varying vec3 vSpherePos;
-        varying vec2 vPartUv;
-        varying vec3 vNrm;
-        varying vec3 vViewPos;
-        varying float vEyeId;
-        varying float vBlink;
-        uniform float uTime;
-        uniform float uMadness;
-        uniform float uClickPulse;
-
-        void main() {
-          vec3 N = normalize(gl_FrontFacing ? vNrm : -vNrm);
-          vec3 V = normalize(vViewPos);
-          vec3 L = normalize(vec3(0.28, 0.56, 0.78));
-          vec3 Lfill = normalize(vec3(-0.45, -0.25, 0.85));
-          vec3 H = normalize(L + V);
-          vec3 H2 = normalize(Lfill + V);
-
-          if (vPartUv.y >= 0.5) {
-            // ---- 3D FLESHY ORBITAL EYELIDS & TORN-LCD SOCKET COLLAR ----
-            float sT = clamp((vPartUv.y - 0.55) / 0.45, 0.0, 1.0);
-            float palpebralRim = 1.0 - smoothstep(0.0, 0.28, sT);
-            float wrapDiff = clamp((dot(N, L) + 0.40) / 1.40, 0.0, 1.0);
-            float wetTearLine = pow(max(dot(N, H), 0.0), 82.0) * (0.45 + 1.15 * palpebralRim);
-
-            float skinFold = 0.5 + 0.5 * sin(sT * 18.0 + cos(vPartUv.x * 6.28318 * 2.0) * 0.8);
-            vec3 innerMucosa = vec3(0.52, 0.08, 0.15);
-            vec3 tarsalFlesh = mix(vec3(0.22, 0.015, 0.045), vec3(0.42, 0.045, 0.095), skinFold);
-            vec3 bruisedLcdMargin = vec3(0.015, 0.16, 0.40);
-
-            vec3 lidCol = mix(innerMucosa, tarsalFlesh, smoothstep(0.05, 0.42, sT));
-            lidCol = mix(lidCol, bruisedLcdMargin, smoothstep(0.68, 0.98, sT));
-            float lidAo = mix(0.55, 1.0, smoothstep(0.0, 0.25, sT));
-            vec3 col = lidCol * (0.22 + 0.78 * wrapDiff) * lidAo;
-            col += vec3(0.95, 0.99, 1.0) * wetTearLine;
-            gl_FragColor = vec4(col, 1.0);
-            return;
-          }
-
-          // ---- 3D REFRACTIVE ANTERIOR-CHAMBER EYEBALL ----
-          // Corneal anterior-chamber parallax: refract view vector into sunken concave iris plane!
-          vec3 refractLocal = normalize(vSpherePos + vec3(0.0, 0.0, 0.18));
-          vec2 p = vSpherePos.xy - V.xy * 0.055 * max(0.0, vSpherePos.z);
-          float r = length(vSpherePos.xy);
-          float rIris = length(p);
-          float safeX = (abs(p.x) < 1e-5 && abs(p.y) < 1e-5) ? 1e-5 : p.x;
-          float ang = atan(p.y, safeX);
-
-          // Realistic wet ivory-pink sclera with fine branching episcleral capillaries & caruncle warmth
-          float v1 = pow(max(0.0, 1.0 - abs(sin(ang * 8.0 + sin(r * 15.0 + vEyeId) * 1.8))), 18.0);
-          float v2 = pow(max(0.0, 1.0 - abs(cos(ang * 19.0 - cos(r * 22.0 - vEyeId) * 1.4))), 22.0);
-          float scleraRim = smoothstep(0.44, 0.98, r);
-          vec3 sclera = mix(vec3(0.94, 0.91, 0.89), vec3(0.54, 0.16, 0.20), scleraRim * 0.68);
-          sclera = mix(sclera, vec3(0.72, 0.04, 0.09), clamp((v1 + v2 * 0.65) * smoothstep(0.42, 0.92, r), 0.0, 0.82));
-
-          // Detailed Parasyte iris: dark limbal ring + radial stroma fibers + collarette ring + caustic illumination!
-          float irisR = 0.43;
-          float inIris = smoothstep(irisR + 0.022, irisR - 0.022, r) * step(0.0, refractLocal.z);
-          float normR = clamp(rIris / irisR, 0.0, 1.0);
-          float radialFibers = 0.5 + 0.5 * sin(ang * 42.0 + sin(normR * 18.0 + vEyeId) * 1.6);
-          float crypts = 0.5 + 0.5 * cos(ang * 17.0 - cos(normR * 12.0) * 2.1);
-          float collarette = exp(-pow((normR - 0.46) * 7.5, 2.0));
-
-          // Cold glacial BSOD cyan-amber heterochromia characteristic of mutated digital Parasyte eyes
-          vec3 baseIris = mix(vec3(0.06, 0.46, 0.86), vec3(0.78, 0.36, 0.18), step(0.58, fract(vEyeId * 0.37)) * 0.72);
-          vec3 irisCol = baseIris * (0.38 + 0.82 * radialFibers * (0.65 + 0.35 * crypts));
-          irisCol += mix(vec3(0.35, 0.78, 1.0), vec3(0.95, 0.62, 0.28), collarette) * collarette * 0.42;
-
-          // Opposite-side anterior chamber caustic brightening + dark outer limbal ring!
-          float irisCaustic = max(0.0, dot(normalize(vec3(-p, 0.35)), L));
-          irisCol *= (0.55 + 0.95 * irisCaustic);
-          float limbus = smoothstep(1.0, 0.78, normR);
-          irisCol *= (0.16 + 0.84 * limbus);
-
-          // Constricted trembling pupil + subtle deep retinal tapetum reflex
-          float pupilR = mix(0.19, 0.082, clamp(uMadness * 0.85 + uClickPulse * 0.35, 0.0, 1.0))
-                       + sin(uTime * 48.0 + vEyeId * 5.0) * 0.006 * uMadness;
-          float inPupil = smoothstep(pupilR + 0.015, pupilR - 0.015, rIris) * step(0.0, refractLocal.z);
-
-          vec3 col = mix(sclera, irisCol, inIris);
-          col = mix(col, vec3(0.006, 0.002, 0.008), inPupil);
-          col += vec3(0.85, 0.08, 0.16) * smoothstep(pupilR * 0.55, 0.0, rIris) * inPupil * uMadness * 0.55;
-
-          // Eyelid ambient occlusion shadow cast onto upper/lower sclera + blink darkening!
-          float palpebralOpen = mix(0.56, 0.06, vBlink);
-          float lidShadow = smoothstep(palpebralOpen * 1.15, palpebralOpen * 0.45, abs(vSpherePos.y));
-          float diff = 0.32 + 0.68 * clamp((dot(N, L) + 0.25) / 1.25, 0.0, 1.0);
-          col *= diff * (0.36 + 0.64 * lidShadow);
-
-          // Dual razor-sharp wet corneal monitor reflections!
-          float corneaSpec1 = pow(max(dot(N, H), 0.0), 140.0) * 2.35;
-          float corneaSpec2 = pow(max(dot(N, H2), 0.0), 64.0) * 0.48;
-          float tearSheen = pow(1.0 - abs(dot(N, V)), 3.5) * 0.22;
-          col += vec3(0.96, 0.99, 1.0) * (corneaSpec1 + corneaSpec2) * lidShadow + vec3(0.35, 0.75, 1.0) * tearSheen;
-
-          gl_FragColor = vec4(col, 1.0);
-        }
-      `,
-    });
-    this.parasyteEyesMesh = new THREE.InstancedMesh(socketedEyeGeo, this.parasyteEyeMat, PARASYTE_EYE_COUNT);
-    this.parasyteEyesMesh.renderOrder = 7;
-    this.parasyteEyesMesh.frustumCulled = false;
-    this.parasyteGroup.add(this.parasyteEyesMesh);
-
-    // 6b. 100% GPU-Animated Razor-Thin 3D Shattered LCD Glass Shards floating out of the screen (0 CPU loops!)
-    const glassGeo = new THREE.CylinderGeometry(0.082, 0.082, 0.0045, 3, 1);
+    // 8. Zero-Gravity 3D Shattered LCD Glass Prism Shards (active at Stage 4+ AND during Suction!)
+    const glassGeo = new THREE.CylinderGeometry(0.055, 0.055, 0.008, 3, 1);
     glassGeo.rotateX(Math.PI * 0.5);
     const gSeed = new Float32Array(GLASS_SHARD_COUNT * 2);
     for (let i = 0; i < GLASS_SHARD_COUNT; i++) {
@@ -2258,6 +1197,7 @@ export class BsodScreen {
       transparent: true,
       side: THREE.DoubleSide,
       depthWrite: false,
+      blending: THREE.AdditiveBlending,
       uniforms: {
         uTime: { value: 0 },
         uMadness: { value: 0 },
@@ -2274,23 +1214,26 @@ export class BsodScreen {
         uniform float uClickPulse;
         varying vec3 vNrm;
         varying vec3 vViewPos;
+        varying float vVis;
         void main() {
-          float idx = aGlassSeed.x * 48.0;
+          float idx = aGlassSeed.x * 56.0;
           float seed = aGlassSeed.y;
-          vec2 mawCenter = mix(vec2(0.144, 0.742), vec2(0.48, 0.48), smoothstep(0.14, 0.88, uMadness));
-          float faceScale = max(mix(0.35, 0.84, smoothstep(0.12, 0.90, uMadness)), 0.08);
-          float mouthX = (mawCenter.x - 0.5) * 1.90566;
-          float mouthY = (mawCenter.y - 0.5) * 1.0;
+          float emerge = smoothstep(0.58, 0.92, uMadness);
+          vVis = emerge * (1.0 - smoothstep(0.35, 0.75, uSuction));
 
-          float ang = aGlassSeed.x * 6.2831853 + sin(uTime * 0.45 + idx) * 0.15;
-          float ringR = (0.16 + uJawOpen * (0.34 + seed * 0.44)) * faceScale;
-          float driftOut = uJawOpen * (0.08 + seed * 0.68) + uClickPulse * 0.10 - uSuction * 3.2;
+          float ang = aGlassSeed.x * 6.2831853 + sin(uTime * 0.55 + idx) * 0.18;
+          float ringR = (0.14 + emerge * (0.22 + seed * 0.46));
+          float driftOut = emerge * (0.04 + seed * 0.52) + uClickPulse * 0.08 - uSuction * 2.8;
 
-          float sc = smoothstep(0.01, 0.22, uJawOpen) * (0.42 + seed * 1.15);
-          vec3 lp = vec3(position.x * sc * (0.65 + mod(idx, 3.0) * 0.4), position.y * sc * (1.1 + mod(idx, 2.0) * 0.55), position.z);
+          float sc = emerge * (0.55 + seed * 1.25);
+          vec3 lp = vec3(
+            position.x * sc * (0.65 + mod(idx, 3.0) * 0.45),
+            position.y * sc * (1.0 + mod(idx, 2.0) * 0.65),
+            position.z
+          );
 
-          float a1 = uTime * (0.7 + seed * 1.4) + idx;
-          float a2 = uTime * (0.9 - seed * 1.2) + idx * 2.1;
+          float a1 = uTime * (0.9 + seed * 1.8) + idx;
+          float a2 = uTime * (1.1 - seed * 1.5) + idx * 2.1;
           float c1 = cos(a1), s1 = sin(a1), c2 = cos(a2), s2 = sin(a2);
           vec3 p1 = vec3(lp.x, lp.y * c1 - lp.z * s1, lp.y * s1 + lp.z * c1);
           vec3 p2 = vec3(p1.x * c2 + p1.z * s2, p1.y, -p1.x * s2 + p1.z * c2);
@@ -2298,8 +1241,8 @@ export class BsodScreen {
           vec3 n2 = vec3(n1.x * c2 + n1.z * s2, n1.y, -n1.x * s2 + n1.z * c2);
 
           vec3 center = vec3(
-            mouthX + cos(ang) * ringR * 1.10,
-            mouthY + sin(ang) * ringR * 0.96 + sin(uTime * 1.6 + idx * 1.7) * 0.022,
+            cos(ang) * ringR * 1.25,
+            sin(ang) * ringR * 0.85 + sin(uTime * 1.8 + idx * 1.7) * 0.02,
             driftOut
           );
           vec4 mv = modelViewMatrix * vec4(center + p2, 1.0);
@@ -2311,13 +1254,15 @@ export class BsodScreen {
       fragmentShader: /* glsl */ `
         varying vec3 vNrm;
         varying vec3 vViewPos;
+        varying float vVis;
         void main() {
+          if (vVis < 0.01) discard;
           vec3 V = normalize(vViewPos);
           vec3 N = normalize(vNrm);
-          float fresnel = pow(1.0 - abs(dot(N, V)), 2.2);
-          float spec = pow(max(dot(reflect(-V, N), normalize(vec3(0.3, 0.6, 0.8))), 0.0), 36.0);
-          vec3 col = mix(vec3(0.02, 0.34, 0.80), vec3(0.90, 0.98, 1.0), fresnel * 0.85 + spec);
-          gl_FragColor = vec4(col, clamp(0.36 + fresnel * 0.54 + spec * 0.42, 0.0, 0.95));
+          float fresnel = pow(1.0 - abs(dot(N, V)), 2.0);
+          float spec = pow(max(dot(reflect(-V, N), normalize(vec3(0.3, 0.6, 0.8))), 0.0), 32.0);
+          vec3 col = mix(vec3(0.08, 0.58, 1.0), vec3(0.95, 0.99, 1.0), fresnel * 0.8 + spec);
+          gl_FragColor = vec4(col, clamp((0.30 + fresnel * 0.55 + spec * 0.45) * vVis, 0.0, 0.92));
         }
       `,
     });
@@ -2327,7 +1272,7 @@ export class BsodScreen {
     this.glassShards.frustumCulled = false;
     this.root.add(this.glassShards);
 
-    // 7. Cerulean Monitor PointLight illuminating the desk, keyboard, chair, and bedroom!
+    // 9. Dynamic Monitor PointLight illuminating desk, keyboard, chair, and bedroom
     this.monitorLight = new THREE.PointLight(0x1b8cff, 2.35, 6.5, 1.6);
     this.monitorLight.position.set(0, 0.04, 0.26);
     this.root.add(this.monitorLight);
@@ -2341,7 +1286,6 @@ export class BsodScreen {
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, W, W);
 
-    // Fallback draw for headless stub canvases that do not implement full ImageData buffers
     ctx.globalCompositeOperation = 'lighter';
     ctx.textBaseline = 'middle';
     ctx.font = '300 660px "Segoe UI", "Yu Gothic UI", system-ui, sans-serif';
@@ -2355,8 +1299,6 @@ export class BsodScreen {
     ctx.fillText('(', startX + colonWidth, centerY);
     ctx.globalCompositeOperation = 'source-over';
 
-    // Exact Analytical 2D Euclidean Signed Distance Field (SDF) for Segoe UI Light ':('
-    // R = ':' SDF (0.5 = glyph edge, +-9px spread), G = '(' SDF, B = 0 (strict invariant!), A = 255
     let img: ImageData | null = null;
     try {
       img = ctx.getImageData(0, 0, W, W);
@@ -2372,7 +1314,6 @@ export class BsodScreen {
       const dotBotY = 722.0;
       const dotR = 32.0;
 
-      // Exact Segoe UI Semilight '(' circular-arc spine passing through waist (566, 554) and terminals (684, 554 +- 268)
       const arcCy = 554.0;
       const arcCx = 931.0;
       const arcR = 365.0;
@@ -2389,12 +1330,9 @@ export class BsodScreen {
 
         for (let x = 0; x < W; x++) {
           const pxX = x + 0.5;
-          // 1) Red channel: ':' Euclidean SDF
           const dColonX = pxX - colonX;
-          const sdColon =
-            Math.min(Math.hypot(dColonX, dyTop), Math.hypot(dColonX, dyBot)) - dotR;
+          const sdColon = Math.min(Math.hypot(dColonX, dyTop), Math.hypot(dColonX, dyBot)) - dotR;
 
-          // 2) Green channel: '(' Euclidean SDF with subtle optical terminal taper
           const dxArc = pxX - arcCx;
           let sdParen: number;
           if (dxArc < 0.0) {
@@ -2448,7 +1386,6 @@ export class BsodScreen {
       gy0 = 1e9,
       gx1 = -1,
       gy1 = -1;
-    // Measure at the exact 0.5 SDF contour (> 127)
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
         const i = (y * size + x) * 4;
@@ -2483,8 +1420,7 @@ export class BsodScreen {
       for (let y = ry0; y <= ry1; y++) {
         for (let x = rx0; x <= rx1; x++) {
           const i = (y * size + x) * 4;
-          if (px[i] <= 127) continue;
-          if (x !== xMid) continue;
+          if (px[i] <= 127 || x !== xMid) continue;
           if (y <= midY) {
             topSum += y;
             topCnt++;
@@ -2514,14 +1450,14 @@ export class BsodScreen {
   }
 
   private drawQrCode(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, stage: number): void {
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = stage >= 4 ? '#cbeeff' : '#ffffff';
     ctx.fillRect(x, y, size, size);
 
     const modules = 29;
     const pad = Math.round(size * 0.085);
     const cell = (size - pad * 2) / modules;
-    const corruption = Math.max(0, (stage - 1) * 0.24);
-    ctx.fillStyle = '#0078d7';
+    const corruption = Math.max(0, stage * 0.20);
+    ctx.fillStyle = stage >= 5 ? '#001536' : stage >= 4 ? '#00285e' : '#0078d7';
 
     const isFinder = (r: number, c: number, fr: number, fc: number): boolean => {
       const dr = r - fr;
@@ -2538,12 +1474,11 @@ export class BsodScreen {
         const inFinderZone =
           (r < 8 && c < 8) || (r < 8 && c >= modules - 8) || (r >= modules - 8 && c < 8);
 
-        // From Stage 1+, the center of the QR code subtly forms an uncanny watching eye!
         const drC = (r - 14) * 1.35;
         const dcC = c - 14;
         const eyeDist = Math.hypot(drC, dcC);
-        if (stage >= 1 && !inFinderZone && eyeDist < 6.4) {
-          on = (eyeDist > 4.6 && eyeDist < 6.1) || eyeDist < 2.1;
+        if (stage >= 1 && !inFinderZone && eyeDist < 6.8) {
+          on = (eyeDist > 4.6 && eyeDist < 6.2) || eyeDist < 2.2;
         } else if (inFinderZone) {
           on =
             isFinder(r, c, 0, 0) ||
@@ -2551,10 +1486,6 @@ export class BsodScreen {
             isFinder(r, c, modules - 7, 0);
         } else if (r === 6 || c === 6) {
           on = (r + c) % 2 === 0;
-        } else if (r >= 20 && r <= 24 && c >= 20 && c <= 24) {
-          const dr = Math.abs(r - 22);
-          const dc = Math.abs(c - 22);
-          on = Math.max(dr, dc) === 2 || (dr === 0 && dc === 0);
         } else {
           const seed = Math.sin((r * 37 + c * 91 + 19) * 12.9898) * 43758.5453;
           on = seed - Math.floor(seed) > 0.47;
@@ -2566,9 +1497,9 @@ export class BsodScreen {
           if (corruption > 0 && !inFinderZone) {
             const h = Math.sin(r * 17.3 + c * 43.7) * 43758.5;
             const rnd = h - Math.floor(h);
-            if (rnd < corruption * 0.45) {
-              ox = (rnd - 0.2) * corruption * 92;
-              oy = Math.cos(r * c) * 0.5 * corruption * 72;
+            if (rnd < corruption * 0.42) {
+              ox = (rnd - 0.25) * corruption * 120;
+              oy = Math.cos(r * c) * 0.5 * corruption * 65;
             }
           }
           ctx.fillRect(
@@ -2582,6 +1513,10 @@ export class BsodScreen {
     }
   }
 
+  /**
+   * Diegetic OS Crash -> Display-Buffer Breach typography (ZERO clumsy right-side popups/charts!).
+   * Every stage mutates the actual BSOD memory layout itself with stark, chilling precision.
+   */
   private bakeStageTexture(stage: number, aftermath: boolean): THREE.CanvasTexture {
     const canvas = document.createElement('canvas');
     canvas.width = 2048;
@@ -2603,29 +1538,20 @@ export class BsodScreen {
     };
 
     if (aftermath) {
-      ctx.fillStyle = '#051326';
+      ctx.fillStyle = '#041022';
       ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = 'rgba(120, 195, 255, 0.03)';
+      for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 2);
 
-      ctx.fillStyle = 'rgba(120, 190, 255, 0.03)';
-      for (let y = 0; y < H; y += 4) {
-        ctx.fillRect(0, y, W, 2);
-      }
-      const vg = ctx.createRadialGradient(W * 0.5, H * 0.48, H * 0.1, W * 0.5, H * 0.5, H * 0.78);
-      vg.addColorStop(0, 'rgba(0, 0, 0, 0)');
-      vg.addColorStop(1, 'rgba(0, 0, 0, 0.68)');
-      ctx.fillStyle = vg;
-      ctx.fillRect(0, 0, W, H);
-
-      // Subtle ghostly reflection of a seated silhouette + faint ':)' watermark burned into phosphor!
       ctx.save();
-      ctx.fillStyle = 'rgba(130, 205, 255, 0.08)';
+      ctx.fillStyle = 'rgba(120, 205, 255, 0.07)';
       ctx.font = '300 245px "Segoe UI", "Yu Gothic UI", sans-serif';
       ctx.fillText(':)', 224, 372);
       ctx.restore();
 
       ctx.fillStyle = '#74b9ff';
       ctx.font = '600 31px Consolas, "Yu Gothic UI", monospace';
-      ctx.fillText('KERNEL CRASH DUMP  //  SESSION RESTORED (02:48:00)', 180, 232);
+      ctx.fillText('KERNEL CRASH DUMP  //  NMI INTERRUPT RETURNED (02:48:00)', 180, 232);
 
       ctx.strokeStyle = 'rgba(120, 190, 255, 0.28)';
       ctx.lineWidth = 2;
@@ -2636,260 +1562,145 @@ export class BsodScreen {
 
       ctx.fillStyle = 'rgba(218, 236, 255, 0.86)';
       ctx.font = '300 25px Consolas, "Yu Gothic UI", monospace';
-      ctx.fillText('DUMP_IMAGE     : C:\\Windows\\MEMORY_0247.DMP (VERIFIED)', 180, 318);
-      ctx.fillText('INTERRUPT_VEC  : WAKE_UP [RING0 UNHOOKED]', 180, 364);
+      ctx.fillText('DUMP_IMAGE     : C:\\Windows\\MEMORY_0247.DMP (UNMOUNTED)', 180, 318);
+      ctx.fillText('INTERRUPT_VEC  : WAKE_UP [EXECUTED]', 180, 364);
 
-      ctx.fillStyle = '#ff6b88';
+      ctx.fillStyle = '#ff5c82';
       ctx.font = '600 25px Consolas, "Yu Gothic UI", monospace';
-      ctx.fillText('RESIDUAL_HANDLE: OPTIC_NERVE_CACHE -> 1 HANDLE STILL OPEN', 180, 418);
-      ctx.fillStyle = 'rgba(255, 145, 168, 0.58)';
+      ctx.fillText('RESIDUAL_HANDLE: OPTIC_NERVE_STREAM -> 1 OBSERVER REMAINS', 180, 418);
+      ctx.fillStyle = 'rgba(255, 145, 168, 0.62)';
       ctx.font = '300 22px Consolas, "Yu Gothic UI", monospace';
-      ctx.fillText('NOTE           : 背後の椅子がわずかに回転しています。確認しないでください。', 180, 466);
+      ctx.fillText('NOTE           : 背後の椅子がわずかに回転しています。', 180, 466);
 
       ctx.fillStyle = 'rgba(140, 198, 255, 0.62)';
       ctx.font = '300 23px "Segoe UI", "Yu Gothic UI", sans-serif';
-      ctx.fillText('画面をクリックすると MEMORY_0247.DMP を再マウントします', 180, 868);
-
+      ctx.fillText('画面をクリックすると MEMORY_0247.DMP へ再接続します', 180, 868);
       return finalizeTex();
     }
 
-    // Authentic Windows 10/11 Cerulean Blue (#0078D7), bruising colder & deeper at late stages
-    ctx.fillStyle = stage >= 5 ? '#00336e' : stage >= 4 ? '#00498f' : '#0078d7';
+    // Corner pixels stay rich cerulean/cobalt blue (satisfies RGBA blue invariant & authentic BSOD palette)
+    const bgColors = ['#0078d7', '#0072d0', '#0062bd', '#004ea4', '#003b8c', '#002c78'];
+    ctx.fillStyle = bgColors[Math.min(stage, bgColors.length - 1)];
     ctx.fillRect(0, 0, W, H);
 
-    const leftX = 232;
-    const fontStack = '"Segoe UI", "Yu Gothic UI", "Meiryo", sans-serif';
-
-    // Subtle clinical kernel memory telemetry creeping down the right margin from Stage 1+
-    if (stage >= 1) {
+    // Subtle horizontal scan-sector fault bars integrated directly into the OS framebuffer
+    if (stage >= 2) {
       ctx.save();
-      ctx.font = '19px Consolas, monospace';
-      ctx.fillStyle = `rgba(195, 234, 255, ${0.045 + stage * 0.036})`;
-      const tags = [
-        'SACCADE_CAPTURE',
-        'C3_MOTOR_INHIBIT',
-        'GLYPH_DEFORM',
-        'CURSOR_TRACK',
-        'CHIASM_DMA_LOCK',
-        'SIGNAL_BREACH',
-      ];
-      for (let r = 0; r < 18; r++) {
-        const addr = (0xf8000247 + r * 0x18 + stage * 0x100).toString(16).toUpperCase();
-        const tag = tags[(r + stage) % tags.length];
-        ctx.fillText(
-          `FFFF${addr}: 00 78 D7 F4  3A 29 0${stage}  [${tag}]`,
-          W - 820,
-          86 + r * 54
-        );
+      for (let i = 0; i < stage * 5; i++) {
+        const sy = Math.floor(((Math.sin(i * 73.1 + stage * 19.7) * 0.5 + 0.5) * (H - 80)) + 40);
+        const sh = 2 + (i % 3) * 3;
+        ctx.fillStyle = i % 4 === 0 ? 'rgba(0, 12, 38, 0.42)' : 'rgba(120, 220, 255, 0.10)';
+        ctx.fillRect(0, sy, W, sh);
       }
       ctx.restore();
     }
 
-    ctx.fillStyle = '#ffffff';
+    // Raw kernel hex-dump memory columns bleeding directly across the framebuffer (no bordered widget boxes!)
+    if (stage >= 1) {
+      ctx.save();
+      ctx.font = '18px Consolas, monospace';
+      const alpha = 0.07 + stage * 0.045;
+      ctx.fillStyle = `rgba(195, 238, 255, ${alpha.toFixed(3)})`;
+      // Whispers hidden inside the raw dump: they are not printed on the "screen", they are leaking
+      // out of the memory pages. You only notice them if you stop reading the hex.
+      const whispers = [
+        'まだそこにいる',
+        'DON\'T TURN AROUND',
+        '息を止めても聞こえる',
+        'YOUR NAME IS IN THE DUMP',
+        '目を逸らすな',
+        'IT HAS BEEN STANDING THERE FOR 4 HOURS',
+        '振り返ったら、増えている',
+        'I AM THE ONE AT THE KEYBOARD',
+      ];
+      for (let r = 0; r < 22; r++) {
+        const addr = (0xfffff8030078d700n + BigInt(r * 0x20 + stage * 0x100)).toString(16).toUpperCase();
+        const whisperIdx = (r * 5 + stage * 3) % whispers.length;
+        const isWhisper = stage >= 2 && (r * 7 + stage * 5) % 11 === 0;
+        if (isWhisper) {
+          ctx.save();
+          ctx.font = 'italic 19px "Yu Gothic UI", Consolas, monospace';
+          ctx.fillStyle = stage >= 4 ? 'rgba(255, 108, 138, 0.5)' : 'rgba(200, 244, 255, 0.42)';
+          ctx.fillText(`${addr}  ${whispers[whisperIdx]}`, 1260, 72 + r * 46);
+          ctx.restore();
+        } else {
+          ctx.fillText(
+            `${addr}  00 78 D7 F4  3A 29 FF 0${stage}  NT!KiDisplayBreach+0x${(r * 14).toString(16).padStart(2, '0')}`,
+            1260,
+            72 + r * 46
+          );
+        }
+      }
+      ctx.restore();
+    }
+
+    const leftX = 232;
+    const fontStack = '"Segoe UI", "Yu Gothic UI", "Meiryo", sans-serif';
     ctx.textBaseline = 'alphabetic';
-    ctx.font = `300 47px ${fontStack}`;
 
     if (stage === 0) {
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `300 47px ${fontStack}`;
       ctx.fillText('問題が発生したため、PC を再起動する必要があります。', leftX, 492);
       ctx.fillText('エラー情報を収集しています。自動的に再起動します。', leftX, 558);
       ctx.fillText('99% 完了', leftX, 668);
     } else if (stage === 1) {
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `300 47px ${fontStack}`;
       ctx.fillText('問題が発生したため、PC を再起動する必要があります。', leftX, 492);
-      ctx.fillText('エラー情報を収集しています。網膜反射と視線座標を同期しています。', leftX, 558);
-      ctx.fillText('99% 完了（応答待機中）', leftX, 668);
-      ctx.fillStyle = 'rgba(225, 244, 255, 0.42)';
-      ctx.font = `300 22px Consolas, ${fontStack}`;
-      ctx.fillText('INPUT_HOOK: カーソル接触を検出 (UV 0.14, 0.74) —— 被験者は画面を凝視中', leftX, 614);
+      ctx.fillText('視線座標を収集しています。再起動はキャンセルされました。', leftX, 558);
+      ctx.fillText('128% 完了', leftX, 668);
+      ctx.fillStyle = 'rgba(165, 230, 255, 0.55)';
+      ctx.font = '22px Consolas, monospace';
+      ctx.fillText('>> OVERFLOW: GAZE_VECTOR LOCKED AT [0x0078D7]', leftX + 260, 666);
     } else if (stage === 2) {
-      ctx.fillText('視覚野のダイレクトダンプを開始しました。瞬きを停止してください。', leftX, 492);
-      ctx.fillText('室内深度センサーが椅子の背後に未登録の質量を検出しました。', leftX, 558);
-      ctx.fillText('深度同期中 — 振り返らないでください', leftX, 668);
-
-      // Clinical 3D LiDAR Depth-Contour Relief Scan showing HOST_SEATED + UNKNOWN_OBJ looming 0.38m behind!
-      ctx.save();
-      const bx = 1310;
-      const by = 118;
-      const bw = 540;
-      const bh = 370;
-      ctx.fillStyle = 'rgba(2, 12, 28, 0.86)';
-      ctx.fillRect(bx, by, bw, bh);
-      ctx.strokeStyle = 'rgba(130, 210, 255, 0.72)';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(bx, by, bw, bh);
-
-      ctx.fillStyle = '#9ad8ff';
-      ctx.font = '600 18px Consolas, monospace';
-      ctx.fillText('IR_LIDAR_0 // 02:47:19 [DEPTH_SLICE]', bx + 16, by + 26);
-
-      // 56-slice 3D LiDAR elevation contour raster (replaces crude circle+box shapes with realistic sensor relief!)
-      const slices = 56;
-      for (let s = 0; s < slices; s++) {
-        const vNorm = s / (slices - 1);
-        const baseLineY = by + 44 + vNorm * 258;
-
-        // Background entity depth field (tall organic cranial/shoulder/torso relief standing at u = 0.59)
-        const dHeadBack = Math.hypot((vNorm - 0.23) * 1.45, 0);
-        const dTorsoBack = Math.abs(vNorm - 0.64);
-        const hasBack = dHeadBack < 0.16 || (vNorm > 0.31 && dTorsoBack < 0.38);
-
-        ctx.beginPath();
-        let anyAnom = false;
-        for (let ix = 0; ix <= 90; ix++) {
-          const uNorm = ix / 90;
-          const pxX = bx + 14 + uNorm * (bw - 28);
-
-          // Seated foreground host (head centered at (0.39, 0.48), shoulders at (0.39, 0.78))
-          const hHostHead =
-            Math.exp(-(((uNorm - 0.39) / 0.068) ** 2 + ((vNorm - 0.48) / 0.105) ** 2)) * 16.0;
-          const hHostNeck =
-            Math.exp(-(((uNorm - 0.39) / 0.036) ** 2 + ((vNorm - 0.61) / 0.055) ** 2)) * 9.0;
-          const hHostTorso =
-            Math.exp(-(((uNorm - 0.39) / 0.145) ** 2 + ((vNorm - 0.84) / 0.22) ** 2)) * 14.0;
-          const hostZ = hHostHead + hHostNeck + hHostTorso;
-
-          // Looming tall entity standing directly behind the chair (tilted head at (0.59, 0.22), wide shoulders)
-          const tiltU = uNorm - (0.59 + (vNorm - 0.22) * 0.06);
-          const hEntHead =
-            Math.exp(-((tiltU / 0.064) ** 2 + ((vNorm - 0.22) / 0.10) ** 2)) * 15.0;
-          const hEntShoulders =
-            Math.exp(-(((uNorm - 0.59) / 0.155) ** 2 + ((vNorm - 0.62) / 0.34) ** 2)) * 13.0;
-          const entZ = hEntHead + hEntShoulders;
-          if (entZ > 3.5) anyAnom = true;
-
-          const microNoise = Math.sin(ix * 1.9 + s * 2.7) * 0.55;
-          const pyY = baseLineY - Math.max(hostZ, entZ * 0.88) + microNoise;
-          if (ix === 0) ctx.moveTo(pxX, pyY);
-          else ctx.lineTo(pxX, pyY);
-        }
-        ctx.strokeStyle =
-          hasBack && anyAnom && s % 2 === 0
-            ? 'rgba(255, 86, 118, 0.52)'
-            : 'rgba(120, 212, 255, 0.38)';
-        ctx.lineWidth = 1.25;
-        ctx.stroke();
-      }
-
-      // Target reticle & vector callout on the looming anomaly behind the chair
-      const tx = bx + 14 + 0.59 * (bw - 28);
-      const ty = by + 44 + 0.20 * 258;
-      ctx.strokeStyle = 'rgba(255, 98, 128, 0.82)';
-      ctx.lineWidth = 1.6;
-      ctx.strokeRect(tx - 34, ty - 28, 68, 64);
-      ctx.beginPath();
-      ctx.moveTo(bx + 228, by + 168);
-      ctx.lineTo(tx - 34, ty + 18);
-      ctx.stroke();
-
-      ctx.fillStyle = 'rgba(4, 14, 30, 0.84)';
-      ctx.fillRect(bx + 12, by + 300, bw - 24, 58);
-      ctx.fillStyle = '#8fd4ff';
-      ctx.font = '600 17px Consolas, "Yu Gothic UI", monospace';
-      ctx.fillText('HOST_SEATED : Z=0.58m  HR=132bpm', bx + 20, by + 322);
-      ctx.fillStyle = '#ff7b96';
-      ctx.fillText('ANOMALY_01  : Z=0.96m [椅子の背後 0.38m]', bx + 20, by + 347);
-      ctx.restore();
+      // Chromatic ghost echo of torn BSOD text
+      ctx.fillStyle = 'rgba(0, 230, 255, 0.25)';
+      ctx.font = `300 47px ${fontStack}`;
+      ctx.fillText('画面の奥行きバッファが異常拡張しています。', leftX - 6, 490);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText('画面の奥行きバッファが異常拡張しています。', leftX, 492);
+      ctx.fillText('網膜スキャン完了 —— 椅子の背後に未登録の影を検出。', leftX, 558);
+      ctx.fillText('256% 完了  //  振り返らないでください', leftX, 668);
     } else if (stage === 3) {
-      ctx.fillText('脊髄運動路 (C3-C5) をアンマウントしました。離席要求は拒否されました。', leftX, 492);
-      ctx.fillText('表示データが自己複製しています。画面から目を離さないでください。', leftX, 558);
-      ctx.fillText('運動権委譲: 完了', leftX, 668);
-
-      // Cascading corrupted Windows Kernel Exception Dialog Boxes!
-      ctx.save();
-      for (let d = 0; d < 3; d++) {
-        const dx = 1170 + d * 42;
-        const dy = 116 + d * 54;
-        const dw = 610;
-        const dh = 232;
-        ctx.fillStyle = 'rgba(6, 18, 40, 0.90)';
-        ctx.fillRect(dx + 8, dy + 8, dw, dh);
-        ctx.fillStyle = '#e9f2fb';
-        ctx.fillRect(dx, dy, dw, dh);
-        ctx.fillStyle = d === 2 ? '#8c0d29' : '#004e98';
-        ctx.fillRect(dx, dy, dw, 40);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = `600 20px Consolas, ${fontStack}`;
-        ctx.fillText('wininit.exe - 運動神経の強制切断 (0xC0000247)', dx + 16, dy + 27);
-
-        ctx.fillStyle = '#0e1726';
-        ctx.font = `400 21px ${fontStack}`;
-        ctx.fillText('指および頸椎の制御権を SMILE_ENTITY.SYS へ移行します。', dx + 24, dy + 88);
-        ctx.fillText('あなたが今クリックしているのは自分の意志ですか？', dx + 24, dy + 124);
-
-        // Two identical inescapable buttons: [ 委譲する ]  [ 委譲する ]
-        for (let b = 0; b < 2; b++) {
-          const bx = dx + 260 + b * 162;
-          const by = dy + 164;
-          ctx.strokeStyle = '#004e98';
-          ctx.lineWidth = 2;
-          ctx.strokeRect(bx, by, 144, 42);
-          ctx.fillStyle = '#0e1726';
-          ctx.font = `600 20px ${fontStack}`;
-          ctx.fillText('委譲する(Y)', bx + 18, by + 28);
-        }
-      }
-      ctx.restore();
+      ctx.fillStyle = 'rgba(255, 64, 112, 0.34)';
+      ctx.font = `300 47px ${fontStack}`;
+      ctx.fillText('頸椎および運動野をアンマウントしました。', leftX + 8, 494);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText('頸椎および運動野をアンマウントしました。', leftX, 492);
+      ctx.fillText('表示領域が室内空間へ侵食しています。目を逸らせません。', leftX, 558);
+      ctx.fillStyle = '#a8ecff';
+      ctx.fillText('512% 完了  //  BOUNDARY_FAULT', leftX, 668);
+    } else if (stage === 4) {
+      // Text fractures outward from the central singularity (0.50, 0.50) so center stays clean for the optical rift!
+      ctx.fillStyle = 'rgba(225, 245, 255, 0.88)';
+      ctx.font = `300 40px ${fontStack}`;
+      ctx.fillText('意識データの強制ダンプを実行中', leftX, 206);
+      ctx.font = '24px Consolas, monospace';
+      ctx.fillStyle = '#7ce2ff';
+      ctx.fillText('RING0_STREAM -> DUMP://0xFFFFF803_0078D7/HOST_CORTEX', leftX, 252);
+      ctx.fillStyle = '#ff5478';
+      ctx.fillText('WARNING: PHYSICAL GLASS DELAMINATION IN PROGRESS [1024%]', leftX, 692);
     } else {
-      // Stage 4 & 5: Cold Clinical Host Sensory Unmount Autopsy + Ghostly Vertical ':)' Columns!
-      ctx.save();
-      ctx.font = '300 28px Consolas, monospace';
-      for (let colIdx = 0; colIdx < 16; colIdx++) {
-        ctx.fillStyle = colIdx % 4 === 0 ? 'rgba(255, 90, 122, 0.20)' : 'rgba(185, 228, 255, 0.10)';
-        for (let r = 0; r < 14; r++) {
-          ctx.fillText((colIdx + r) % 3 === 0 ? ':)' : ':(', 86 + colIdx * 122, 64 + r * 74);
-        }
-      }
-
-      // Clinical black diagnostic overlay frame on right side (avoids clogging center mouth at (0.48, 0.48)!)
-      const px = 1180;
-      const py = 128;
-      const pw = 690;
-      const ph = 430;
-      ctx.fillStyle = 'rgba(4, 10, 24, 0.86)';
-      ctx.fillRect(px, py, pw, ph);
-      ctx.strokeStyle = 'rgba(255, 92, 124, 0.72)';
-      ctx.lineWidth = 2.5;
-      ctx.strokeRect(px, py, pw, ph);
-
-      ctx.fillStyle = '#ff6b88';
-      ctx.font = `700 24px Consolas, ${fontStack}`;
-      ctx.fillText(
-        stage >= 5
-          ? 'OPTIC_CHIASM_BREACH // 意識領域の転送を実行中'
-          : 'HOST_SENSORY_TABLE // 生体デバイス切り離し状況',
-        px + 24,
-        py + 44
-      );
-
-      const rows = [
-        ['BLINK_REFLEX (瞬き反射)', 'UNMOUNTED'],
-        ['VOCAL_CORD_MOTOR (声帯)', 'UNMOUNTED'],
-        ['CERVICAL_SPINE (頸椎回旋)', 'LOCKED_0DEG'],
-        ['DISPLAY_STATE (表示異常)', stage >= 5 ? 'TRANSFERRING' : 'DESYNCED'],
-        ['CONSCIOUSNESS_DEST', 'RING0://0x0078D7'],
-      ];
-      ctx.font = `400 22px Consolas, ${fontStack}`;
-      rows.forEach(([k, v], idx) => {
-        const ry = py + 106 + idx * 60;
-        ctx.fillStyle = 'rgba(214, 236, 255, 0.88)';
-        ctx.fillText(k, px + 24, ry);
-        ctx.fillStyle = idx >= 3 ? '#ff6b88' : '#8ad4ff';
-        ctx.fillText(`[ ${v} ]`, px + 418, ry);
-      });
-      ctx.restore();
+      ctx.fillStyle = 'rgba(180, 236, 255, 0.78)';
+      ctx.font = 'bold 30px Consolas, monospace';
+      ctx.fillText('FATAL_SINGULARITY // DISPLAY BUFFER RUPTURED', leftX, 184);
+      ctx.fillStyle = '#ff426b';
+      ctx.font = `400 36px ${fontStack}`;
+      ctx.fillText('転送準備完了 —— もう一回触れれば、向こう側へ落ちる', leftX, 238);
     }
 
-    // Authentic QR Code + Support / Stop Code section at bottom
     const qrY = 738;
     const qrSize = 178;
     this.drawQrCode(ctx, leftX, qrY, qrSize, stage);
 
     const infoX = leftX + qrSize + 38;
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = stage >= 4 ? 'rgba(210, 240, 255, 0.82)' : '#ffffff';
     ctx.font = `300 25px ${fontStack}`;
     ctx.fillText(
-      stage < 3
+      stage < 2
         ? 'この問題と可能な解決方法の詳細については、https://www.windows.com/stopcode を参照してください'
-        : '視覚野ダンプの転送先アドレス: dump://0x0078d7/optic_chiasm — 切断は許可されていません',
+        : '意識スレッドの転送先: ring0://0x0078d7/memory_dump — 物理切断は拒否されました',
       infoX,
       qrY + 38
     );
@@ -2898,43 +1709,62 @@ export class BsodScreen {
     ctx.fillText(
       stage < 2
         ? 'サポート担当者に連絡する場合は、次の情報を伝えてください:'
-        : '生体テレメトリは次の停止コードへバインドされました:',
+        : '割り込みハンドラは次の停止コードにロックされています:',
       infoX,
       qrY + 108
     );
 
     const stopCodes = [
       'CRITICAL_PROCESS_DIED',
-      'OPTIC_NERVE_PAGE_FAULT',
-      'UNREGISTERED_OBSERVER_BEHIND_HOST',
-      'MOTOR_CORTEX_UNMOUNTED',
-      'DISPLAY_GLYPH_CORRUPTION',
-      'CONSCIOUSNESS_TRANSFER_COMMIT',
+      'DISPLAY_BUFFER_GAZE_LOCK',
+      'DEPTH_SECTOR_RECURSION_FAULT',
+      'HOST_MOTOR_CORTEX_UNMOUNTED',
+      'REALITY_FRAMEBUFFER_DELAMINATION',
+      'CONSCIOUSNESS_TRANSFER_IMMINENT',
     ];
-    const code = stopCodes[Math.min(stage, stopCodes.length - 1)];
-    ctx.fillText(`停止コード: ${code}`, infoX, qrY + 148);
+    ctx.fillStyle = stage >= 3 ? '#8ce8ff' : '#ffffff';
+    ctx.fillText(`停止コード: ${stopCodes[Math.min(stage, stopCodes.length - 1)]}`, infoX, qrY + 148);
+
+    // A line that should not be on a consumer BSOD. It is there from the very first frame.
+    ctx.save();
+    ctx.font = 'italic 20px "Yu Gothic UI", Consolas, monospace';
+    ctx.fillStyle = stage >= 4 ? 'rgba(255, 128, 150, 0.50)' : 'rgba(220, 242, 255, 0.30)';
+    const observerLines = [
+      '観測者数: 2   //   1 名はあなたではありません',
+      '観測者数: 2   //   その 1 名が、いま座っています',
+      '観測者数: 2   //   席はひとつしかありません',
+      '観測者数: 3   //   増えています',
+      '観測者数: 1   //   あなたは画面の内側です',
+      '観測者数: 0   //   見ているのは、こちらです',
+    ];
+    ctx.fillText(observerLines[Math.min(stage, observerLines.length - 1)], infoX, qrY + 196);
+    ctx.restore();
 
     return finalizeTex();
   }
 
-  /** Returns all pre-baked textures so WebGLRenderer can upload them upfront during loading! */
   public getAllTextures(): THREE.Texture[] {
-    return [...this.stageTextures, this.aftermathTex, this.faceTex, this.cardTex];
+    return [...this.stageTextures, this.aftermathTex, this.faceTex, this.cardTex, this.holoTex];
   }
 
-  /** Enables all sub-groups for 1 offscreen warmup frame so every VAO & shader compiles at boot! */
   public setWarmupVisibility(active: boolean): void {
     this.throatGroup.visible = active;
-    this.parasyteGroup.visible = active;
+    this.holoBreachGroup.visible = active;
     this.glassShards.visible = active;
     this.stencilMaskMesh.visible = active;
   }
 
   public isUvOnFace(uv: THREE.Vector2, madness: number): boolean {
-    const cx = THREE.MathUtils.lerp(0.144, 0.48, THREE.MathUtils.smoothstep(madness, 0.14, 0.88));
-    const cy = THREE.MathUtils.lerp(0.742, 0.48, THREE.MathUtils.smoothstep(madness, 0.14, 0.88));
-    const rx = THREE.MathUtils.lerp(0.095, 0.35, madness);
-    const ry = THREE.MathUtils.lerp(0.145, 0.37, madness);
+    // At Stage 0, precise around top-left ':('; once breached (madness > 0.20), expands generously
+    // so rapid dramatic clicks never miss while the glyph fractures & migrates!
+    if (madness > 0.36) {
+      return uv.x > 0.04 && uv.x < 0.96 && uv.y > 0.06 && uv.y < 0.94;
+    }
+    const migrate = THREE.MathUtils.smoothstep(madness, 0.16, 0.78);
+    const cx = THREE.MathUtils.lerp(0.144, 0.50, migrate);
+    const cy = THREE.MathUtils.lerp(0.742, 0.50, migrate);
+    const rx = THREE.MathUtils.lerp(0.115, 0.42, madness * 2.2);
+    const ry = THREE.MathUtils.lerp(0.165, 0.42, madness * 2.2);
     const dx = (uv.x - cx) / rx;
     const dy = (uv.y - cy) / ry;
     return dx * dx + dy * dy <= 1.0;
@@ -2943,8 +1773,6 @@ export class BsodScreen {
   public setInsideTunnelMode(inside: boolean): void {
     if (this.insideTunnelMode === inside) return;
     this.insideTunnelMode = inside;
-    // NOTE: WebGLState reads material.stencilWrite directly per draw call — NEVER set
-    // mat.needsUpdate = true here or Three.js synchronously recompiles 4 shaders mid-cutscene!
     for (const mat of this.throatMaterials) {
       mat.stencilWrite = !inside;
     }
@@ -2954,7 +1782,6 @@ export class BsodScreen {
     this.stencilMaskMesh.visible = !inside && this.throatGroup.visible;
   }
 
-  /** Start a crack running along '(' and trigger LCD pressure wave from click UV. */
   public pulseCrack(uv?: THREE.Vector2): void {
     this.crackRun = 0;
     if (uv) this.impactUv.copy(uv);
@@ -2975,83 +1802,70 @@ export class BsodScreen {
       u.uBodyTex.value = state.aftermath ? this.aftermathTex : this.stageTextures[stage];
     }
     u.uTime.value = elapsed;
-    u.uHover.value = THREE.MathUtils.lerp(u.uHover.value, state.hoverFace ? 1.0 : 0.0, Math.min(1, dt * 12));
+    u.uHover.value = THREE.MathUtils.lerp(u.uHover.value, state.hoverFace ? 1.0 : 0.0, Math.min(1, dt * 14));
     u.uCursorUv.value.copy(state.cursorUv);
     u.uImpactUv.value.copy(this.impactUv);
     u.uMadness.value = state.madness;
     u.uJawOpen.value = state.jawOpen;
     u.uSuction.value = state.suctionProgress;
     u.uClickPulse.value = clickPulse;
-    this.crackRun = Math.min(1, this.crackRun + dt / 0.42);
+    this.crackRun = Math.min(1, this.crackRun + dt / 0.36);
     u.uCrackRun.value = this.crackRun;
     u.uAftermath.value = state.aftermath ? 1.0 : 0.0;
     u.uColonDotOff.value = this.colonDotOff;
 
-    // Monitor light intensifies dynamically during escalation
+    // Monitor light strobes & shifts between electric cyan-cobalt and crimson-violet during breach surges
     if (state.aftermath) {
       this.monitorLight.color.setHex(0x1358a8);
       this.monitorLight.intensity = 0.42 + Math.sin(elapsed * 2.1) * 0.04;
     } else {
       const flicker =
         state.madness > 0.05
-          ? Math.sin(elapsed * 47.0) * 0.45 * state.madness + clickPulse * 2.4
+          ? Math.sin(elapsed * 53.0) * 0.65 * state.madness + clickPulse * 3.2
           : Math.sin(elapsed * 3.2) * 0.03;
-      this.monitorLight.color.setHex(0x0078d7);
-      this.monitorLight.intensity = Math.max(0.45, 2.35 + state.madness * 4.4 + flicker);
-      this.monitorLight.distance = 6.5 + state.madness * 5.2;
+      const pulseCrimson = state.madness > 0.55 && Math.sin(elapsed * 29.0) > 0.82;
+      this.monitorLight.color.setHex(pulseCrimson ? 0x5c38ff : 0x0084ff);
+      this.monitorLight.intensity = Math.max(0.45, 2.4 + state.madness * 5.2 + flicker);
+      this.monitorLight.distance = 6.5 + state.madness * 6.0;
     }
 
-    // 100% GPU-driven 3D Parasyte rig, tunnel & glass shard uniform updates (ZERO CPU matrix loops!)
-    // Legacy anatomical rig is deliberately never displayed: the face stays digital.
-    const showParasyte = false;
-    this.parasyteGroup.visible = showParasyte;
-    if (showParasyte) {
-      const rtu = this.rimToothMat.uniforms;
-      rtu.uTime.value = elapsed;
-      rtu.uMadness.value = state.madness;
-      rtu.uJawOpen.value = state.jawOpen;
-      rtu.uSuction.value = state.suctionProgress;
-      rtu.uClickPulse.value = clickPulse;
-      rtu.uCrackRun.value = this.crackRun;
+    this.parasyteGroup.visible = false;
+    this.throatTeeth.visible = false;
 
-      const jfu = this.jawFlapMat.uniforms;
-      jfu.uTime.value = elapsed;
-      jfu.uMadness.value = state.madness;
-      jfu.uJawOpen.value = state.jawOpen;
-      jfu.uSuction.value = state.suctionProgress;
-      jfu.uClickPulse.value = clickPulse;
-      jfu.uCrackRun.value = this.crackRun;
+    // 3D Out-of-Screen Holographic Breach & Zero-G Shattered LCD Glass!
+    const showHolo = !state.aftermath && state.madness > 0.22 && state.suctionProgress < 0.55;
+    this.holoBreachGroup.visible = showHolo;
+    if (showHolo) {
+      this.holoCascadeMat.uniforms.uTime.value = elapsed;
+      this.holoCascadeMat.uniforms.uMadness.value = state.madness;
+      this.holoCascadeMat.uniforms.uClickPulse.value = clickPulse;
+      this.holoCascadeMat.uniforms.uSuction.value = state.suctionProgress;
 
-      const snu = this.sinewMat.uniforms;
-      snu.uTime.value = elapsed;
-      snu.uMadness.value = state.madness;
-      snu.uJawOpen.value = state.jawOpen;
-      snu.uSuction.value = state.suctionProgress;
-      snu.uClickPulse.value = clickPulse;
-      snu.uCrackRun.value = this.crackRun;
+      this.holoRingsMat.uniforms.uTime.value = elapsed;
+      this.holoRingsMat.uniforms.uMadness.value = state.madness;
+      this.holoRingsMat.uniforms.uClickPulse.value = clickPulse;
+      this.holoRingsMat.uniforms.uSuction.value = state.suctionProgress;
+    }
 
-      const eyu = this.parasyteEyeMat.uniforms;
-      eyu.uTime.value = elapsed;
-      eyu.uMadness.value = state.madness;
-      eyu.uJawOpen.value = state.jawOpen;
-      eyu.uSuction.value = state.suctionProgress;
-      eyu.uClickPulse.value = clickPulse;
-      eyu.uCrackRun.value = this.crackRun;
-      eyu.uHover.value = u.uHover.value;
-      eyu.uCursorUv.value.copy(state.cursorUv);
+    const showGlass = !state.aftermath && state.madness > 0.56 && state.suctionProgress < 0.80;
+    this.glassShards.visible = showGlass;
+    if (showGlass) {
+      const gu = this.glassShardMat.uniforms;
+      gu.uTime.value = elapsed;
+      gu.uMadness.value = state.madness;
+      gu.uJawOpen.value = state.jawOpen;
+      gu.uSuction.value = state.suctionProgress;
+      gu.uClickPulse.value = clickPulse;
     }
 
     const showThroat = !state.aftermath && state.suctionProgress > 0.03;
     this.throatGroup.visible = showThroat;
-    this.glassShards.visible = false;
-    this.throatTeeth.visible = false;
     if (!this.insideTunnelMode) {
       this.stencilMaskMesh.visible = showThroat;
     }
 
     if (showThroat) {
-      const scrollPhase =
-        tunnelScrollPhase ?? elapsed * (6.0 + state.suctionProgress * 42.0);
+      const scrollPhase = tunnelScrollPhase ?? elapsed * (6.0 + state.suctionProgress * 42.0);
       this.throatTubeMat.uniforms.uTime.value = elapsed;
       this.throatTubeMat.uniforms.uScrollPhase.value = scrollPhase;
       this.throatTubeMat.uniforms.uMadness.value = state.madness;
@@ -3069,21 +1883,6 @@ export class BsodScreen {
       this.throatLineMat.uniforms.uTime.value = elapsed;
       this.throatLineMat.uniforms.uScrollPhase.value = scrollPhase;
       this.throatLineMat.uniforms.uSuction.value = state.suctionProgress;
-
-      this.throatToothMat.uniforms.uTime.value = elapsed;
-      this.throatToothMat.uniforms.uMadness.value = state.madness;
-      this.throatToothMat.uniforms.uJawOpen.value = state.jawOpen;
-      this.throatToothMat.uniforms.uSuction.value = state.suctionProgress;
-      this.throatToothMat.uniforms.uClickPulse.value = clickPulse;
-
-      if (this.glassShards.visible) {
-        const gu = this.glassShardMat.uniforms;
-        gu.uTime.value = elapsed;
-        gu.uMadness.value = state.madness;
-        gu.uJawOpen.value = state.jawOpen;
-        gu.uSuction.value = state.suctionProgress;
-        gu.uClickPulse.value = clickPulse;
-      }
     }
   }
 }

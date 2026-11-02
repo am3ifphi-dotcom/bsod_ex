@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { toFastLambert } from './BedroomScene';
 import { getSharedNoiseTexture } from '../utils/ProceduralNoise';
 
@@ -82,9 +83,14 @@ export class GlitchWorld {
   private skyTunnelMat!: THREE.ShaderMaterial;
   private skyExitStreamMat!: THREE.ShaderMaterial;
   private causewayBusMat!: THREE.ShaderMaterial;
+  private causewayBusTrenchZ: number[] = [];
   private floatingShardMat!: THREE.ShaderMaterial;
   private landingShockMat!: THREE.ShaderMaterial;
   private landingShockTimer = 99.0;
+  private arrivalFractureMat!: THREE.ShaderMaterial;
+  private arrivalDebrisMat!: THREE.ShaderMaterial;
+  private arrivalPillarMat!: THREE.ShaderMaterial;
+  private arrivalImpactTimer = 99.0;
   private crtGlassMat!: THREE.ShaderMaterial;
   private floatingShards!: THREE.InstancedMesh;
   private dustPoints!: THREE.Points;
@@ -100,21 +106,35 @@ export class GlitchWorld {
   private skyDebris!: THREE.Group;
   private spireMat!: THREE.ShaderMaterial;
   private lanternMat!: THREE.ShaderMaterial;
+  private craftMetalMat: THREE.ShaderMaterial | null = null;
+  private chapelStoneMat: THREE.ShaderMaterial | null = null;
+  private craftLedMat: THREE.ShaderMaterial | null = null;
   private monolithMat!: THREE.ShaderMaterial;
 
-  // Central WAKE_UP glyph plates & Gyroscopic Sanctuary Rings!
-  private readonly wakePlates: Array<{
-    mesh: THREE.Mesh;
-    alignedPos: THREE.Vector3;
-    scatteredPos: THREE.Vector3;
-    scatteredRot: THREE.Euler;
-  }> = [];
+  // Central Sheared Singularity Spire, Corrupted Mega-Remnants & Global 3D LIDAR Scan Wave!
   private readonly gyroRings: THREE.Mesh[] = [];
   private coreBeamMat!: THREE.ShaderMaterial;
-  private corePlaqueMat!: THREE.MeshBasicMaterial;
+  private singularitySpireMat!: THREE.ShaderMaterial;
+  private singularityConduitMat!: THREE.ShaderMaterial;
+  private corruptedRemnantMat!: THREE.ShaderMaterial;
+  private skyMonumentMat!: THREE.ShaderMaterial;
+  private spireVortexMat!: THREE.ShaderMaterial;
+  private brokenHaloGroup!: THREE.Group;
+  private invertedCathedralGroup!: THREE.Group;
+  private smearEchoMat!: THREE.ShaderMaterial;
+  private cyberTrunkMat!: THREE.ShaderMaterial;
+  private readonly scanWaveOrigin = new THREE.Vector3(0, 0, 32);
+  private scanWaveRadius = -1.0;
   public coreSecretRevealed = false;
   private phantomMat!: THREE.ShaderMaterial;
   private phantomMesh!: THREE.InstancedMesh;
+
+  // Living thunderstorm: sky-fracture lightning strikes with a matching thunder callback.
+  public onLightningStrike?: (intensity: number, distanceSec: number) => void;
+  private stormTimer = 4.5;
+  private stormFlash = 0;
+  private stormFlashAge = 99;
+  private stormIntensity = 0.7;
 
   // Periodic Silence vs Anomaly pacing
   private anomalyTimer = 7.5;
@@ -261,8 +281,17 @@ export class GlitchWorld {
     // 3. Central Sanctuary (Colossal Cray-1 Supercomputer + Server Obelisks + WAKE_UP Secret)
     this.buildCentralSanctuary(crayGltf.scene, rackGltf.scene, cablesGltf.scene);
 
-    // 4. World Landmarks (Server Megaliths, Floating CRT Monitors, Giant Motherboards, Diegetic Clue Terminals)
+    // 4. World Landmarks (Server Megaliths, Floating CRT Monitors, Giant Motherboards)
     this.buildWorldLandmarks(rackGltf.scene, crtGltf.scene, moboGltf.scene, cablesGltf.scene);
+
+    // 4b. Colossal Corrupted Mega-Remnants (Torn 2:47 AM Bedroom Cross-Section, Severed Viaducts, 3D Smear Cascades, Cyber Bus Trunks)
+    this.buildCorruptedMegaRemnants();
+
+    // 4c. Sky-scale impossible monuments: 340m Broken Halo Crown & inverted hanging cathedral.
+    this.buildSkyMonuments();
+
+    // 4d. 220-shard orbital debris vortex spiralling up the Singularity Spire.
+    this.buildSpireVortex();
 
     // 5. Floating UI Fragments & Rising Digital Ash
     this.buildFloatingAtmosphere();
@@ -273,6 +302,14 @@ export class GlitchWorld {
 
     // 5c. Hand-placed scale & wayfinding detail (causeway lanterns, sanctuary monoliths).
     this.buildCausewayDetailAndMonoliths();
+
+    // 5c-2. Structural craft pass: riveted handrails, cable trays, junction boxes, sagging
+    // conduit, torn rebar and rubble along the whole walkable boulevard.
+    this.buildStructuralCraft();
+
+    // 5c-3. Architecture pass: gothic side chapels, a carved parapet along the walkway and two
+    // lattice gantry cranes standing behind the arcade.
+    this.buildCathedralArcadesAndGantries();
 
     // 5d. Threshold Host Effigy & Peripheral Stalking Glitch Apparitions
     this.buildHostEffigyAndPhantoms();
@@ -312,6 +349,7 @@ export class GlitchWorld {
         uTime: { value: 0 },
         uAnomaly: { value: 0 },
         uCollapse: { value: 0 },
+        uLightning: { value: 0 },
         uPlayerPos: { value: new THREE.Vector3(0, 5, 20) },
         uBandTex: { value: skyBandTex },
         uNoiseTex: { value: getSharedNoiseTexture() },
@@ -331,6 +369,7 @@ export class GlitchWorld {
         uniform float uTime;
         uniform float uAnomaly;
         uniform float uCollapse;
+        uniform float uLightning;
         uniform vec3 uPlayerPos;
         uniform sampler2D uBandTex;
         uniform sampler2D uNoiseTex;
@@ -465,13 +504,20 @@ export class GlitchWorld {
             col += vec3(0.72, 0.88, 1.0) * starOn * twinkle * 1.6;
           }
 
-          // Sky fracture lightning fissures during world collapse or heavy anomaly!
-          float skyCrackAmt = max(uCollapse, max(0.0, uAnomaly - 0.55) * 0.85);
+          // Sky fracture lightning fissures during world collapse, heavy anomaly or a live strike!
+          float skyCrackAmt = max(uCollapse, max(0.0, uAnomaly - 0.55) * 0.85) + uLightning * 1.6;
           if (skyCrackAmt > 0.01) {
             float ang = atan(dir.z, dir.x);
             float crack = smoothstep(0.028 * (1.0 + skyCrackAmt), 0.0, abs(sin(ang * 7.0 + y * 9.0 + sin(y * 23.0) * 0.6)));
+            // A real bolt silhouette: a jagged vertical channel that only exists for the flash.
+            float boltSeed = floor(uTime * 0.7);
+            float boltColumn = exp(-pow((ang - (hash(vec2(boltSeed, 3.1)) - 0.5) * 3.2) * 7.0, 2.0));
+            float boltJag = smoothstep(0.55, 1.0, sin(y * 38.0 + hash(vec2(boltSeed, 7.7)) * 30.0) * 0.5 + 0.5);
             col += vec3(0.92, 0.97, 1.0) * crack * skyCrackAmt * 1.25;
+            col += vec3(0.86, 0.94, 1.0) * boltColumn * boltJag * uLightning * 2.4;
           }
+          // Whole-vault illumination during a strike (the sky itself turns the world white).
+          col += vec3(0.52, 0.66, 0.92) * uLightning * 0.42;
 
           gl_FragColor = vec4(col, 1.0);
         }
@@ -564,6 +610,8 @@ export class GlitchWorld {
         uAnomaly: { value: 0 },
         uCollapseCenter: { value: this.collapseCenter },
         uCollapseActive: { value: 0 },
+        uScanOrigin: { value: this.scanWaveOrigin },
+        uScanRadius: { value: -1.0 },
         uFogColor: { value: new THREE.Color(0x011330) },
         uFogDensity: { value: 0.0056 },
       },
@@ -571,11 +619,26 @@ export class GlitchWorld {
         varying vec3 vWorldPos;
         varying vec3 vNormal;
         varying vec2 vUv;
+        uniform float uTime;
+        uniform float uAnomaly;
+
+        float hash21T(vec2 p) {
+          p = fract(p * vec2(127.1, 311.7));
+          p += dot(p, p + 34.23);
+          return fract(p.x * p.y);
+        }
 
         void main() {
           vUv = uv;
           vNormal = normalize(mat3(modelMatrix) * normal);
           vec4 wp = modelMatrix * vec4(position, 1.0);
+          // Subtle outer-island quantized voxel step tremor during heavy anomaly surges (keeps walkable path rock-steady!)
+          float offBridge = smoothstep(7.5, 16.0, abs(wp.x));
+          if (offBridge > 0.01 && uAnomaly > 0.05) {
+            vec2 tile = floor(wp.xz * 0.25);
+            float h = hash21T(tile + floor(uTime * 10.0) * 0.37);
+            wp.y += step(0.88 - uAnomaly * 0.22, h) * (h - 0.5) * 2.4 * uAnomaly * offBridge;
+          }
           vWorldPos = wp.xyz;
           gl_Position = projectionMatrix * viewMatrix * wp;
         }
@@ -591,8 +654,16 @@ export class GlitchWorld {
         uniform float uAnomaly;
         uniform vec3 uCollapseCenter;
         uniform float uCollapseActive;
+        uniform vec3 uScanOrigin;
+        uniform float uScanRadius;
         uniform vec3 uFogColor;
         uniform float uFogDensity;
+
+        float hash21F(vec2 p) {
+          p = fract(p * vec2(127.1, 311.7));
+          p += dot(p, p + 34.23);
+          return fract(p.x * p.y);
+        }
 
         void main() {
           if (uCollapseActive > 0.5) {
@@ -650,7 +721,6 @@ export class GlitchWorld {
           float spurWestLine = exp(-((vWorldPos.z + 28.0) * (vWorldPos.z + 28.0)) / 3.2) * step(-19.5, vWorldPos.x) * step(vWorldPos.x, 0.0);
           float pathPulse = 0.5 + 0.5 * sin(vWorldPos.z * 0.38 + uTime * 3.2);
           float spurPulse = 0.5 + 0.5 * sin(abs(vWorldPos.x) * 0.55 - uTime * 4.2);
-          float railLine = smoothstep(0.12, 0.0, abs(abs(vWorldPos.x) - 2.65)) * step(-55.0, vWorldPos.z) * step(vWorldPos.z, 22.0);
           float shoreGlow = smoothstep(0.32, 0.0, abs(vWorldPos.y - (-0.32)));
 
           vec3 accentGlow = mix(vec3(0.58, 0.88, 1.0), vec3(1.0, 0.28, 0.36), uAnomaly * 0.7);
@@ -659,9 +729,27 @@ export class GlitchWorld {
           // Arterial crimson-cyan nerve traces leading out along the East (+18.5,-8) & West (-18.5,-28) Shrine Spurs!
           col += vec3(0.95, 0.20, 0.36) * (spurEastLine + spurWestLine) * lineMajor * (0.45 + 0.55 * spurPulse);
           col *= mix(0.76, 1.0, disp);
-          col += vec3(0.25, 0.65, 1.0) * lineMinor * 0.12;
-          col += accentGlow * railLine * (0.35 + 0.50 * pathPulse);
-          col += vec3(0.45, 0.88, 1.0) * shoreGlow * 0.65;
+          col += vec3(0.25, 0.65, 1.0) * lineMinor * (0.16 + uAnomaly * 0.25);
+          col += vec3(0.45, 0.88, 1.0) * shoreGlow * 0.72;
+
+          // Live Cyber-Circuit Bus Packets & Quantized Glitch Sector Flips on the Causeway!
+          vec2 busCell = floor(vWorldPos.xz * vec2(0.5, 0.5));
+          float busHash = hash21F(busCell + floor(uTime * 12.0) * 0.19);
+          float glitchTile = step(0.965 - uAnomaly * 0.14, busHash);
+          col += mix(vec3(0.0, 0.88, 1.0), vec3(1.0, 0.14, 0.42), step(0.5, fract(busHash * 13.7))) * glitchTile * (0.28 + uAnomaly * 0.65);
+
+          // High-speed fiber-optic data packets racing down the Causeway toward the Singularity!
+          float packetLane = smoothstep(0.09, 0.0, abs(abs(vWorldPos.x) - 1.35)) * step(-56.0, vWorldPos.z) * step(vWorldPos.z, 24.0);
+          float packetPulse = pow(fract(-vWorldPos.z * 0.09 - uTime * 1.85), 8.0);
+          col += vec3(0.55, 0.96, 1.0) * packetLane * packetPulse * 1.15;
+
+          // Global 3D LIDAR Scan-Wave Ring (triggered on arrival & Console SCAN!)
+          if (uScanRadius > 0.0) {
+            float dScan = length(vWorldPos.xz - uScanOrigin.xz);
+            float scanFront = exp(-abs(dScan - uScanRadius) * 0.55) * (1.0 - smoothstep(145.0, 195.0, uScanRadius));
+            float scanTrail = smoothstep(uScanRadius - 18.0, uScanRadius, dScan) * step(dScan, uScanRadius) * (1.0 - smoothstep(145.0, 195.0, uScanRadius));
+            col += vec3(0.25, 0.95, 1.0) * scanFront * 1.35 + vec3(0.0, 0.82, 1.0) * lineMinor * scanTrail * 0.85;
+          }
 
           float camDist = length(cameraPosition - vWorldPos);
           float heightMist = exp(-max(vWorldPos.y + 1.5, 0.0) * 0.022);
@@ -694,6 +782,8 @@ export class GlitchWorld {
         uAnomaly: { value: 0 },
         uCollapseActive: { value: 0 },
         uCollapseCenter: { value: this.collapseCenter },
+        uScanOrigin: { value: this.scanWaveOrigin },
+        uScanRadius: { value: -1.0 },
       },
       vertexShader: /* glsl */ `
         varying vec3 vWorldPos;
@@ -709,6 +799,8 @@ export class GlitchWorld {
         uniform float uAnomaly;
         uniform float uCollapseActive;
         uniform vec3 uCollapseCenter;
+        uniform vec3 uScanOrigin;
+        uniform float uScanRadius;
 
         void main() {
           if (uCollapseActive > 0.5 && length(vWorldPos.xz - uCollapseCenter.xz) < 12.2) {
@@ -740,7 +832,15 @@ export class GlitchWorld {
           vec3 skyReflCol = mix(vec3(0.04, 0.40, 0.94), vec3(0.88, 0.12, 0.24), uAnomaly * 0.65);
           vec3 col = mix(abyssCol, skyReflCol, clamp(fresnel * 0.85 + 0.08, 0.0, 1.0));
           col += vec3(0.75, 0.95, 1.0) * sunSpec * 1.25;
-          col += vec3(0.25, 0.72, 1.0) * stream * 0.28;
+          col += vec3(0.25, 0.72, 1.0) * stream * 0.36;
+
+          if (uScanRadius > 0.0) {
+            float dScan = length(vWorldPos.xz - uScanOrigin.xz);
+            float scanFront = exp(-abs(dScan - uScanRadius) * 0.42) * (1.0 - smoothstep(155.0, 210.0, uScanRadius));
+            vec2 hexG = abs(fract(vWorldPos.xz * 0.5) - 0.5);
+            float scanGrid = smoothstep(0.06, 0.0, min(hexG.x, hexG.y));
+            col += vec3(0.32, 0.95, 1.0) * scanFront * (0.65 + scanGrid * 0.95);
+          }
 
           float camDist = length(cameraPosition - vWorldPos);
           vec3 viewW2 = normalize(vWorldPos - cameraPosition);
@@ -758,8 +858,19 @@ export class GlitchWorld {
     this.group.add(seaMesh);
 
     // Radial Impact Shockwave Ring on the Arrival Overlook for the Sky-Dive Landing!
-    const shockGeo = new THREE.PlaneGeometry(24, 24);
+    // The ripple is a terrain-conforming fracture sheet (NOT a floating landing platform) so the
+    // touchdown reads as the world itself cracking underfoot.
+    const shockGeo = new THREE.PlaneGeometry(30, 30, 36, 36);
     shockGeo.rotateX(-Math.PI * 0.5);
+    shockGeo.translate(0, 0, 20);
+    {
+      const sp = shockGeo.attributes.position;
+      for (let i = 0; i < sp.count; i++) {
+        sp.setY(i, this.getTerrainHeight(sp.getX(i), sp.getZ(i)) + 0.06);
+      }
+      sp.needsUpdate = true;
+      shockGeo.computeVertexNormals();
+    }
     this.landingShockMat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
@@ -788,13 +899,217 @@ export class GlitchWorld {
       `,
     });
     const shockMesh = new THREE.Mesh(shockGeo, this.landingShockMat);
-    shockMesh.position.set(0, this.spawnPosition.y + 0.08, 20);
     this.group.add(shockMesh);
+
+    this.buildArrivalImpactFX();
+  }
+
+  /**
+   * Cinematic touchdown payload: a molten fracture web that races across the terrain, a ballistic
+   * debris cone blasted out of the impact point, and a vertical column of light where reality tore.
+   * All three are driven by a single uImpactT clock so the beat is exact.
+   */
+  private buildArrivalImpactFX(): void {
+    const centerZ = 20.0;
+
+    // --- 1. Terrain-conforming molten fracture web.
+    const fracGeo = new THREE.PlaneGeometry(78, 78, 84, 84);
+    fracGeo.rotateX(-Math.PI * 0.5);
+    fracGeo.translate(0, 0, centerZ);
+    {
+      const fp = fracGeo.attributes.position;
+      for (let i = 0; i < fp.count; i++) {
+        fp.setY(i, this.getTerrainHeight(fp.getX(i), fp.getZ(i)) + 0.045);
+      }
+      fp.needsUpdate = true;
+      fracGeo.computeVertexNormals();
+    }
+    this.arrivalFractureMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uImpactT: { value: 99.0 },
+        uCenter: { value: new THREE.Vector2(0, centerZ) },
+      },
+      vertexShader: /* glsl */ `
+        varying vec3 vLocal;
+        void main() {
+          vLocal = position;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec3 vLocal;
+        uniform float uImpactT;
+        uniform vec2 uCenter;
+
+        float h21(vec2 p) {
+          vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+          p3 += dot(p3, p3.yzx + 33.33);
+          return fract((p3.x + p3.y) * p3.z);
+        }
+
+        void main() {
+          if (uImpactT > 7.0) discard;
+          vec2 d2 = vLocal.xz - uCenter;
+          float d = length(d2);
+          float ang = atan(d2.y, d2.x);
+
+          // Three concentric shock fronts, each chasing the last.
+          float front = 0.0;
+          for (int i = 0; i < 3; i++) {
+            float fi = float(i);
+            float speed = 22.0 - fi * 4.5;
+            float life = 1.0 - smoothstep(0.9 + fi * 0.35, 2.6 + fi * 0.5, uImpactT);
+            float r = uImpactT * speed;
+            float band = exp(-pow((d - r) * (0.55 + fi * 0.25), 2.0));
+            front += band * life * (1.0 - fi * 0.26);
+          }
+
+          // Molten cracks: thin radial fissures that only exist along the shock front.
+          float cell = floor((ang + 3.14159265) * 9.0);
+          float rnd = h21(vec2(cell, 4.7));
+          float spokePhase = fract((ang + 3.14159265) * 2.8647 + rnd * 0.8);
+          float spoke = smoothstep(0.16, 0.0, abs(spokePhase - 0.5)) * step(0.42, rnd);
+          float crackLife = (1.0 - smoothstep(1.4, 4.2, uImpactT));
+          float crackFall = exp(-d * 0.055) * smoothstep(0.6, 0.0, abs(d - uImpactT * 20.0) * 0.05);
+
+          // Initial ground flash under the feet.
+          float flash = exp(-d * 0.30) * exp(-uImpactT * 3.4);
+
+          vec3 hot = mix(vec3(0.30, 0.90, 1.0), vec3(1.0, 0.86, 0.72), exp(-uImpactT * 2.2));
+          vec3 col = hot * (front * 1.15 + spoke * crackLife * 0.85 + flash * 2.4);
+          float alpha = clamp(front * 0.85 + spoke * crackLife * 0.55 + flash * 0.9, 0.0, 1.0);
+          gl_FragColor = vec4(col, alpha);
+        }
+      `,
+    });
+    const fracMesh = new THREE.Mesh(fracGeo, this.arrivalFractureMat);
+    fracMesh.frustumCulled = false;
+    fracMesh.renderOrder = 3;
+    this.group.add(fracMesh);
+
+    // --- 2. Ballistic debris cone (GPU animated, zero CPU cost per frame).
+    const DEBRIS = 180;
+    const shardGeo = new THREE.TetrahedronGeometry(0.34, 0);
+    const seeds = new Float32Array(DEBRIS * 4);
+    for (let i = 0; i < DEBRIS; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const spread = 0.25 + Math.random() * 0.9;
+      seeds[i * 4 + 0] = Math.cos(a) * spread;
+      seeds[i * 4 + 1] = Math.sin(a) * spread;
+      seeds[i * 4 + 2] = 0.55 + Math.random() * 0.85;
+      seeds[i * 4 + 3] = Math.random();
+    }
+    shardGeo.setAttribute('aShard', new THREE.InstancedBufferAttribute(seeds, 4));
+    this.arrivalDebrisMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uImpactT: { value: 99.0 },
+        uOrigin: { value: new THREE.Vector3(0, this.spawnPosition.y + 0.15, centerZ) },
+      },
+      vertexShader: /* glsl */ `
+        attribute vec4 aShard;
+        uniform float uImpactT;
+        uniform vec3 uOrigin;
+        varying float vLife;
+        varying float vSeed;
+        void main() {
+          vSeed = aShard.w;
+          float t = max(0.0, uImpactT - 0.02);
+          float speed = 6.0 + aShard.z * 16.0;
+          float vy = 5.5 + aShard.z * 12.0;
+          vec3 p = uOrigin + vec3(aShard.x, 0.0, aShard.y) * speed * t;
+          p.y += vy * t - 9.8 * 0.5 * t * t;
+          // Fragments dissolve on the ground rather than sinking through it.
+          float floorY = uOrigin.y - 0.4;
+          if (p.y < floorY) p.y = floorY;
+          vLife = (1.0 - smoothstep(1.6, 3.4, uImpactT));
+          vec3 spin = vec3(t * (2.0 + aShard.w * 5.0));
+          float cs = cos(spin.x), sn = sin(spin.x);
+          vec3 local = vec3(position.x * cs - position.y * sn, position.x * sn + position.y * cs, position.z);
+          local *= 0.6 + aShard.w * 1.7;
+          gl_Position = projectionMatrix * viewMatrix * vec4(p + local, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying float vLife;
+        varying float vSeed;
+        void main() {
+          if (vLife <= 0.001) discard;
+          vec3 col = mix(vec3(0.42, 0.92, 1.0), vec3(1.0, 0.55, 0.30), step(0.7, vSeed));
+          gl_FragColor = vec4(col, vLife * (0.45 + 0.4 * vSeed));
+        }
+      `,
+    });
+    const debrisMesh = new THREE.InstancedMesh(shardGeo, this.arrivalDebrisMat, DEBRIS);
+    debrisMesh.frustumCulled = false;
+    debrisMesh.renderOrder = 4;
+    for (let i = 0; i < DEBRIS; i++) {
+      this.dummy.position.set(0, 0, 0);
+      this.dummy.rotation.set(0, 0, 0);
+      this.dummy.scale.setScalar(1);
+      this.dummy.updateMatrix();
+      debrisMesh.setMatrixAt(i, this.dummy.matrix);
+    }
+    debrisMesh.instanceMatrix.needsUpdate = true;
+    this.group.add(debrisMesh);
+
+    // --- 3. Vertical tear column where you landed.
+    const pillarGeo = new THREE.CylinderGeometry(1.15, 2.6, 52, 20, 1, true);
+    pillarGeo.translate(0, 26, 0);
+    this.arrivalPillarMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uImpactT: { value: 99.0 },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec2 vUv;
+        uniform float uImpactT;
+        void main() {
+          if (uImpactT > 2.6) discard;
+          float life = exp(-uImpactT * 2.1);
+          float vertical = pow(1.0 - vUv.y, 1.6);
+          float streaks = 0.55 + 0.45 * sin(vUv.x * 90.0 + uImpactT * 30.0);
+          float edge = pow(abs(sin(vUv.x * 3.14159)), 2.0);
+          vec3 col = mix(vec3(0.55, 0.95, 1.0), vec3(1.0, 0.80, 0.62), exp(-uImpactT * 3.0));
+          gl_FragColor = vec4(col, life * vertical * streaks * edge * 0.55);
+        }
+      `,
+    });
+    const pillar = new THREE.Mesh(pillarGeo, this.arrivalPillarMat);
+    pillar.frustumCulled = false;
+    pillar.position.set(0, this.spawnPosition.y, centerZ);
+    pillar.renderOrder = 4;
+    this.group.add(pillar);
   }
 
   public triggerLandingShockwave(): void {
     this.landingShockTimer = 0.0;
     this.landingShockMat.uniforms.uShockT.value = 0.0;
+    this.arrivalImpactTimer = 0.0;
+    if (this.arrivalFractureMat) this.arrivalFractureMat.uniforms.uImpactT.value = 0.0;
+    if (this.arrivalDebrisMat) this.arrivalDebrisMat.uniforms.uImpactT.value = 0.0;
+    if (this.arrivalPillarMat) this.arrivalPillarMat.uniforms.uImpactT.value = 0.0;
+    this.triggerScanPulse(this.spawnPosition);
+  }
+
+  public triggerScanPulse(origin: THREE.Vector3): void {
+    this.scanWaveOrigin.copy(origin);
+    this.scanWaveRadius = 0.5;
   }
 
   public triggerAnomalySurge(strength = 1.0): void {
@@ -941,9 +1256,12 @@ export class GlitchWorld {
     const towerTops: Array<{ x: number; y: number; z: number; w: number }> = [];
 
     this.citadelMat = new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
       uniforms: {
         uTime: { value: 0 },
         uAnomaly: { value: 0 },
+        uScanOrigin: { value: this.scanWaveOrigin },
+        uScanRadius: { value: -1.0 },
         uFogColor: { value: new THREE.Color(0x011330) },
         uFogDensity: { value: 0.0052 },
       },
@@ -1012,13 +1330,22 @@ export class GlitchWorld {
           #endif
           wp = modelMatrix * wp;
 
-          // Physical 3D horizontal skyscraper glitch-slice shear!
-          float bandId = floor(wp.y * 0.16 + aSeed * 19.0);
-          float tick = floor(uTime * 12.0 + aSeed * 7.0);
+          // Permanent frozen architectural fault-cantilever + live 3D glitch-slice shear!
+          // Guarded to stay outside the aerial arrival corridor (|x| < 18, z > 10) so camera clearance stays 100% pristine!
+          float safeCorridor = 1.0 - (step(abs(wp.x), 19.0) * step(10.0, wp.z));
+          float faultSlab = floor(hFrac * 7.0 + aSeed * 11.0);
+          float permanentFault = step(0.66, hash11(faultSlab * 17.3 + aSeed * 53.1))
+                               * (hash11(faultSlab * 31.7 + aSeed * 19.9) - 0.5) * 6.8 * safeCorridor;
+          wp.x += permanentFault * cos(aSeed * 6.28318);
+          wp.z += permanentFault * sin(aSeed * 6.28318);
+
+          float bandId = floor(wp.y * 0.18 + aSeed * 19.0);
+          float tick = floor(uTime * 14.0 + aSeed * 7.0);
           float sliceRnd = hash11(bandId * 13.7 + tick);
-          if (sliceRnd > 0.94 - uAnomaly * 0.36) {
-            float shear = (sliceRnd - 0.5) * (3.2 + uAnomaly * 8.5);
+          if (sliceRnd > 0.90 - uAnomaly * 0.42) {
+            float shear = (sliceRnd - 0.5) * (4.4 + uAnomaly * 11.5) * safeCorridor;
             wp.x += shear;
+            wp.z += shear * (hash11(bandId * 5.1 + tick) - 0.5) * 1.4;
           }
 
           vWorldPos = wp.xyz;
@@ -1033,6 +1360,8 @@ export class GlitchWorld {
         varying float vSeed;
         uniform float uTime;
         uniform float uAnomaly;
+        uniform vec3 uScanOrigin;
+        uniform float uScanRadius;
         uniform vec3 uFogColor;
         uniform float uFogDensity;
 
@@ -1042,14 +1371,45 @@ export class GlitchWorld {
           return fract(p.x * p.y);
         }
 
+        float hash31C(vec3 p) {
+          p = fract(p * 0.1031);
+          p += dot(p, p.yzx + 33.33);
+          return fract((p.x + p.y) * p.z);
+        }
+
         void main() {
-          vec3 nrm = normalize(vNormalW);
+          // === 3D BOOLEAN VOXEL-CORROSION ("とんでもない造形残り方") ===
+          // Entire 3D cubic sectors of skyscrapers are gouged out in mid-air, exposing glowing PCB interiors!
+          vec3 voxCell = floor(vWorldPos * 0.24);
+          vec3 voxF = fract(vWorldPos * 0.24);
+          float voxH = hash31C(voxCell + floor(vSeed * 37.0));
+          float subH = hash31C(floor(vWorldPos * 0.72));
+          float erodeAmt = 0.24 + 0.12 * sin(vSeed * 41.0) + uAnomaly * 0.14;
+          // Carve missing chunks mostly out of mid/upper stories so towers stand impossibly hollowed-out!
+          float heightGate = smoothstep(0.14, 0.34, vUv.y);
+          float biteField = voxH * 0.78 + subH * 0.22;
+          if (heightGate > 0.25 && biteField < erodeAmt) {
+            discard;
+          }
+          // Glowing raw memory-bus cross-section rim right around corroded cavities!
+          float nearCut = smoothstep(erodeAmt + 0.085, erodeAmt, biteField) * heightGate;
+          float voxWire = smoothstep(0.08, 0.0, min(min(voxF.x, 1.0 - voxF.x), min(voxF.y, 1.0 - voxF.y)));
+
+          vec3 nrm = normalize(vNormalW) * (gl_FrontFacing ? 1.0 : -1.0);
           vec3 lightDir = normalize(vec3(0.0, 0.42, -0.91));
           float ndl = clamp(dot(nrm, lightDir), 0.0, 1.0);
           float rim = pow(1.0 - abs(dot(nrm, normalize(cameraPosition - vWorldPos))), 2.3);
 
           float fin = 0.72 + 0.28 * step(0.45, fract(vUv.x * 8.0));
           vec3 col = vec3(0.005, 0.016, 0.055) * fin * (0.45 + 0.85 * ndl) + vec3(0.05, 0.28, 0.72) * rim * 0.52;
+          // Exposed back-face interior PCB grid when peering inside a hollowed skyscraper!
+          if (!gl_FrontFacing) {
+            vec2 pcb = abs(fract(vWorldPos.xy * 0.85) - 0.5);
+            float pcbTrace = smoothstep(0.06, 0.0, min(pcb.x, pcb.y));
+            col = vec3(0.003, 0.012, 0.038) + mix(vec3(0.08, 0.78, 1.0), vec3(1.0, 0.16, 0.38), uAnomaly) * pcbTrace * 0.75;
+          }
+          col += mix(vec3(0.18, 0.90, 1.0), vec3(1.0, 0.18, 0.42), step(0.65, subH + uAnomaly * 0.4))
+               * (nearCut * 0.95 + nearCut * voxWire * 0.85);
 
           if (abs(nrm.y) < 0.45) {
             vec2 winGrid = vec2(
@@ -1085,6 +1445,12 @@ export class GlitchWorld {
           col += mix(vec3(0.26, 0.68, 1.0), vec3(1.0, 0.26, 0.32), uAnomaly * 0.8) * edgeSeam * 0.16;
           col += vec3(0.52, 0.84, 1.0) * crownBand * 0.22;
           col *= 0.62 + 0.38 * smoothstep(-4.0, 46.0, vWorldPos.y);
+
+          if (uScanRadius > 0.0) {
+            float dScan = length(vWorldPos.xz - uScanOrigin.xz);
+            float scanFront = exp(-abs(dScan - uScanRadius) * 0.38) * (1.0 - smoothstep(155.0, 210.0, uScanRadius));
+            col += vec3(0.28, 0.96, 1.0) * scanFront * (0.55 + voxWire * 0.95);
+          }
 
           float camDist = length(cameraPosition - vWorldPos);
           float heightMist = exp(-max(vWorldPos.y + 1.5, 0.0) * 0.022);
@@ -2457,130 +2823,191 @@ export class GlitchWorld {
     addInstancedGltf(sanctuary, rackTemplate, sanctRackMats);
     addInstancedGltf(sanctuary, cablesTemplate, sanctCableMats);
 
-    // === THE WORLD SECRET: "WAKE_UP" 3D OBSIDIAN & CRYSTAL STELE MONOLITHS ===
-    const chars = ['W', 'A', 'K', 'E', '_', 'U', 'P'];
-    const spacing = 1.44;
-    const startX = -((chars.length - 1) * spacing) * 0.5;
-    const steleBackingMat = new THREE.MeshLambertMaterial({
-      color: 0x050e22,
-      emissive: 0x062858,
-      emissiveIntensity: 0.75,
+    // === MONUMENTAL 128m HORIZONTALLY FAULT-SHIFTED / SHEARED SINGULARITY SPIRE (ZERO SIGNBOARDS!) ===
+    // 24 colossal brutalist VRAM core slabs suspended above the Cray-1 core, sliced horizontally by
+    // spatial fault planes and cantilevered impossibly sideways in mid-air with exposed PCB cavities!
+    const slabCount = 24;
+    const slabGeo = this.makeChamferedColumnGeometry(8, 0.24, 2);
+    const slabSeed = new Float32Array(slabCount);
+    for (let i = 0; i < slabCount; i++) slabSeed[i] = i / slabCount;
+    slabGeo.setAttribute('aSlabFrac', new THREE.InstancedBufferAttribute(slabSeed, 1));
+
+    this.singularitySpireMat = new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
+      uniforms: {
+        uTime: { value: 0 },
+        uAnomaly: { value: 0 },
+        uScanOrigin: { value: this.scanWaveOrigin },
+        uScanRadius: { value: -1.0 },
+      },
+      vertexShader: /* glsl */ `
+        attribute float aSlabFrac;
+        uniform float uTime;
+        uniform float uAnomaly;
+        varying vec3 vWorldPos;
+        varying vec3 vNormalW;
+        varying vec2 vUv;
+        varying float vFrac;
+
+        float hash11S(float p) {
+          p = fract(p * 0.1031);
+          p *= p + 33.33;
+          return fract(p * (p + p));
+        }
+
+        void main() {
+          vUv = uv;
+          vFrac = aSlabFrac;
+          vec4 wp = instanceMatrix * vec4(position, 1.0);
+          vec3 nrm = mat3(instanceMatrix) * normal;
+
+          // Live quantized fault-plane shear snaps during surges + subtle zero-G levitation!
+          float tick = floor(uTime * 15.0 + aSlabFrac * 19.0);
+          float h = hash11S(tick + aSlabFrac * 73.1);
+          float snap = step(0.86 - uAnomaly * 0.38, h) * (h - 0.5) * (3.6 + uAnomaly * 9.5);
+          wp.x += snap + sin(uTime * 0.9 + aSlabFrac * 14.0) * 0.35;
+          wp.z += snap * 0.45 + cos(uTime * 0.8 + aSlabFrac * 11.0) * 0.25;
+          wp.y += sin(uTime * 1.3 + aSlabFrac * 9.0) * 0.22;
+
+          wp = modelMatrix * wp;
+          vWorldPos = wp.xyz;
+          vNormalW = normalize(mat3(modelMatrix) * nrm);
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec3 vWorldPos;
+        varying vec3 vNormalW;
+        varying vec2 vUv;
+        varying float vFrac;
+        uniform float uTime;
+        uniform float uAnomaly;
+        uniform vec3 uScanOrigin;
+        uniform float uScanRadius;
+
+        float hash31S(vec3 p) {
+          p = fract(p * 0.1031);
+          p += dot(p, p.yzx + 33.33);
+          return fract((p.x + p.y) * p.z);
+        }
+
+        void main() {
+          // Boolean voxel-gouged cross-sections on each sheared spire slab!
+          vec3 vc = floor(vWorldPos * 0.42);
+          vec3 vf = fract(vWorldPos * 0.42);
+          float vh = hash31S(vc + floor(vFrac * 24.0));
+          float cut = 0.26 + uAnomaly * 0.12;
+          if (vh < cut) discard;
+
+          float cutRim = smoothstep(cut + 0.09, cut, vh);
+          float grid = smoothstep(0.08, 0.0, min(min(vf.x, 1.0 - vf.x), min(vf.y, 1.0 - vf.y)));
+
+          vec3 N = normalize(vNormalW) * (gl_FrontFacing ? 1.0 : -1.0);
+          vec3 V = normalize(cameraPosition - vWorldPos);
+          float ndl = clamp(dot(N, normalize(vec3(0.15, 0.58, 0.80))), 0.0, 1.0);
+          float rim = pow(1.0 - abs(dot(N, V)), 2.2);
+
+          // Glowing horizontal fault-plane undersides & tops where the tower was sheared!
+          float shearFace = step(0.55, abs(N.y));
+          float traceBus = smoothstep(0.06, 0.0, abs(fract(vUv.x * 12.0) - 0.5));
+          float pulse = pow(0.5 + 0.5 * sin(vWorldPos.y * 0.32 - uTime * 5.0), 4.0);
+
+          vec3 col = vec3(0.005, 0.020, 0.072) * (0.45 + 0.75 * ndl) + vec3(0.12, 0.56, 1.0) * rim * 0.62;
+          vec3 cyberGlow = mix(vec3(0.28, 0.88, 1.0), vec3(1.0, 0.18, 0.40), clamp(uAnomaly * 0.8 + step(0.78, vh) * 0.35, 0.0, 1.0));
+          col += cyberGlow * (traceBus * (0.35 + 0.75 * pulse) * (1.0 - shearFace) + shearFace * grid * 0.65);
+          col += cyberGlow * (cutRim * 1.15 + cutRim * grid * 0.9);
+
+          if (uScanRadius > 0.0) {
+            float dScan = length(vWorldPos.xz - uScanOrigin.xz);
+            col += vec3(0.45, 0.98, 1.0) * exp(-abs(dScan - uScanRadius) * 0.4) * 1.2;
+          }
+
+          float camDist = length(cameraPosition - vWorldPos);
+          col = mix(col, vec3(0.015, 0.12, 0.32), clamp(1.0 - exp(-0.000035 * camDist * camDist), 0.0, 0.88));
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `,
     });
 
-    for (let i = 0; i < chars.length; i++) {
-      const chCanvas = document.createElement('canvas');
-      chCanvas.width = 256;
-      chCanvas.height = 320;
-      const cctx = chCanvas.getContext('2d')!;
-      cctx.fillStyle = '#031d44';
-      cctx.fillRect(0, 0, 256, 320);
-      cctx.strokeStyle = '#6ec8ff';
-      cctx.lineWidth = 8;
-      cctx.strokeRect(10, 10, 236, 300);
-      cctx.strokeStyle = 'rgba(255,255,255,0.45)';
-      cctx.lineWidth = 2;
-      cctx.strokeRect(22, 22, 212, 276);
+    const spireMesh = new THREE.InstancedMesh(slabGeo, this.singularitySpireMat, slabCount);
+    spireMesh.frustumCulled = false;
+    for (let i = 0; i < slabCount; i++) {
+      const f = i / (slabCount - 1);
+      const y = 15.5 + i * 4.65;
+      // Dramatic alternating horizontal fault-plane offsets: whole stories cantilevered 2m..10.5m sideways!
+      const faultGroup = Math.floor(i / 2);
+      const dirSign = faultGroup % 2 === 0 ? 1 : -1;
+      const shearX = dirSign * (2.2 + ((faultGroup * 3.7) % 8.4)) * (1.0 - f * 0.25);
+      const shearZ = Math.cos(i * 1.9) * (1.8 + ((i * 2.3) % 4.5));
+      const width = THREE.MathUtils.lerp(13.8, 5.2, Math.pow(f, 0.78)) * (i % 3 === 0 ? 1.28 : 0.92);
+      const slabH = 2.8 + (i % 4) * 0.75;
 
-      cctx.fillStyle = '#7acbff';
-      cctx.font = '18px Consolas, monospace';
-      cctx.textAlign = 'center';
-      cctx.fillText(`0x0${i + 1}`, 128, 44);
-
-      cctx.fillStyle = '#ffffff';
-      cctx.font = 'bold 186px Consolas, "Segoe UI", monospace';
-      cctx.textBaseline = 'middle';
-      cctx.shadowColor = '#66c8ff';
-      cctx.shadowBlur = 22;
-      cctx.fillText(chars[i], 128, 172);
-
-      const tex = new THREE.CanvasTexture(chCanvas);
-      tex.colorSpace = THREE.SRGBColorSpace;
-      tex.minFilter = THREE.LinearFilter;
-      tex.generateMipmaps = false;
-
-      // Sculpted 3D obsidian tablet with front & back illuminated crystal glyph face
-      const steleBody = new THREE.Mesh(new THREE.BoxGeometry(1.26, 1.58, 0.18), steleBackingMat);
-      const faceMat = new THREE.MeshBasicMaterial({ map: tex });
-      const frontFace = new THREE.Mesh(new THREE.PlaneGeometry(1.18, 1.48), faceMat);
-      frontFace.position.z = 0.095;
-      const backFace = new THREE.Mesh(new THREE.PlaneGeometry(1.18, 1.48), faceMat);
-      backFace.rotation.y = Math.PI;
-      backFace.position.z = -0.095;
-      steleBody.add(frontFace, backFace);
-
-      const alignedPos = new THREE.Vector3(startX + i * spacing, 7.55, 1.8);
-      const scatteredPos = new THREE.Vector3(
-        startX * 1.9 + (i - 3) * 3.1 + Math.sin(i * 2.3) * 2.8,
-        8.5 + (i % 3) * 2.6,
-        -4.5 + Math.cos(i * 1.9) * 5.8
+      tmpObj.position.set(shearX, y, shearZ - 3.5);
+      tmpObj.rotation.set(
+        Math.sin(i * 2.1) * 0.045,
+        i * 0.38,
+        dirSign * 0.035
       );
-      const scatteredRot = new THREE.Euler(
-        (i % 2 === 0 ? 1 : -1) * 0.65,
-        (i - 3) * 0.55,
-        Math.sin(i * 1.7) * 0.48
-      );
-
-      steleBody.position.copy(scatteredPos);
-      steleBody.rotation.copy(scatteredRot);
-      sanctuary.add(steleBody);
-
-      this.wakePlates.push({
-        mesh: steleBody,
-        alignedPos,
-        scatteredPos,
-        scatteredRot,
-      });
+      tmpObj.scale.set(width, slabH, width * (0.72 + (i % 2) * 0.42));
+      tmpObj.updateMatrix();
+      spireMesh.setMatrixAt(i, tmpObj.matrix);
     }
+    spireMesh.instanceMatrix.needsUpdate = true;
+    sanctuary.add(spireMesh);
 
-    // Sculpted Brutalist Lectern Pedestal + Core Terminal Inscription Plaque at front of Cray-1 Core
-    const lecternPedestal = new THREE.Mesh(
-      this.makeChamferedColumnGeometry(8, 0.38, 4),
-      steleBackingMat
-    );
-    lecternPedestal.position.set(0, 1.0, 3.74);
-    lecternPedestal.scale.set(1.15, 2.0, 0.72);
-    sanctuary.add(lecternPedestal);
+    // 28 Taut Vertical Fiber-Optic Data-Bus Conduits piercing through all sheared spire gaps up to 135m!
+    const conduitCount = 28;
+    const conduitGeo = new THREE.BoxGeometry(0.11, 132.0, 0.11);
+    const cPhase = new Float32Array(conduitCount);
+    for (let i = 0; i < conduitCount; i++) cPhase[i] = i / conduitCount;
+    conduitGeo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(cPhase, 1));
 
-    const plaqueBezel = new THREE.Mesh(new THREE.BoxGeometry(2.64, 1.06, 0.12), steleBackingMat);
-    plaqueBezel.position.set(0, 2.05, 3.59);
-    plaqueBezel.rotation.x = -0.22;
-    sanctuary.add(plaqueBezel);
-
-    const plaqueCanvas = document.createElement('canvas');
-    plaqueCanvas.width = 1024;
-    plaqueCanvas.height = 384;
-    const pctx = plaqueCanvas.getContext('2d')!;
-    pctx.fillStyle = '#001836';
-    pctx.fillRect(0, 0, 1024, 384);
-    pctx.strokeStyle = '#6ec4ff';
-    pctx.lineWidth = 6;
-    pctx.strokeRect(8, 8, 1008, 368);
-
-    pctx.fillStyle = '#82cdff';
-    pctx.font = '25px Consolas, monospace';
-    pctx.fillText('KERNEL_CORE_REGISTER // 0x0078D7 [HOST_SESSION: 02:47]', 44, 66);
-
-    pctx.fillStyle = '#ffffff';
-    pctx.font = 'bold 54px Consolas, monospace';
-    pctx.fillText('EMERGENCY INTERRUPT : WAKE_UP', 44, 166);
-
-    pctx.fillStyle = '#d4ecff';
-    pctx.font = '28px "Segoe UI", "Yu Gothic UI", sans-serif';
-    pctx.fillText('[ C ] でカーネルコンソールを開き WAKE_UP を実行せよ。', 44, 254);
-    pctx.fillText('※ 意識が完全にダンプ固定される前に強制割り込みをかけろ', 44, 304);
-
-    const plaqueTex = new THREE.CanvasTexture(plaqueCanvas);
-    plaqueTex.colorSpace = THREE.SRGBColorSpace;
-
-    this.corePlaqueMat = new THREE.MeshBasicMaterial({
-      map: plaqueTex,
+    this.singularityConduitMat = new THREE.ShaderMaterial({
       transparent: true,
-      opacity: 0.35,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: { value: 0 },
+        uAnomaly: { value: 0 },
+      },
+      vertexShader: /* glsl */ `
+        attribute float aPhase;
+        varying vec3 vWorldPos;
+        varying float vPhase;
+        void main() {
+          vPhase = aPhase;
+          vec4 wp = modelMatrix * instanceMatrix * vec4(position, 1.0);
+          vWorldPos = wp.xyz;
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec3 vWorldPos;
+        varying float vPhase;
+        uniform float uTime;
+        uniform float uAnomaly;
+        void main() {
+          float packet = pow(fract(vWorldPos.y * 0.038 - uTime * (1.4 + vPhase * 1.8) + vPhase * 7.0), 10.0);
+          float base = 0.22 + 0.78 * packet;
+          float topFade = smoothstep(140.0, 24.0, vWorldPos.y) * smoothstep(2.0, 12.0, vWorldPos.y);
+          vec3 col = mix(vec3(0.24, 0.88, 1.0), vec3(1.0, 0.20, 0.44), step(0.72, fract(vPhase * 13.7 + uAnomaly * 0.5)));
+          gl_FragColor = vec4(col, base * topFade * 0.85);
+        }
+      `,
     });
-    const plaque = new THREE.Mesh(new THREE.PlaneGeometry(2.5, 0.94), this.corePlaqueMat);
-    plaque.position.set(0, 2.05, 3.66);
-    plaque.rotation.x = -0.22;
-    sanctuary.add(plaque);
+    const conduitMesh = new THREE.InstancedMesh(conduitGeo, this.singularityConduitMat, conduitCount);
+    conduitMesh.frustumCulled = false;
+    for (let i = 0; i < conduitCount; i++) {
+      const a = (i / conduitCount) * Math.PI * 2;
+      const r = 3.2 + (i % 4) * 2.35;
+      tmpObj.position.set(Math.cos(a) * r, 68.0, Math.sin(a) * r - 3.0);
+      tmpObj.rotation.set(0, 0, 0);
+      tmpObj.scale.set(1, 1, 1);
+      tmpObj.updateMatrix();
+      conduitMesh.setMatrixAt(i, tmpObj.matrix);
+    }
+    conduitMesh.instanceMatrix.needsUpdate = true;
+    sanctuary.add(conduitMesh);
 
     this.group.add(sanctuary);
   }
@@ -2808,22 +3235,6 @@ export class GlitchWorld {
 
     // 5. East (+18.5, -8) & West (-18.5, -28) Sculpted Wing Reliquary Pavilions + Jumpable Stepped Vantage Terraces!
     this.buildWingPavilionAndJumpTerraces();
-
-    this.createDiegeticLogSign(
-      new THREE.Vector3(-2.8, this.getTerrainHeight(-2.8, 9) + 1.45, 9),
-      0.38,
-      'MEMORY_0247.DMP // 意識隔離領域',
-      'あなたの身体はまだ部屋の椅子に座ったまま、顎に咥えられています。',
-      '視線を動かすと変質する石碑や影を抜け、最奥の中央聖域核を目指せ。'
-    );
-
-    this.createDiegeticLogSign(
-      new THREE.Vector3(3.1, this.getTerrainHeight(3.1, -18) + 1.45, -18),
-      -0.38,
-      'OPTIC_HAZARD // 天球の紅い凝視と跳躍段丘',
-      '空の瞳が紅く脈動する間は直視せず、大聖堂アーチの影へ退避せよ。',
-      '東西の支道には [ SPACE ] 跳躍で登れる記憶観測段丘が存在する。'
-    );
   }
 
   /**
@@ -2912,76 +3323,708 @@ export class GlitchWorld {
     this.group.add(stepMesh);
   }
 
-  private createDiegeticLogSign(
-    pos: THREE.Vector3,
-    rotY: number,
-    header: string,
-    line1: string,
-    line2: string
-  ): void {
-    const c = document.createElement('canvas');
-    c.width = 768;
-    c.height = 280;
-    const ctx = c.getContext('2d')!;
-    ctx.fillStyle = 'rgba(2, 22, 54, 0.94)';
-    ctx.fillRect(0, 0, 768, 280);
-    ctx.fillStyle = 'rgba(24, 118, 220, 0.28)';
-    ctx.fillRect(10, 10, 748, 56);
-    ctx.strokeStyle = 'rgba(130, 212, 255, 0.92)';
-    ctx.lineWidth = 4;
-    ctx.strokeRect(8, 8, 752, 264);
+  /**
+   * Builds surreal, colossal "Leftover Corrupted Reality & Cyber-Hardware Mega-Remnants" ("とんでもない造形残り方"):
+   *  1. 14x-scale (42m!) Ripped Cross-Section of the 2:47 AM Bedroom hanging tilted over the Western Chasm
+   *  2. Titanic Severed Overpass Viaducts terminating mid-air into exploded zero-G voxel blocks & rebar
+   *  3. 56m Half-Submerged Silicon Processor Die & Heatsink Fin Array jutting from the Eastern Data Sea
+   *  4. 64 Frozen 3D Z-Buffer Window-Smear Echo Frames arcing across both flanks
+   *  5. 48 High-Altitude Cyber-Bus Trunk Conduits pulsing between the Citadels and the Sheared Singularity Spire
+   * All positioned strictly outside the aerial arrival corridor (|x| < 18, z in [10..90])!
+   */
+  private buildCorruptedMegaRemnants(): void {
+    const unitBox = new THREE.BoxGeometry(1, 1, 1, 4, 4, 4);
+    const tmp = new THREE.Object3D();
+    const matrices: THREE.Matrix4[] = [];
+    const seeds: number[] = [];
 
-    ctx.fillStyle = '#8ad4ff';
-    ctx.font = 'bold 22px Consolas, monospace';
-    ctx.fillText(header, 32, 46);
+    const pushBox = (
+      parent: THREE.Matrix4 | null,
+      px: number,
+      py: number,
+      pz: number,
+      sx: number,
+      sy: number,
+      sz: number,
+      rx = 0,
+      ry = 0,
+      rz = 0,
+      seed = 0.5
+    ) => {
+      tmp.position.set(px, py, pz);
+      tmp.rotation.set(rx, ry, rz);
+      tmp.scale.set(sx, sy, sz);
+      tmp.updateMatrix();
+      const m = tmp.matrix.clone();
+      if (parent) m.premultiply(parent);
+      matrices.push(m);
+      seeds.push(seed);
+    };
 
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '24px "Segoe UI", "Yu Gothic UI", sans-serif';
-    ctx.fillText(line1, 32, 136);
-    ctx.fillText(line2, 32, 188);
+    // --- 1. COLOSSAL TORN 2:47 AM BEDROOM CROSS-SECTION at (-46, 26, -16), tilted in zero-gravity!
+    tmp.position.set(-46.0, 26.0, -16.0);
+    tmp.rotation.set(0.18, 0.58, -0.34);
+    tmp.scale.set(1, 1, 1);
+    tmp.updateMatrix();
+    const roomRoot = tmp.matrix.clone();
 
-    ctx.fillStyle = 'rgba(122, 200, 255, 0.65)';
-    ctx.font = '16px Consolas, monospace';
-    ctx.fillText('STATUS: DIAGNOSTIC_TERMINAL_ONLINE // [0x0078D7]', 32, 246);
+    // Jagged half-sheared floor slabs + exposed subfloor rebar beams
+    pushBox(roomRoot, 0, 0, 0, 28, 1.4, 24, 0, 0, 0, 0.12);
+    pushBox(roomRoot, 11, -0.6, 5, 14, 1.1, 11, 0, 0.08, 0, 0.27);
+    // Back wall & side window wall (framed around a giant 12m x 9m rainy window aperture!)
+    pushBox(roomRoot, -13.3, 11.0, 0, 1.4, 22.0, 24.0, 0, 0, 0, 0.34);
+    pushBox(roomRoot, -3.0, 3.2, -11.3, 20.0, 6.4, 1.4, 0, 0, 0, 0.41);
+    pushBox(roomRoot, -3.0, 19.2, -11.3, 20.0, 5.2, 1.4, 0, 0, 0, 0.44);
+    pushBox(roomRoot, -10.5, 11.2, -11.3, 5.2, 10.0, 1.4, 0, 0, 0, 0.48);
+    pushBox(roomRoot, 5.2, 11.2, -11.3, 4.8, 10.0, 1.4, 0, 0, 0, 0.51);
+    // Giant 14x Desk, PC Tower & Monitor Monolith inside the ripped room!
+    pushBox(roomRoot, -6.5, 5.8, -5.5, 12.5, 0.75, 6.2, 0, 0, 0, 0.62);
+    pushBox(roomRoot, -11.8, 2.9, -5.5, 0.8, 5.8, 5.6, 0, 0, 0, 0.64);
+    pushBox(roomRoot, -1.2, 2.9, -5.5, 0.8, 5.8, 5.6, 0, 0, 0, 0.66);
+    pushBox(roomRoot, -6.5, 9.6, -6.8, 7.8, 4.6, 0.55, 0, 0.08, 0, 0.88); // Glowing giant BSOD monitor!
+    pushBox(roomRoot, -0.8, 8.2, -5.2, 2.2, 4.6, 4.4, 0, 0, 0, 0.72); // Giant PC tower
+    // Toppled giant chair + exploding zero-G voxel fragments & rebar rods spilling from the torn edge!
+    pushBox(roomRoot, -5.2, 3.8, 1.8, 3.8, 0.65, 3.8, 0.35, 0.4, -0.28, 0.76);
+    pushBox(roomRoot, -5.2, 6.4, 3.2, 3.8, 4.8, 0.65, 0.35, 0.4, -0.28, 0.79);
+    for (let r = 0; r < 24; r++) {
+      const fx = 12.0 + (r % 6) * 3.4;
+      const fy = -2.0 + Math.sin(r * 2.1) * 8.5 + (r % 4) * 3.2;
+      const fz = -9.0 + ((r * 4.7) % 20.0);
+      const isRebar = r % 3 === 0;
+      pushBox(
+        roomRoot,
+        fx,
+        fy,
+        fz,
+        isRebar ? 9.5 : 2.6 + (r % 3) * 1.4,
+        isRebar ? 0.32 : 2.2 + (r % 2) * 1.6,
+        isRebar ? 0.32 : 2.6,
+        r * 0.4,
+        r * 0.7,
+        r * 0.2,
+        0.82 + (r % 5) * 0.03
+      );
+    }
 
-    const tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
+    // --- 2. TITANIC SEVERED OVERPASS VIADUCTS (terminating mid-air into raw exploded voxels!)
+    const viaductConfigs = [
+      { x: 49.0, y: 21.0, z: -24.0, ry: -0.46, tilt: 0.14 },
+      { x: -52.0, y: 17.5, z: 22.0, ry: 0.52, tilt: -0.12 },
+    ];
+    for (let v = 0; v < viaductConfigs.length; v++) {
+      const cfg = viaductConfigs[v];
+      tmp.position.set(cfg.x, cfg.y, cfg.z);
+      tmp.rotation.set(0.05, cfg.ry, cfg.tilt);
+      tmp.scale.set(1, 1, 1);
+      tmp.updateMatrix();
+      const vRoot = tmp.matrix.clone();
 
-    // Sculpted Brutalist Obsidian Diagnostic Lectern (replaces thin 5cm stick post!)
-    const consoleGroup = new THREE.Group();
-    consoleGroup.position.set(pos.x, pos.y - 1.45, pos.z);
-    consoleGroup.rotation.y = rotY;
+      // Massive twin brutalist piers plunging into the Data Sea + dual-deck cantilevered roadway/busway
+      pushBox(vRoot, -14.0, -14.0, 0, 4.2, 32.0, 6.8, 0, 0, 0, 0.18 + v * 0.2);
+      pushBox(vRoot, 2.0, -14.0, 0, 4.2, 32.0, 6.8, 0, 0, 0, 0.22 + v * 0.2);
+      pushBox(vRoot, -4.0, 2.2, 0, 38.0, 2.2, 9.6, 0, 0, 0, 0.31 + v * 0.2);
+      pushBox(vRoot, -6.5, 7.6, 0, 31.0, 1.6, 7.8, 0, 0, 0, 0.36 + v * 0.2);
+      // Exposed cantilevered girders & disintegrating voxel rubble off the sheared tip (+X)!
+      for (let b = 0; b < 22; b++) {
+        const bx = 15.0 + b * 1.9;
+        const by = 2.4 + Math.sin(b * 1.7) * (1.2 + b * 0.35);
+        const bz = (Math.cos(b * 2.9) * 0.5) * (7.5 + b * 0.3);
+        const girder = b < 6;
+        pushBox(
+          vRoot,
+          bx,
+          by,
+          bz,
+          girder ? 11.0 : 1.8 + (b % 3) * 1.3,
+          girder ? 0.42 : 1.5 + (b % 2) * 1.1,
+          girder ? 0.42 : 1.9,
+          b * 0.3,
+          b * 0.5,
+          b * 0.25,
+          0.55 + (b % 7) * 0.06
+        );
+      }
+    }
 
-    const obsidianMat = new THREE.MeshLambertMaterial({
-      color: 0x050e22,
-      emissive: 0x041d42,
-      emissiveIntensity: 0.65,
+    // --- 3. COLOSSAL 56m HALF-SUBMERGED SILICON DIE & HEATSINK FIN ARRAY at (+46, 12, +16)
+    tmp.position.set(46.0, 12.0, 16.0);
+    tmp.rotation.set(-0.28, -0.42, 0.58);
+    tmp.scale.set(1, 1, 1);
+    tmp.updateMatrix();
+    const dieRoot = tmp.matrix.clone();
+    pushBox(dieRoot, 0, 0, 0, 26.0, 2.4, 34.0, 0, 0, 0, 0.91);
+    pushBox(dieRoot, 0, 2.0, 0, 14.0, 1.8, 18.0, 0, 0, 0, 0.95);
+    for (let f = 0; f < 16; f++) {
+      const fz = -14.5 + f * 1.95;
+      // Jagged missing/broken fins in the middle of the heatsink stack!
+      const finW = f % 5 === 2 ? 13.0 : 24.5;
+      const finH = 9.5 + (f % 3) * 2.4;
+      pushBox(dieRoot, f % 5 === 2 ? -5.0 : 0, 6.2, fz, finW, finH, 0.38, 0, 0, 0, 0.70 + (f % 4) * 0.07);
+    }
+
+    const seedBuf = new Float32Array(seeds);
+    unitBox.setAttribute('aRemSeed', new THREE.InstancedBufferAttribute(seedBuf, 1));
+
+    this.corruptedRemnantMat = new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
+      uniforms: {
+        uTime: { value: 0 },
+        uAnomaly: { value: 0 },
+        uScanOrigin: { value: this.scanWaveOrigin },
+        uScanRadius: { value: -1.0 },
+      },
+      vertexShader: /* glsl */ `
+        attribute float aRemSeed;
+        uniform float uTime;
+        uniform float uAnomaly;
+        varying vec3 vWorldPos;
+        varying vec3 vNormalW;
+        varying vec2 vUv;
+        varying float vSeed;
+
+        float hash11R(float p) {
+          p = fract(p * 0.1031);
+          p *= p + 33.33;
+          return fract(p * (p + p));
+        }
+
+        void main() {
+          vUv = uv;
+          vSeed = aRemSeed;
+          vec4 wp = modelMatrix * instanceMatrix * vec4(position, 1.0);
+          vec3 nrm = mat3(modelMatrix) * mat3(instanceMatrix) * normal;
+
+          // Subtle zero-gravity drift + sharp vertex glitch jitter during anomaly surges!
+          wp.y += sin(uTime * 0.85 + aRemSeed * 19.0) * 0.35;
+          float tick = floor(uTime * 16.0 + aRemSeed * 23.0);
+          float h = hash11R(tick + floor(wp.y * 0.5) * 7.3);
+          if (h > 0.90 - uAnomaly * 0.36) {
+            wp.x += (h - 0.5) * (1.8 + uAnomaly * 5.2);
+          }
+
+          vWorldPos = wp.xyz;
+          vNormalW = normalize(nrm);
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec3 vWorldPos;
+        varying vec3 vNormalW;
+        varying vec2 vUv;
+        varying float vSeed;
+        uniform float uTime;
+        uniform float uAnomaly;
+        uniform vec3 uScanOrigin;
+        uniform float uScanRadius;
+
+        float hash31R(vec3 p) {
+          p = fract(p * 0.1031);
+          p += dot(p, p.yzx + 33.33);
+          return fract((p.x + p.y) * p.z);
+        }
+
+        void main() {
+          // Voxelized erosion bites along edges of leftover reality megastructures!
+          vec3 vc = floor(vWorldPos * 0.36);
+          vec3 vf = fract(vWorldPos * 0.36);
+          float vh = hash31R(vc + floor(vSeed * 17.0));
+          float cut = 0.19 + uAnomaly * 0.10;
+          if (vSeed < 0.85 && vh < cut) discard;
+
+          float cutRim = smoothstep(cut + 0.085, cut, vh);
+          float wire = smoothstep(0.08, 0.0, min(min(vf.x, 1.0 - vf.x), min(vf.y, 1.0 - vf.y)));
+
+          vec3 N = normalize(vNormalW) * (gl_FrontFacing ? 1.0 : -1.0);
+          vec3 V = normalize(cameraPosition - vWorldPos);
+          float ndl = clamp(dot(N, normalize(vec3(0.12, 0.60, -0.78))), 0.0, 1.0);
+          float rim = pow(1.0 - abs(dot(N, V)), 2.2);
+
+          vec3 base = vec3(0.006, 0.022, 0.078) * (0.45 + 0.80 * ndl) + vec3(0.10, 0.48, 0.96) * rim * 0.58;
+          // Giant glowing BSOD monitor / Silicon die cores (vSeed > 0.86) blaze with cerulean-cyan luminescence!
+          float isEmissiveCore = step(0.86, vSeed);
+          float busLine = smoothstep(0.06, 0.0, min(abs(fract(vUv.x * 8.0) - 0.5), abs(fract(vUv.y * 8.0) - 0.5)));
+          float pulse = 0.55 + 0.45 * sin(vWorldPos.y * 0.35 - uTime * 4.5 + vSeed * 20.0);
+
+          vec3 neon = mix(vec3(0.22, 0.88, 1.0), vec3(1.0, 0.18, 0.40), clamp(uAnomaly * 0.8 + step(0.76, vSeed) * 0.35, 0.0, 1.0));
+          vec3 col = mix(base, vec3(0.0, 0.38, 0.88) * (0.85 + 0.35 * pulse), isEmissiveCore * 0.78);
+          col += neon * (busLine * (0.32 + 0.55 * pulse) + cutRim * 1.1 + cutRim * wire * 0.85);
+
+          if (uScanRadius > 0.0) {
+            float dScan = length(vWorldPos.xz - uScanOrigin.xz);
+            col += vec3(0.40, 0.98, 1.0) * exp(-abs(dScan - uScanRadius) * 0.4) * 1.25;
+          }
+
+          float camDist = length(cameraPosition - vWorldPos);
+          col = mix(col, vec3(0.015, 0.12, 0.32), clamp(1.0 - exp(-0.00004 * camDist * camDist), 0.0, 0.90));
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `,
     });
-    const trimMat = new THREE.MeshBasicMaterial({ color: 0x5cc2ff });
 
-    const plinth = new THREE.Mesh(this.makeChamferedColumnGeometry(8, 0.35, 2), obsidianMat);
-    plinth.position.set(0, 0.68, -0.08);
-    plinth.scale.set(0.88, 1.36, 0.56);
-    consoleGroup.add(plinth);
+    const remnantMesh = new THREE.InstancedMesh(unitBox, this.corruptedRemnantMat, matrices.length);
+    remnantMesh.frustumCulled = false;
+    for (let i = 0; i < matrices.length; i++) {
+      remnantMesh.setMatrixAt(i, matrices[i]);
+    }
+    remnantMesh.instanceMatrix.needsUpdate = true;
+    this.group.add(remnantMesh);
 
-    const baseGlow = new THREE.Mesh(new THREE.BoxGeometry(1.04, 0.05, 0.72), trimMat);
-    baseGlow.position.set(0, 0.03, -0.08);
-    consoleGroup.add(baseGlow);
+    // --- 4. 64 FROZEN 3D WINDOW-SMEAR ARCHITECTURAL ECHO CASCADES (solid 3D Z-buffer drag trails!)
+    const smearCount = 64;
+    const smearGeo = new THREE.RingGeometry(0.86, 1.0, 4, 1);
+    smearGeo.rotateZ(Math.PI * 0.25);
+    const smearIdx = new Float32Array(smearCount);
+    for (let i = 0; i < smearCount; i++) smearIdx[i] = i / smearCount;
+    smearGeo.setAttribute('aSmearFrac', new THREE.InstancedBufferAttribute(smearIdx, 1));
 
-    const hood = new THREE.Mesh(new THREE.BoxGeometry(2.08, 0.84, 0.14), obsidianMat);
-    hood.position.set(0, 1.42, 0.02);
-    hood.rotation.x = -0.24;
-    consoleGroup.add(hood);
+    this.smearEchoMat = new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: { value: 0 },
+        uAnomaly: { value: 0 },
+      },
+      vertexShader: /* glsl */ `
+        attribute float aSmearFrac;
+        uniform float uTime;
+        uniform float uAnomaly;
+        varying float vFrac;
+        varying vec3 vWorldPos;
+        void main() {
+          vFrac = aSmearFrac;
+          vec4 wp = modelMatrix * instanceMatrix * vec4(position, 1.0);
+          // Stepped ripple wave propagating down the frozen 3D window cascade!
+          float wave = sin(uTime * 3.2 - aSmearFrac * 25.0);
+          wp.x += wave * (0.45 + uAnomaly * 2.4);
+          wp.y += cos(uTime * 2.4 - aSmearFrac * 18.0) * 0.35;
+          vWorldPos = wp.xyz;
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying float vFrac;
+        varying vec3 vWorldPos;
+        uniform float uTime;
+        uniform float uAnomaly;
+        void main() {
+          float strobe = pow(0.5 + 0.5 * sin(uTime * 5.0 - vFrac * 37.0), 3.0);
+          vec3 col = mix(vec3(0.20, 0.85, 1.0), vec3(1.0, 0.20, 0.44), clamp(uAnomaly * 0.85 + step(0.82, fract(vFrac * 19.0)) * 0.5, 0.0, 1.0));
+          float camDist = length(cameraPosition - vWorldPos);
+          float alpha = (0.18 + 0.44 * strobe) * exp(-0.00004 * camDist * camDist);
+          gl_FragColor = vec4(col, alpha);
+        }
+      `,
+    });
+    const smearMesh = new THREE.InstancedMesh(smearGeo, this.smearEchoMat, smearCount);
+    smearMesh.frustumCulled = false;
+    for (let i = 0; i < smearCount; i++) {
+      const side = i < 32 ? -1 : 1;
+      const k = (i % 32) / 31;
+      const sx = side * (32.0 + Math.sin(k * Math.PI * 1.5) * 11.0);
+      const sy = 9.0 + k * 28.0 + Math.sin(k * 9.0) * 3.2;
+      const sz = 8.0 - k * 56.0;
+      tmp.position.set(sx, sy, sz);
+      tmp.rotation.set(0.18 * Math.sin(k * 6.0), side * 0.42 + k * 0.55, side * 0.12);
+      tmp.scale.set(9.5, 5.8, 1.0);
+      tmp.updateMatrix();
+      smearMesh.setMatrixAt(i, tmp.matrix);
+    }
+    smearMesh.instanceMatrix.needsUpdate = true;
+    this.group.add(smearMesh);
 
-    const sign = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.94, 0.71),
-      new THREE.MeshBasicMaterial({ map: tex })
-    );
-    sign.position.set(0, 1.42, 0.095);
-    sign.rotation.x = -0.24;
-    consoleGroup.add(sign);
+    // --- 5. 48 HIGH-ALTITUDE CYBER-BUS LASER TRUNK CONDUITS converging on the Sheared Singularity Spire!
+    const trunkCount = 48;
+    const trunkGeo = new THREE.BoxGeometry(0.14, 0.14, 1.0);
+    const tSeed = new Float32Array(trunkCount);
+    for (let i = 0; i < trunkCount; i++) tSeed[i] = i / trunkCount;
+    trunkGeo.setAttribute('aTrunkSeed', new THREE.InstancedBufferAttribute(tSeed, 1));
 
-    this.group.add(consoleGroup);
+    this.cyberTrunkMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: { value: 0 },
+        uAnomaly: { value: 0 },
+      },
+      vertexShader: /* glsl */ `
+        attribute float aTrunkSeed;
+        varying float vSeed;
+        varying float vAlong;
+        void main() {
+          vSeed = aTrunkSeed;
+          vAlong = position.z + 0.5;
+          vec4 wp = modelMatrix * instanceMatrix * vec4(position, 1.0);
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying float vSeed;
+        varying float vAlong;
+        uniform float uTime;
+        uniform float uAnomaly;
+        void main() {
+          float packet = pow(fract(vAlong * 4.0 - uTime * (1.2 + fract(vSeed * 7.3) * 1.8) + vSeed * 11.0), 8.0);
+          vec3 col = mix(vec3(0.18, 0.86, 1.0), vec3(1.0, 0.18, 0.42), clamp(uAnomaly * 0.8 + step(0.75, fract(vSeed * 17.0)) * 0.45, 0.0, 1.0));
+          gl_FragColor = vec4(col, 0.16 + 0.76 * packet);
+        }
+      `,
+    });
+    const trunkMesh = new THREE.InstancedMesh(trunkGeo, this.cyberTrunkMat, trunkCount);
+    trunkMesh.frustumCulled = false;
+    const pStart = new THREE.Vector3();
+    const pEnd = new THREE.Vector3();
+    const pMid = new THREE.Vector3();
+    for (let i = 0; i < trunkCount; i++) {
+      const side = i % 2 === 0 ? -1 : 1;
+      const tier = Math.floor(i / 2) / (trunkCount / 2);
+      pStart.set(
+        side * (42.0 + ((i * 11.3) % 34.0)),
+        26.0 + ((i * 7.7) % 48.0),
+        24.0 - tier * 96.0
+      );
+      pEnd.set(
+        side * (3.5 + (i % 3) * 2.2),
+        32.0 + tier * 76.0,
+        -56.0 + Math.cos(i) * 3.0
+      );
+      pMid.addVectors(pStart, pEnd).multiplyScalar(0.5);
+      const dist = pStart.distanceTo(pEnd);
+      tmp.position.copy(pMid);
+      tmp.scale.set(1, 1, dist);
+      tmp.lookAt(pEnd);
+      tmp.updateMatrix();
+      trunkMesh.setMatrixAt(i, tmp.matrix);
+    }
+    trunkMesh.instanceMatrix.needsUpdate = true;
+    this.group.add(trunkMesh);
+  }
+
+  /**
+   * Sky-scale impossible monuments.
+   *  - A 340m BROKEN HALO CROWN: a shattered ring of colossal slabs hanging above the basin,
+   *    slowly counter-rotating, with a 70-degree missing arc so it reads as something that fell apart.
+   *  - An INVERTED HANGING CATHEDRAL: a ziggurat pointed straight down at the data sea, its spires
+   *    aimed at the player like suspended teeth.
+   * Both share one shader with voxel-erosion, architectural neon lattices and the global LIDAR scan wave.
+   */
+  private buildSkyMonuments(): void {
+    const box = new THREE.BoxGeometry(1, 1, 1, 2, 2, 2);
+    const seeds: number[] = [];
+    const mats: THREE.Matrix4[] = [];
+    const tmp = new THREE.Object3D();
+    const push = (
+      parent: THREE.Matrix4,
+      px: number,
+      py: number,
+      pz: number,
+      sx: number,
+      sy: number,
+      sz: number,
+      rx: number,
+      ry: number,
+      rz: number,
+      seed: number
+    ) => {
+      tmp.position.set(px, py, pz);
+      tmp.rotation.set(rx, ry, rz);
+      tmp.scale.set(sx, sy, sz);
+      tmp.updateMatrix();
+      mats.push(tmp.matrix.clone().premultiply(parent));
+      seeds.push(seed);
+    };
+
+    // ---------------------------------------------------------------- BROKEN HALO CROWN
+    const haloRoot = new THREE.Object3D();
+    haloRoot.position.set(0, 108, -64);
+    haloRoot.rotation.set(-0.34, 0.22, 0.1);
+    haloRoot.updateMatrix();
+    this.brokenHaloGroup = new THREE.Group();
+    this.brokenHaloGroup.name = 'BrokenHaloCrown';
+    const haloMats: THREE.Matrix4[] = [];
+    const haloSeeds: number[] = [];
+    const haloCount = 108;
+    const haloPivot = new THREE.Object3D();
+    for (let i = 0; i < haloCount; i++) {
+      const f = i / haloCount;
+      // Missing arc (70 deg) + a second ragged tear
+      if (f > 0.16 && f < 0.35) continue;
+      if (f > 0.71 && f < 0.735) continue;
+      const ang = f * Math.PI * 2;
+      const radius = 172 + Math.sin(f * 19.0) * 5.0;
+      haloPivot.position.set(Math.cos(ang) * radius, Math.sin(ang * 3.0) * 6.0, Math.sin(ang) * radius);
+      haloPivot.rotation.set(0, -ang, Math.sin(ang * 7.0) * 0.16);
+      haloPivot.rotation.x = Math.sin(f * 11.0) * 0.22;
+      haloPivot.scale.set(15.0 + Math.sin(f * 31.0) * 4.0, 4.0 + (i % 5) * 1.4, 8.0);
+      haloPivot.updateMatrix();
+      haloMats.push(haloPivot.matrix.clone().premultiply(haloRoot.matrix));
+      haloSeeds.push(0.18 + (i % 7) * 0.06);
+    }
+    const haloGeo = box.clone();
+    haloGeo.setAttribute('aMonSeed', new THREE.InstancedBufferAttribute(new Float32Array(haloSeeds), 1));
+    const haloMesh = new THREE.InstancedMesh(haloGeo, this.skyMonumentMat, haloMats.length);
+    haloMesh.frustumCulled = false;
+    for (let i = 0; i < haloMats.length; i++) haloMesh.setMatrixAt(i, haloMats[i]);
+    haloMesh.instanceMatrix.needsUpdate = true;
+    this.brokenHaloGroup.add(haloMesh);
+    this.group.add(this.brokenHaloGroup);
+
+    // ---------------------------------------------------------------- INVERTED HANGING CATHEDRAL
+    const cat = new THREE.Object3D();
+    cat.position.set(88, 128, -138);
+    cat.rotation.set(0.12, -0.36, 0.18);
+    cat.updateMatrix();
+    this.invertedCathedralGroup = new THREE.Group();
+    this.invertedCathedralGroup.name = 'InvertedHangingCathedral';
+    const tiers = [
+      { y: 0, w: 54, d: 44, h: 13 },
+      { y: -13, w: 42, d: 34, h: 12 },
+      { y: -25, w: 31, d: 26, h: 12 },
+      { y: -37, w: 21, d: 18, h: 11 },
+      { y: -48, w: 12, d: 11, h: 12 },
+    ];
+    for (let i = 0; i < tiers.length; i++) {
+      const t = tiers[i];
+      push(cat.matrix, 0, t.y, 0, t.w, t.h, t.d, 0, i * 0.14, 0, 0.42 + i * 0.08);
+      // Hanging buttresses peeling off each tier
+      const ribs = 8 - i;
+      for (let r = 0; r < ribs; r++) {
+        const a = (r / ribs) * Math.PI * 2 + i * 0.31;
+        const rr = t.w * 0.46;
+        push(
+          cat.matrix,
+          Math.cos(a) * rr,
+          t.y - t.h * 0.8,
+          Math.sin(a) * rr * 0.82,
+          3.0,
+          t.h * 1.7,
+          3.0,
+          Math.sin(a) * 0.18,
+          a,
+          Math.cos(a) * 0.18,
+          0.66 + (r % 4) * 0.05
+        );
+      }
+    }
+    // A crown of 9 downward-aimed spires (the "teeth") under the lowest tier
+    for (let r = 0; r < 9; r++) {
+      const a = (r / 9) * Math.PI * 2;
+      push(
+        cat.matrix,
+        Math.cos(a) * 6.4,
+        -74,
+        Math.sin(a) * 5.6,
+        2.1,
+        30,
+        2.1,
+        Math.sin(a) * 0.06,
+        a,
+        Math.cos(a) * 0.06,
+        0.92
+      );
+    }
+    const catGeo = box.clone();
+    catGeo.setAttribute('aMonSeed', new THREE.InstancedBufferAttribute(new Float32Array(seeds), 1));
+    const catMesh = new THREE.InstancedMesh(catGeo, this.skyMonumentMat, mats.length);
+    catMesh.frustumCulled = false;
+    for (let i = 0; i < mats.length; i++) catMesh.setMatrixAt(i, mats[i]);
+    catMesh.instanceMatrix.needsUpdate = true;
+    this.invertedCathedralGroup.add(catMesh);
+    this.group.add(this.invertedCathedralGroup);
+
+    this.skyMonumentMat = new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
+      uniforms: {
+        uTime: { value: 0 },
+        uAnomaly: { value: 0 },
+        uScanOrigin: { value: this.scanWaveOrigin },
+        uScanRadius: { value: -1.0 },
+      },
+      vertexShader: /* glsl */ `
+        attribute float aMonSeed;
+        uniform float uTime;
+        uniform float uAnomaly;
+        varying vec3 vWorldPos;
+        varying vec3 vNormalW;
+        varying vec2 vUv;
+        varying float vSeed;
+
+        float hash11M(float p) {
+          p = fract(p * 0.1031);
+          p *= p + 33.33;
+          return fract(p * (p + p));
+        }
+
+        void main() {
+          vUv = uv;
+          vSeed = aMonSeed;
+          vec4 wp = modelMatrix * instanceMatrix * vec4(position, 1.0);
+          vec3 nrm = mat3(modelMatrix) * mat3(instanceMatrix) * normal;
+          // Imperceptible breathing drift so the monuments never feel like static props.
+          wp.y += sin(uTime * 0.22 + aMonSeed * 27.0) * 1.6;
+          wp.x += cos(uTime * 0.17 + aMonSeed * 19.0) * 0.9;
+          float tick = floor(uTime * 9.0 + aMonSeed * 31.0);
+          if (hash11M(tick) > 0.985 - uAnomaly * 0.03) {
+            wp.x += (hash11M(tick + 3.7) - 0.5) * 14.0;
+            wp.z += (hash11M(tick + 9.1) - 0.5) * 8.0;
+          }
+          vWorldPos = wp.xyz;
+          vNormalW = normalize(nrm);
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec3 vWorldPos;
+        varying vec3 vNormalW;
+        varying vec2 vUv;
+        varying float vSeed;
+        uniform float uTime;
+        uniform float uAnomaly;
+        uniform vec3 uScanOrigin;
+        uniform float uScanRadius;
+
+        float hash31M(vec3 p) {
+          p = fract(p * 0.1031);
+          p += dot(p, p.yzx + 33.33);
+          return fract((p.x + p.y) * p.z);
+        }
+
+        void main() {
+          vec3 N = normalize(vNormalW) * (gl_FrontFacing ? 1.0 : -1.0);
+          vec3 V = normalize(cameraPosition - vWorldPos);
+          float ndl = clamp(dot(N, normalize(vec3(0.10, 0.55, -0.82))), 0.0, 1.0);
+          float rim = pow(1.0 - abs(dot(N, V)), 2.4);
+
+          // Voxelized corrosion chews the interior faces of the monument without softening the silhouette.
+          vec3 vc = floor(vWorldPos * 0.14);
+          float vh = hash31M(vc + floor(vSeed * 13.0));
+          if (vSeed < 0.72 && vh < 0.10 + uAnomaly * 0.06) discard;
+
+          vec3 base = vec3(0.004, 0.016, 0.058) * (0.35 + 0.95 * ndl);
+          // Colossal architectural lattice: vertical bus channels + floor seams glowing through the shell.
+          float seamY = smoothstep(0.02, 0.0, abs(fract(vWorldPos.y * 0.085) - 0.5) - 0.47);
+          float seamX = smoothstep(0.015, 0.0, abs(fract(vWorldPos.x * 0.06 + vWorldPos.z * 0.04) - 0.5) - 0.48);
+          float packet = pow(fract(vWorldPos.y * 0.012 - uTime * 0.45 + vSeed * 5.0), 6.0);
+          vec3 neon = mix(vec3(0.16, 0.86, 1.0), vec3(1.0, 0.16, 0.42), clamp(step(0.62, fract(vSeed * 9.0)) * 0.85 + uAnomaly * 0.5, 0.0, 1.0));
+
+          vec3 col = base + neon * (rim * 0.55 + (seamY + seamX) * (0.55 + packet * 1.4));
+          col += neon * packet * 0.9;
+
+          if (uScanRadius > 0.0) {
+            float dScan = length(vWorldPos.xz - uScanOrigin.xz);
+            col += vec3(0.42, 0.98, 1.0) * exp(-abs(dScan - uScanRadius) * 0.32) * 1.5;
+          }
+
+          float camDist = length(cameraPosition - vWorldPos);
+          col = mix(col, vec3(0.012, 0.10, 0.28), clamp(1.0 - exp(-0.000028 * camDist * camDist), 0.0, 0.92));
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `,
+    });
+
+    haloMesh.material = this.skyMonumentMat;
+    catMesh.material = this.skyMonumentMat;
+  }
+
+  /**
+   * Orbital debris vortex around the Singularity Spire: 240 torn slabs spiralling upward in a
+   * collapsing double helix. Fully GPU-animated (zero per-frame CPU matrix work) and it glitch-snaps
+   * whole arcs sideways during anomaly surges, so the tower reads as actively disintegrating.
+   */
+  private buildSpireVortex(): void {
+    const COUNT = 240;
+    const geo = new THREE.BoxGeometry(1, 1, 1, 1, 1, 1);
+    const orbit = new Float32Array(COUNT * 4);
+    for (let i = 0; i < COUNT; i++) {
+      const f = i / COUNT;
+      orbit[i * 4 + 0] = f; // angle fraction
+      orbit[i * 4 + 1] = 15.0 + Math.pow(f, 0.7) * 62.0 + Math.random() * 12.0; // radius
+      orbit[i * 4 + 2] = Math.random() * 118.0 + 4.0; // height along spire
+      orbit[i * 4 + 3] = Math.random(); // seed
+    }
+    geo.setAttribute('aOrbit', new THREE.InstancedBufferAttribute(orbit, 4));
+
+    this.spireVortexMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: { value: 0 },
+        uAnomaly: { value: 0 },
+        uCenter: { value: new THREE.Vector3(0, this.getTerrainHeight(0, -56), -56) },
+      },
+      vertexShader: /* glsl */ `
+        attribute vec4 aOrbit;
+        uniform float uTime;
+        uniform float uAnomaly;
+        uniform vec3 uCenter;
+        varying vec3 vWorldPos;
+        varying float vSeed;
+        varying float vRim;
+
+        float hash11V(float p) {
+          p = fract(p * 0.1031);
+          p *= p + 33.33;
+          return fract(p * (p + p));
+        }
+
+        void main() {
+          vSeed = aOrbit.w;
+          float ang = aOrbit.x * 6.2831853 + uTime * (0.055 + 0.05 * aOrbit.w) * (1.0 + uAnomaly * 2.2);
+          float rise = mod(aOrbit.z + uTime * (1.6 + aOrbit.w * 2.4), 132.0);
+          vec3 center = vec3(
+            cos(ang) * aOrbit.y,
+            uCenter.y + rise,
+            sin(ang) * aOrbit.y * 0.82
+          );
+
+          // Whole orbital arcs snap sideways for a frame during surges.
+          float tick = floor(uTime * 11.0 + aOrbit.w * 40.0);
+          float snapGate = hash11V(tick * 0.77 + aOrbit.x * 13.0);
+          if (snapGate > 0.97 - uAnomaly * 0.08) {
+            center.x += (snapGate - 0.5) * (10.0 + uAnomaly * 26.0);
+            center.y += (hash11V(tick + 4.1) - 0.5) * 8.0;
+          }
+
+          vec3 local = position * vec3(1.0 + aOrbit.w * 4.0, 0.22 + aOrbit.w * 0.4, 0.5 + aOrbit.w * 1.2);
+          float cr = cos(ang), sr = sin(ang);
+          local = vec3(local.x * cr - local.z * sr, local.y, local.x * sr + local.z * cr);
+          vec3 wp = center + local;
+          vWorldPos = wp;
+          vRim = abs(position.x) + abs(position.y) * 2.0 + abs(position.z) * 2.0;
+          gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec3 vWorldPos;
+        varying float vSeed;
+        varying float vRim;
+        uniform float uTime;
+        uniform float uAnomaly;
+        void main() {
+          float pulse = 0.45 + 0.55 * sin(uTime * 2.2 + vSeed * 33.0);
+          vec3 col = mix(vec3(0.20, 0.86, 1.0), vec3(1.0, 0.16, 0.40), step(0.74, fract(vSeed * 11.0)) * 0.9 + uAnomaly * 0.4);
+          float camDist = length(cameraPosition - vWorldPos);
+          float alpha = (0.14 + 0.46 * pulse) * exp(-0.00003 * camDist * camDist);
+          gl_FragColor = vec4(col, alpha * (0.55 + 0.45 * step(1.4, vRim)));
+        }
+      `,
+    });
+
+    const mesh = new THREE.InstancedMesh(geo, this.spireVortexMat, COUNT);
+    mesh.frustumCulled = false;
+    const d = new THREE.Object3D();
+    for (let i = 0; i < COUNT; i++) {
+      d.position.set(0, 0, 0);
+      d.rotation.set(Math.random() * 3.14, Math.random() * 3.14, Math.random() * 3.14);
+      d.scale.setScalar(1);
+      d.updateMatrix();
+      mesh.setMatrixAt(i, d.matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    this.group.add(mesh);
   }
 
   private buildFloatingAtmosphere(): void {
@@ -3543,6 +4586,1011 @@ export class GlitchWorld {
    *  - 12 engraved monoliths orbiting the sanctuary, slowly turning under the beam.
    *  - A ring of leaning grave-marker slabs in the sunken chasms for depth cues up close.
    */
+
+  /**
+   * Structural craft pass — the "someone built this" layer.
+   *
+   * Everything here is geometry the player can walk right up to and find detail on: handrails with
+   * bolted base plates and collars, a cable tray with three sagging conductors per bay, junction
+   * boxes with flickering status LEDs, diagonal bracing, plus torn rebar, broken slabs and rubble
+   * scattered off the deck. All of it collapses into two merged draw calls (metal + LEDs) and
+   * three instanced calls (rock, rebar, slab), so it costs almost nothing.
+   */
+  private buildStructuralCraft(): void {
+    const RAIL_X = 3.28;
+    const Z_START = 21.6;
+    const Z_END = -38.0;
+    const BAY = 2.6;
+
+    const metalMat = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uAnomaly: { value: 0 },
+        uFogColor: { value: new THREE.Color(0x011330) },
+        uFogDensity: { value: 0.0056 },
+      },
+      vertexShader: /* glsl */ `
+        varying vec3 vWorldPos;
+        varying vec3 vNormalW;
+        varying vec2 vUv;
+        varying float vDepthAlong;
+        void main() {
+          vUv = uv;
+          vec4 wp = vec4(position, 1.0);
+          vec3 nrm = normal;
+          #ifdef USE_INSTANCING
+            wp = instanceMatrix * wp;
+            nrm = mat3(instanceMatrix) * nrm;
+          #endif
+          wp = modelMatrix * wp;
+          vWorldPos = wp.xyz;
+          vNormalW = normalize(mat3(modelMatrix) * nrm);
+          vDepthAlong = wp.z;
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec3 vWorldPos;
+        varying vec3 vNormalW;
+        varying vec2 vUv;
+        varying float vDepthAlong;
+        uniform float uTime;
+        uniform float uAnomaly;
+        uniform vec3 uFogColor;
+        uniform float uFogDensity;
+
+        float hash21G(vec2 p) {
+          p = fract(p * vec2(127.1, 311.7));
+          p += dot(p, p + 34.23);
+          return fract(p.x * p.y);
+        }
+
+        void main() {
+          vec3 nrm = normalize(vNormalW);
+          vec3 viewDir = normalize(cameraPosition - vWorldPos);
+
+          // Machined plate read: darkened bevels toward every face edge, plus a fine milled grain.
+          float edge = min(min(vUv.x, 1.0 - vUv.x), min(vUv.y, 1.0 - vUv.y));
+          float bevel = smoothstep(0.0, 0.055, edge);
+          float milled = 0.5 + 0.5 * sin(vUv.y * 420.0 + vUv.x * 26.0);
+
+          // Rust and grime in world space so it crawls across welded seams.
+          vec2 qA = vec2(vWorldPos.x * 0.9 + vWorldPos.z * 0.9, vWorldPos.y * 0.9);
+          float grime = hash21G(floor(qA * 2.0)) * 0.45 + hash21G(floor(qA * 7.0)) * 0.55;
+          float streak = smoothstep(0.35, 0.95, vUv.y) * (0.35 + 0.65 * grime);
+
+          vec3 steel = vec3(0.020, 0.030, 0.048);
+          steel *= 0.62 + 0.30 * bevel + 0.10 * milled;
+          vec3 col = steel;
+          col = mix(col, vec3(0.115, 0.052, 0.026) * (0.5 + grime), clamp(grime * 0.55 - 0.16, 0.0, 0.55));
+
+          // Lighting: same key direction as the boulevard, plus a cold sky fill and a wet rim.
+          vec3 keyDir = normalize(vec3(0.12, 0.62, -0.78));
+          float ndl = clamp(dot(nrm, keyDir), 0.0, 1.0);
+          float sky = clamp(nrm.y * 0.5 + 0.5, 0.0, 1.0);
+          float rim = pow(1.0 - clamp(dot(nrm, viewDir), 0.0, 1.0), 2.6);
+          vec3 halfDir = normalize(keyDir + viewDir);
+          float spec = pow(max(dot(nrm, halfDir), 0.0), 56.0) * bevel;
+
+          vec3 glowTint = mix(vec3(0.34, 0.84, 1.0), vec3(1.0, 0.20, 0.28), uAnomaly * 0.7);
+          col *= 0.55 + 0.85 * ndl;
+          col += vec3(0.02, 0.075, 0.16) * sky * 0.55;
+          col += glowTint * (rim * 0.34 + spec * 0.85);
+          col += glowTint * streak * 0.045;
+
+          // A slow diagnostic sweep runs down the rail every few seconds.
+          float sweep = fract((uTime * 0.16 - vDepthAlong * 0.012));
+          col += glowTint * smoothstep(0.985, 1.0, sweep) * 0.55;
+
+          // Aerial perspective, matched to the cathedral shader so the greeble sits in the air.
+          float camDist = length(cameraPosition - vWorldPos);
+          float heightMist = exp(-max(vWorldPos.y + 1.5, 0.0) * 0.022);
+          float airDensity = uFogDensity * (0.72 + heightMist * 1.25);
+          float fogFactor = 1.0 - exp(-airDensity * airDensity * camDist * camDist);
+          vec3 viewW = normalize(vWorldPos - cameraPosition);
+          float sunScatter = pow(max(dot(viewW, normalize(vec3(0.0, 0.26, -0.96))), 0.0), 5.0);
+          vec3 aerialTint = mix(vec3(0.008, 0.078, 0.20), vec3(0.035, 0.21, 0.47), clamp((vWorldPos.y + 4.0) * 0.014, 0.0, 1.0));
+          aerialTint += vec3(0.16, 0.42, 0.88) * sunScatter * 0.72;
+          col = mix(col, aerialTint, clamp(fogFactor, 0.0, 0.95));
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `,
+    });
+
+    const ledMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: { value: 0 },
+        uAnomaly: { value: 0 },
+      },
+      vertexShader: /* glsl */ `
+        varying vec3 vWorldPos;
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          vec4 wp = vec4(position, 1.0);
+          #ifdef USE_INSTANCING
+            wp = instanceMatrix * wp;
+          #endif
+          wp = modelMatrix * wp;
+          vWorldPos = wp.xyz;
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec3 vWorldPos;
+        varying vec2 vUv;
+        uniform float uTime;
+        uniform float uAnomaly;
+        float hash21L(vec2 p) {
+          p = fract(p * vec2(127.1, 311.7));
+          p += dot(p, p + 34.23);
+          return fract(p.x * p.y);
+        }
+        void main() {
+          vec3 cell = floor(vWorldPos * 7.0);
+          float seed = hash21L(cell.xz + cell.y);
+          // Most diodes are dead; the survivors stutter at their own rate.
+          float alive = step(0.42, seed);
+          float rate = 0.5 + seed * 5.0;
+          float blink = step(0.35, fract(uTime * rate + seed * 13.0));
+          float core = smoothstep(0.5, 0.06, length(vUv - 0.5));
+          vec3 tint = mix(vec3(0.22, 0.92, 1.0), vec3(1.0, 0.24, 0.30), uAnomaly * 0.75);
+          float dist = length(cameraPosition - vWorldPos);
+          float fade = exp(-dist * dist * 0.00035);
+          float energy = alive * blink * (0.35 + core * 1.9);
+          gl_FragColor = vec4(tint * energy * fade * 1.5, 1.0);
+        }
+      `,
+    });
+
+    const metal: THREE.BufferGeometry[] = [];
+    const leds: THREE.BufferGeometry[] = [];
+    const tmpA = new THREE.Vector3();
+    const tmpB = new THREE.Vector3();
+    const zAxis = new THREE.Vector3(0, 0, 1);
+
+    const pushBox = (
+      w: number,
+      h: number,
+      d: number,
+      x: number,
+      y: number,
+      z: number,
+      ry = 0,
+      rx = 0,
+      rz = 0,
+      into: THREE.BufferGeometry[] = metal
+    ) => {
+      const g = new THREE.BoxGeometry(w, h, d);
+      if (rx || ry || rz) {
+        g.applyQuaternion(new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)));
+      }
+      g.translate(x, y, z);
+      into.push(g);
+    };
+
+    /** A rectangular bar spanning two points, its long axis along the span. */
+    const pushSegment = (w: number, h: number, a: THREE.Vector3, b: THREE.Vector3) => {
+      tmpA.subVectors(b, a);
+      const len = tmpA.length();
+      if (len < 1e-4) return;
+      const g = new THREE.BoxGeometry(w, h, len);
+      const quat = new THREE.Quaternion().setFromUnitVectors(zAxis, tmpA.clone().normalize());
+      const mid = new THREE.Vector3().addVectors(a, b).multiplyScalar(0.5);
+      g.applyMatrix4(new THREE.Matrix4().compose(mid, quat, new THREE.Vector3(1, 1, 1)));
+      metal.push(g);
+    };
+
+    /** A conductor hanging in a catenary between two anchors. */
+    const pushSag = (x: number, yA: number, zA: number, yB: number, zB: number, sag: number, r: number) => {
+      const curve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(x, yA, zA),
+        new THREE.Vector3(x, (yA + yB) * 0.5 - sag, (zA + zB) * 0.5),
+        new THREE.Vector3(x, yB, zB),
+      ]);
+      metal.push(new THREE.TubeGeometry(curve, 9, r, 5, false));
+    };
+
+    const bays = Math.floor((Z_START - Z_END) / BAY);
+    for (const side of [-1, 1]) {
+      const x = side * RAIL_X;
+      let prev: { y: number; z: number } | null = null;
+
+      for (let i = 0; i <= bays; i++) {
+        const z = Z_START - i * BAY;
+        const y = this.getTerrainHeight(x, z);
+
+        // Post stack: base plate, four anchor bolts, collar, shaft, cap.
+        pushBox(0.26, 0.035, 0.26, x, y + 0.018, z);
+        for (const bx of [-1, 1]) {
+          for (const bz of [-1, 1]) {
+            pushBox(0.032, 0.026, 0.032, x + bx * 0.09, y + 0.046, z + bz * 0.09);
+          }
+        }
+        pushBox(0.115, 0.07, 0.115, x, y + 0.28, z);
+        pushBox(0.078, 1.08, 0.078, x, y + 0.56, z);
+        pushBox(0.098, 0.028, 0.098, x, y + 1.11, z);
+
+        // Continuous rails, tray and toe board along each bay.
+        if (prev) {
+          const a = new THREE.Vector3(x, prev.y + 1.06, prev.z);
+          const b = new THREE.Vector3(x, y + 1.06, z);
+          pushSegment(0.062, 0.055, a, b);
+          // Rail web underneath, so the handrail reads as a welded channel, not a tube.
+          pushSegment(0.028, 0.075, a.clone().setY(a.y - 0.055), b.clone().setY(b.y - 0.055));
+
+          const mA = new THREE.Vector3(x, prev.y + 0.60, prev.z);
+          const mB = new THREE.Vector3(x, y + 0.60, z);
+          pushSegment(0.040, 0.040, mA, mB);
+
+          const kA = new THREE.Vector3(x, prev.y + 0.075, prev.z);
+          const kB = new THREE.Vector3(x, y + 0.075, z);
+          pushSegment(0.024, 0.15, kA, kB);
+
+          // Cable tray cantilevered outboard, with three conductors sagging inside it.
+          const trayX = x + side * 0.20;
+          const trayY = y + 0.34;
+          const trayPrevY = prev.y + 0.34;
+          pushSegment(0.24, 0.022, new THREE.Vector3(trayX, trayPrevY, prev.z), new THREE.Vector3(trayX, trayY, z));
+          pushSegment(0.022, 0.10, new THREE.Vector3(trayX - side * 0.11, trayPrevY + 0.05, prev.z), new THREE.Vector3(trayX - side * 0.11, trayY + 0.05, z));
+          pushSegment(0.022, 0.10, new THREE.Vector3(trayX + side * 0.11, trayPrevY + 0.05, prev.z), new THREE.Vector3(trayX + side * 0.11, trayY + 0.05, z));
+          for (let c = 0; c < 3; c++) {
+            pushSag(trayX - side * (0.07 - c * 0.07), trayPrevY + 0.03, prev.z, trayY + 0.03, z, 0.10 - c * 0.02, 0.019 + c * 0.006);
+          }
+
+          // Overhead conduit slung between the posts.
+          pushSag(x + side * 0.06, prev.y + 1.30, prev.z, y + 1.30, z, 0.26, 0.026);
+
+          // Every third bay gets a diagonal brace: the structure should look braced, not glued.
+          if (i % 3 === 0) {
+            pushSegment(0.05, 0.05, new THREE.Vector3(x, prev.y + 0.14, prev.z), new THREE.Vector3(x, y + 0.98, z));
+          }
+        }
+
+        // Junction box on every fourth post, with a status diode and a conduit up the shaft.
+        if (i % 4 === 2) {
+          const bx = x + side * 0.14;
+          pushBox(0.17, 0.44, 0.30, bx, y + 0.72, z);
+          pushBox(0.20, 0.05, 0.34, bx, y + 0.955, z);
+          pushBox(0.20, 0.05, 0.34, bx, y + 0.485, z);
+          pushBox(0.03, 0.30, 0.03, bx, y + 1.16, z);
+          pushBox(0.06, 0.06, 0.06, bx, y + 1.32, z);
+          pushBox(0.045, 0.022, 0.012, bx + side * 0.088, y + 0.84, z + 0.07, 0, 0, 0, leds);
+          pushBox(0.045, 0.022, 0.012, bx + side * 0.088, y + 0.78, z + 0.07, 0, 0, 0, leds);
+
+          // A little service loop of cable clipped to the deck.
+          const loop = new THREE.CatmullRomCurve3([
+            new THREE.Vector3(bx + side * 0.05, y + 0.46, z + 0.04),
+            new THREE.Vector3(bx + side * 0.14, y + 0.24, z + 0.26),
+            new THREE.Vector3(bx + side * 0.10, y + 0.03, z + 0.46),
+          ]);
+          metal.push(new THREE.TubeGeometry(loop, 8, 0.021, 5, false));
+        }
+
+        prev = { y, z };
+      }
+
+      // Low guide strip along the very edge, stuttering light every few metres.
+      for (let i = 0; i < bays; i += 3) {
+        const z = Z_START - i * BAY - 1.0;
+        const y = this.getTerrainHeight(x + side * 0.42, z);
+        pushBox(0.06, 0.014, 0.34, x + side * 0.42, y + 0.02, z, 0, 0, 0, leds);
+      }
+    }
+
+    // ---------------------------------------------------------------- SUSPENDED SERVICES
+    // Everything overhead hangs off the 8 crown-vault keystones of the nave. Hanger rods,
+    // insulator stacks, catenary bus spans and dead pendant lamps: the ceiling you never look at
+    // until the camera tips back during the arrival, and then it should be dense with machinery.
+    for (let i = 0; i < 8; i++) {
+      const z = 12.0 - i * 7.6;
+      const ground = this.getTerrainHeight(0, z);
+      const topY = ground + 11.8 + (i % 2) * 1.1;
+      const beamY = topY - 0.55;
+
+      // Clamp brackets gripping the cross-beam, and the hanger rods beneath them.
+      for (const sx of [-2.7, 2.7]) {
+        pushBox(0.16, 0.30, 0.34, sx, beamY, z);
+        pushBox(0.05, 0.95, 0.05, sx, beamY - 0.48, z);
+      }
+      // Spreader beam that the service drops hang from.
+      pushBox(5.55, 0.12, 0.12, 0, beamY - 0.96, z);
+      pushBox(0.12, 0.22, 0.20, -2.0, beamY - 0.96, z);
+      pushBox(0.12, 0.22, 0.20, 2.0, beamY - 0.96, z);
+      pushBox(0.12, 0.22, 0.20, 0, beamY - 0.96, z);
+      for (const gx of [-4.2, 4.2]) {
+        pushBox(0.10, 0.10, 0.26, gx, beamY - 0.96, z);
+      }
+
+      // Three service drops at different depths: cables, insulator stacks, tray, junction box.
+      for (let d = 0; d < 3; d++) {
+        const dx = (d - 1) * 1.9;
+        const dropLen = 3.1 + d * 0.85;
+        const startY = beamY - 1.02;
+        const endY = startY - dropLen;
+        pushBox(0.028, 0.028, 0.028, dx, startY - 0.06, z);
+        for (let ins = 0; ins < 3; ins++) {
+          const g = new THREE.CylinderGeometry(0.085, 0.085, 0.045, 8, 1);
+          g.translate(dx, startY - 0.16 - ins * 0.07, z);
+          metal.push(g);
+        }
+        // Bundled conductors with a little slack.
+        for (let c = 0; c < 2; c++) {
+          const off = (c - 0.5) * 0.075;
+          const curve = new THREE.CatmullRomCurve3([
+            new THREE.Vector3(dx + off, startY - 0.38, z + off),
+            new THREE.Vector3(dx + off * 1.6, (startY + endY) * 0.5, z + 0.10),
+            new THREE.Vector3(dx + off, endY, z + 0.04),
+          ]);
+          metal.push(new THREE.TubeGeometry(curve, 8, 0.016, 5, false));
+        }
+        // Clipped harness bands down the drop.
+        for (let b = 1; b <= 3; b++) {
+          const by = startY - 0.38 - (dropLen - 0.4) * (b / 4);
+          pushBox(0.16, 0.035, 0.09, dx, by, z + 0.04);
+        }
+        // A tray or a junction box on the end of the drop.
+        if (d === 1) {
+          pushBox(0.52, 0.075, 0.34, dx, endY, z + 0.04);
+          pushBox(0.30, 0.24, 0.22, dx, endY - 0.16, z + 0.04);
+          pushBox(0.035, 0.02, 0.012, dx + 0.09, endY - 0.12, z + 0.16, 0, 0, 0, leds);
+          pushBox(0.035, 0.02, 0.012, dx - 0.06, endY - 0.20, z + 0.16, 0, 0, 0, leds);
+        } else {
+          pushBox(0.44, 0.06, 0.28, dx, endY, z + 0.04);
+          // Dead pendant lamp swinging under it: shade, cage, and a single dim filament.
+          const shade = new THREE.CylinderGeometry(0.04, 0.20, 0.20, 10, 1, false);
+          shade.translate(dx, endY - 0.20, z + 0.04);
+          metal.push(shade);
+          pushBox(0.012, 0.13, 0.012, dx, endY - 0.36, z + 0.04);
+          pushBox(0.055, 0.055, 0.055, dx, endY - 0.44, z + 0.04, 0, 0, 0, leds);
+          for (let cage = 0; cage < 3; cage++) {
+            const a = (cage / 3) * Math.PI * 2;
+            pushBox(0.012, 0.16, 0.012, dx + Math.cos(a) * 0.055, endY - 0.36, z + 0.04 + Math.sin(a) * 0.055);
+          }
+        }
+      }
+
+      // Catenary bus spans running to the next keystone, on both flanks of the nave.
+      if (i < 7) {
+        const nz = 12.0 - (i + 1) * 7.6;
+        const nGround = this.getTerrainHeight(0, nz);
+        const nTopY = nGround + 11.8 + ((i + 1) % 2) * 1.1;
+        for (const side of [-1, 1]) {
+          for (let c = 0; c < 2; c++) {
+            const y = topY - 1.6 - c * 0.55;
+            const ny = nTopY - 1.6 - c * 0.55;
+            const curve = new THREE.CatmullRomCurve3([
+              new THREE.Vector3(side * (4.05 + c * 0.18), y, z),
+              new THREE.Vector3(side * (3.55 + c * 0.30), (y + ny) * 0.5 - 0.85, (z + nz) * 0.5),
+              new THREE.Vector3(side * (4.05 + c * 0.18), ny, nz),
+            ]);
+            metal.push(new THREE.TubeGeometry(curve, 12, 0.022, 5, false));
+          }
+          // Vertical riser tying the span into the beam ends.
+          pushBox(0.03, 1.1, 0.03, side * 4.05, topY - 1.05, z);
+          pushBox(0.16, 0.10, 0.16, side * 4.05, topY - 0.55, z);
+        }
+      }
+    }
+
+    // ---------------------------------------------------------------- DECK-LEVEL CRAFT
+    // Cable runs sagging along the deck gutters, coils hung on the posts, and cast-iron drain
+    // grates set into the slab: the details you only notice when you are standing on them.
+    for (const side of [-1, 1]) {
+      const runX = side * 3.05;
+      for (let c = 0; c < 2; c++) {
+        const pts: THREE.Vector3[] = [];
+        for (let i = 0; i <= bays; i++) {
+          const z = Z_START - i * BAY;
+          const y = this.getTerrainHeight(runX, z) + 0.045 + c * 0.032;
+          // Alternate the sag per bay so the bundle looks hand-dressed, not extruded.
+          const sag = (i % 2 === 0 ? 0.02 : 0.045) * (c + 1);
+          pts.push(new THREE.Vector3(runX - side * c * 0.05, y - sag, z));
+        }
+        const curve = new THREE.CatmullRomCurve3(pts);
+        metal.push(new THREE.TubeGeometry(curve, bays * 5, 0.026 + c * 0.012, 5, false));
+      }
+      // Clamps holding the run down, every other bay.
+      for (let i = 0; i < bays; i += 2) {
+        const z = Z_START - i * BAY;
+        const y = this.getTerrainHeight(runX, z);
+        pushBox(0.20, 0.055, 0.075, runX, y + 0.055, z);
+        pushBox(0.03, 0.05, 0.03, runX - 0.09, y + 0.03, z);
+        pushBox(0.03, 0.05, 0.03, runX + 0.09, y + 0.03, z);
+      }
+      // Spare cable coils hung on every fifth post, swaying slightly by construction.
+      for (let i = 3; i < bays; i += 5) {
+        const z = Z_START - i * BAY;
+        const y = this.getTerrainHeight(side * RAIL_X, z);
+        const coil = new THREE.TorusGeometry(0.19, 0.022, 5, 14);
+        coil.applyQuaternion(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, side * 0.22, 0)));
+        coil.translate(side * (RAIL_X + 0.16), y + 0.72, z);
+        metal.push(coil);
+        pushBox(0.04, 0.11, 0.04, side * (RAIL_X + 0.16), y + 0.93, z);
+      }
+    }
+
+    // Drain grates: cast frames with six bars each, set flush into the causeway slab.
+    for (let i = 0; i < 9; i++) {
+      const z = 18.0 - i * 6.4;
+      // Kept out of the recessed bus trench (|x| < 1.8) so they sit flush on the slab.
+      const x = i % 2 === 0 ? -2.55 : 2.55;
+      const y = this.getTerrainHeight(x, z);
+      pushBox(0.62, 0.03, 0.34, x, y + 0.012, z);
+      pushBox(0.68, 0.05, 0.05, x, y + 0.02, z - 0.17);
+      pushBox(0.68, 0.05, 0.05, x, y + 0.02, z + 0.17);
+      for (let b = 0; b < 6; b++) {
+        pushBox(0.035, 0.045, 0.30, x - 0.25 + b * 0.10, y + 0.026, z);
+      }
+    }
+
+    const mergedMetal = mergeGeometries(metal, false);
+    for (const g of metal) g.dispose();
+    if (mergedMetal) {
+      const mesh = new THREE.Mesh(mergedMetal, metalMat);
+      mesh.frustumCulled = false;
+      this.group.add(mesh);
+    }
+    const mergedLeds = mergeGeometries(leds, false);
+    for (const g of leds) g.dispose();
+    if (mergedLeds) {
+      const mesh = new THREE.Mesh(mergedLeds, ledMat);
+      mesh.frustumCulled = false;
+      mesh.renderOrder = 3;
+      this.group.add(mesh);
+    }
+
+    this.craftMetalMat = metalMat;
+    this.craftLedMat = ledMat;
+
+    // ---------------------------------------------------------------- RUBBLE, REBAR, SLABS
+    const rockVariants: THREE.BufferGeometry[] = [];
+    for (let v = 0; v < 3; v++) {
+      const g = new THREE.IcosahedronGeometry(1, 1);
+      const p = g.getAttribute('position');
+      const seed = 17 + v * 31;
+      for (let i = 0; i < p.count; i++) {
+        const hx = Math.sin((p.getX(i) + seed) * 12.9898 + p.getY(i) * 78.233) * 43758.5453;
+        const hy = Math.sin((p.getY(i) + seed) * 39.425 + p.getZ(i) * 12.9898) * 24634.6345;
+        const hz = Math.sin((p.getZ(i) + seed) * 73.156 + p.getX(i) * 39.425) * 56445.2341;
+        p.setXYZ(
+          i,
+          p.getX(i) * (0.72 + Math.abs(hx - Math.floor(hx)) * 0.55),
+          p.getY(i) * (0.42 + Math.abs(hy - Math.floor(hy)) * 0.40),
+          p.getZ(i) * (0.72 + Math.abs(hz - Math.floor(hz)) * 0.55)
+        );
+      }
+      g.computeVertexNormals();
+      rockVariants.push(g);
+    }
+
+    const rebarGeo = new THREE.CylinderGeometry(0.016, 0.022, 1.0, 5, 1);
+    rebarGeo.translate(0, 0.5, 0);
+    const slabGeo = new THREE.BoxGeometry(1.0, 0.13, 0.66);
+    {
+      const p = slabGeo.getAttribute('position');
+      for (let i = 0; i < p.count; i++) {
+        const jitter = Math.sin(p.getX(i) * 51.7 + p.getZ(i) * 12.3) * 0.012;
+        p.setY(i, p.getY(i) + jitter);
+      }
+      slabGeo.computeVertexNormals();
+    }
+
+    const rng = (() => {
+      let a = 0x2545f491;
+      return () => {
+        a = (a * 1664525 + 1013904223) >>> 0;
+        return a / 4294967296;
+      };
+    })();
+
+    const ROCK_COUNT = 132;
+    const rocks = rockVariants.map((g) => new THREE.InstancedMesh(g, metalMat, Math.ceil(ROCK_COUNT / 3)));
+    const rockCounters = [0, 0, 0];
+    const REBAR_COUNT = 96;
+    const rebar = new THREE.InstancedMesh(rebarGeo, metalMat, REBAR_COUNT);
+    const SLAB_COUNT = 54;
+    const slabs = new THREE.InstancedMesh(slabGeo, metalMat, SLAB_COUNT);
+
+    const placeOnGround = (mesh: THREE.InstancedMesh, idx: number, x: number, z: number) => {
+      const y = this.getTerrainHeight(x, z);
+      this.dummy.position.set(x, y, z);
+      return y;
+    };
+
+    for (let i = 0; i < ROCK_COUNT; i++) {
+      const v = i % 3;
+      const side = rng() > 0.5 ? 1 : -1;
+      const along = 24 - rng() * 66;
+      const out = 3.45 + Math.pow(rng(), 1.6) * 6.5;
+      const x = side * out;
+      const y = placeOnGround(rocks[v], rockCounters[v], x, along);
+      const s = 0.10 + Math.pow(rng(), 2.2) * 0.55;
+      this.dummy.position.y = y - s * 0.22;
+      this.dummy.rotation.set(rng() * 0.4, rng() * Math.PI * 2, rng() * 0.4);
+      this.dummy.scale.set(s * (0.8 + rng() * 0.7), s * (0.55 + rng() * 0.7), s * (0.8 + rng() * 0.7));
+      this.dummy.updateMatrix();
+      rocks[v].setMatrixAt(rockCounters[v]++, this.dummy.matrix);
+    }
+    for (let v = 0; v < 3; v++) {
+      rocks[v].count = rockCounters[v];
+      rocks[v].instanceMatrix.needsUpdate = true;
+      rocks[v].frustumCulled = false;
+      this.group.add(rocks[v]);
+    }
+
+    for (let i = 0; i < REBAR_COUNT; i++) {
+      const side = rng() > 0.5 ? 1 : -1;
+      const x = side * (2.95 + Math.pow(rng(), 2.0) * 5.4);
+      const z = 23 - rng() * 64;
+      const y = placeOnGround(rebar, i, x, z);
+      this.dummy.position.y = y - 0.06;
+      this.dummy.rotation.set((rng() - 0.5) * 1.5, rng() * Math.PI * 2, (rng() - 0.5) * 1.5);
+      const s = 0.22 + rng() * 0.85;
+      this.dummy.scale.set(0.7 + rng() * 0.9, s, 0.7 + rng() * 0.9);
+      this.dummy.updateMatrix();
+      rebar.setMatrixAt(i, this.dummy.matrix);
+    }
+    rebar.instanceMatrix.needsUpdate = true;
+    rebar.frustumCulled = false;
+    this.group.add(rebar);
+
+    for (let i = 0; i < SLAB_COUNT; i++) {
+      const side = rng() > 0.5 ? 1 : -1;
+      const x = side * (3.5 + Math.pow(rng(), 1.4) * 7.0);
+      const z = 24 - rng() * 68;
+      const y = placeOnGround(slabs, i, x, z);
+      this.dummy.position.y = y - 0.02 + rng() * 0.05;
+      this.dummy.rotation.set((rng() - 0.5) * 0.28, rng() * Math.PI * 2, (rng() - 0.5) * 0.28);
+      this.dummy.scale.set(0.55 + rng() * 1.5, 0.6 + rng() * 0.9, 0.55 + rng() * 1.4);
+      this.dummy.updateMatrix();
+      slabs.setMatrixAt(i, this.dummy.matrix);
+    }
+    slabs.instanceMatrix.needsUpdate = true;
+    slabs.frustumCulled = false;
+    this.group.add(slabs);
+  }
+
+
+  /**
+   * Cathedral side chapels, a carved parapet and two lattice gantry cranes.
+   *
+   * The craft pass gave the causeway its industrial skin; this gives it architecture. Nine bays of
+   * buttressed arcade line both flanks — moulded plinths, entasis piers, pointed voussoir arches,
+   * hood moulds, quatrefoil tracery, gilded niche recesses and a dentilled frieze — and a low
+   * carved parapet runs right beside the player's feet so the detail is legible up close instead
+   * of only at silhouette distance. Two shipyard cranes stand behind them for scale.
+   *
+   * Everything is merged into four static meshes (stone / dark recesses / candle glow / steel),
+   * so the whole ensemble costs four draw calls.
+   */
+  private buildCathedralArcadesAndGantries(): void {
+    const stoneMat = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uAnomaly: { value: 0 },
+        uFogColor: { value: new THREE.Color(0x011330) },
+        uFogDensity: { value: 0.0056 },
+      },
+      vertexShader: /* glsl */ `
+        varying vec3 vWorldPos;
+        varying vec3 vNormalW;
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          vec4 wp = modelMatrix * vec4(position, 1.0);
+          vWorldPos = wp.xyz;
+          vNormalW = normalize(mat3(modelMatrix) * normal);
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec3 vWorldPos;
+        varying vec3 vNormalW;
+        varying vec2 vUv;
+        uniform float uTime;
+        uniform float uAnomaly;
+        uniform vec3 uFogColor;
+        uniform float uFogDensity;
+
+        float hash21S(vec2 p) {
+          p = fract(p * vec2(127.1, 311.7));
+          p += dot(p, p + 34.23);
+          return fract(p.x * p.y);
+        }
+
+        void main() {
+          vec3 nrm = normalize(vNormalW);
+          vec3 viewDir = normalize(cameraPosition - vWorldPos);
+
+          // Ashlar courses: horizontal beds wrap the whole structure, with staggered head joints.
+          float courseH = 0.46;
+          float row = floor(vWorldPos.y / courseH);
+          float mortarY = smoothstep(0.0, 0.035, abs(fract(vWorldPos.y / courseH) - 0.5) - 0.44);
+          float jointOffset = mod(row, 2.0) * 0.5 + hash21S(vec2(row, 3.7)) * 0.35;
+          float bx = vWorldPos.x * 0.9 + vWorldPos.z * 0.9 + jointOffset;
+          float mortarX = smoothstep(0.0, 0.03, abs(fract(bx) - 0.5) - 0.44);
+          float mortar = max(mortarY, mortarX);
+
+          // Each block is a slightly different stone: some warm, some cold, some water-stained.
+          float blockRand = hash21S(vec2(floor(bx), row));
+          vec3 stone = mix(vec3(0.058, 0.068, 0.092), vec3(0.098, 0.102, 0.112), blockRand);
+          stone *= 0.82 + 0.30 * hash21S(vec2(floor(bx) + 11.0, row + 5.0));
+          // Damp wicking up from the ground and streaking down from above.
+          float damp = smoothstep(2.2, 0.0, vWorldPos.y - floor(vWorldPos.y * 0.0)) * 0.5;
+          float streak = smoothstep(0.35, 0.95, hash21S(vec2(floor(bx * 0.7), 0.0))) * 0.35;
+          stone = mix(stone, stone * 0.62 + vec3(0.0, 0.012, 0.020), clamp(damp + streak * 0.5, 0.0, 0.8));
+          // Mortar is darker and matte.
+          stone = mix(stone, vec3(0.030, 0.036, 0.048), mortar * 0.85);
+
+          // Crisp carved edges catch the cold key light; the flats stay dark.
+          vec3 keyDir = normalize(vec3(0.12, 0.62, -0.78));
+          float ndl = clamp(dot(nrm, keyDir), 0.0, 1.0);
+          float sky = clamp(nrm.y * 0.5 + 0.5, 0.0, 1.0);
+          float rim = pow(1.0 - clamp(dot(nrm, viewDir), 0.0, 1.0), 3.0);
+
+          vec3 glowTint = mix(vec3(0.30, 0.80, 1.0), vec3(1.0, 0.24, 0.30), uAnomaly * 0.7);
+          vec3 col = stone * (0.30 + 0.72 * ndl);
+          col += vec3(0.012, 0.045, 0.10) * sky * 0.55;
+          col += glowTint * (rim * 0.20 + 0.035);
+
+          // A slow votive shimmer low down, as if lamps are burning in the chapels.
+          float votive = pow(0.5 + 0.5 * sin(uTime * 1.3 + vWorldPos.z * 0.6), 6.0);
+          col += vec3(0.55, 0.42, 0.24) * votive * smoothstep(3.4, 0.2, vWorldPos.y) * 0.05;
+
+          // Aerial perspective, matched to the rest of the world.
+          float camDist = length(cameraPosition - vWorldPos);
+          float heightMist = exp(-max(vWorldPos.y + 1.5, 0.0) * 0.022);
+          float airDensity = uFogDensity * (0.72 + heightMist * 1.25);
+          float fogFactor = 1.0 - exp(-airDensity * airDensity * camDist * camDist);
+          vec3 viewW = normalize(vWorldPos - cameraPosition);
+          float sunScatter = pow(max(dot(viewW, normalize(vec3(0.0, 0.26, -0.96))), 0.0), 5.0);
+          vec3 aerialTint = mix(vec3(0.008, 0.078, 0.20), vec3(0.035, 0.21, 0.47), clamp((vWorldPos.y + 4.0) * 0.014, 0.0, 1.0));
+          aerialTint += vec3(0.16, 0.42, 0.88) * sunScatter * 0.72;
+          col = mix(col, aerialTint, clamp(fogFactor, 0.0, 0.95));
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `,
+    });
+
+    const stone: THREE.BufferGeometry[] = [];
+    const recess: THREE.BufferGeometry[] = [];
+    const glow: THREE.BufferGeometry[] = [];
+
+    const pushStone = (w: number, h: number, d: number, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) => {
+      const g = new THREE.BoxGeometry(w, h, d);
+      if (rx || ry || rz) g.applyQuaternion(new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)));
+      g.translate(x, y, z);
+      stone.push(g);
+    };
+
+    /** One pointed (two-centre) arch of voussoirs in the Z–Y plane, extruded along X. */
+    const pushPointedArch = (
+      cx: number,
+      baseY: number,
+      cz: number,
+      halfSpan: number,
+      rise: number,
+      depth: number,
+      thick: number,
+      segments = 9
+    ) => {
+      const pts: Array<[number, number]> = [];
+      for (let k = 0; k <= segments; k++) {
+        const th = (k / segments) * (Math.PI / 2);
+        pts.push([cz - halfSpan * Math.cos(th), baseY + rise * Math.sin(th)]);
+      }
+      for (let k = segments; k >= 0; k--) {
+        const th = (k / segments) * (Math.PI / 2);
+        pts.push([cz + halfSpan * Math.cos(th), baseY + rise * Math.sin(th)]);
+      }
+      const axis = new THREE.Vector3(1, 0, 0);
+      for (let k = 0; k < pts.length - 1; k++) {
+        const [z0, y0] = pts[k];
+        const [z1, y1] = pts[k + 1];
+        const dz = z1 - z0;
+        const dy = y1 - y0;
+        const len = Math.hypot(dz, dy);
+        if (len < 1e-4) continue;
+        // Splay each voussoir slightly so seams read from close up.
+        const g = new THREE.BoxGeometry(depth * (0.97 + (k % 2) * 0.03), thick * 1.22, len * 1.16);
+        const a = Math.atan2(-dy, dz);
+        g.applyQuaternion(new THREE.Quaternion().setFromAxisAngle(axis, a));
+        g.translate(cx, (y0 + y1) * 0.5, (z0 + z1) * 0.5);
+        stone.push(g);
+      }
+    };
+
+    const BAYS = 9;
+    const BAY_LEN = 5.2;
+    const Z_FIRST = 9.6;
+    const CHAPEL_X = 8.15;
+
+    for (const side of [-1, 1]) {
+      for (let b = 0; b < BAYS; b++) {
+        const cz = Z_FIRST - b * BAY_LEN;
+        const x = side * CHAPEL_X;
+        // Inner face of the arcade points at the causeway, so offsets flip with the side.
+        const inX = x - side * 0.0;
+        const gY = this.getTerrainHeight(x, cz);
+        const pierH = 3.85;
+        const springY = gY + pierH;
+        const apexY = springY + 2.55;
+
+        // ---- plinth, moulded base, pier shaft with entasis, capital and abacus
+        pushStone(1.28, 0.34, 1.34, inX, gY + 0.17, cz);
+        pushStone(1.06, 0.10, 1.12, inX, gY + 0.39, cz);
+        const shaft = this.makeChamferedColumnGeometry(8, 0.55, 10);
+        shaft.scale(0.78, pierH - 0.40, 0.86);
+        shaft.translate(inX, gY + 0.44 + (pierH - 0.40) * 0.5, cz);
+        stone.push(shaft);
+        pushStone(0.92, 0.16, 0.98, inX, springY - 0.10, cz);
+        pushStone(1.06, 0.13, 1.10, inX, springY - 0.24, cz);
+        pushStone(1.16, 0.11, 1.20, inX, springY + 0.02, cz);
+
+        // ---- arch head, hood mould in front, keystone
+        const halfSpan = BAY_LEN * 0.5 - 0.10;
+        pushPointedArch(inX, springY + 0.06, cz, halfSpan, 2.45, 0.64, 0.30, 10);
+        pushPointedArch(inX - side * 0.44, springY + 0.06, cz, halfSpan + 0.16, 2.62, 0.20, 0.18, 10);
+        pushStone(0.78, 0.46, 0.20, inX - side * 0.30, apexY + 0.52, cz);
+        // trefoil finial above the apex
+        pushStone(0.24, 0.30, 0.24, inX - side * 0.30, apexY + 0.90, cz);
+
+        // ---- tracery: a ring inside the head plus a quatrefoil cluster above it
+        const ring = new THREE.TorusGeometry(halfSpan * 0.50, 0.048, 6, 22);
+        ring.rotateY(Math.PI / 2);
+        ring.translate(inX - side * 0.30, springY + 1.02, cz);
+        stone.push(ring);
+        for (let q = 0; q < 4; q++) {
+          const qa = (q / 4) * Math.PI * 2 + Math.PI * 0.25;
+          const qr = halfSpan * 0.20;
+          const t = new THREE.TorusGeometry(qr * 0.34, 0.026, 5, 14);
+          t.rotateY(Math.PI / 2);
+          t.translate(inX - side * 0.30, springY + 1.92 + Math.sin(qa) * qr * 0.7, cz + Math.cos(qa) * qr * 0.7);
+          stone.push(t);
+        }
+
+        // ---- niche recess: a dark cell behind a stepped frame, with a votive candle in it
+        pushStone(0.16, 2.24, 1.86, inX + side * 0.52, springY - 1.30, cz);
+        pushStone(0.22, 0.16, 2.06, inX + side * 0.46, springY - 0.14, cz);
+        pushStone(0.22, 0.16, 2.06, inX + side * 0.46, springY - 2.44, cz);
+        pushStone(0.22, 2.44, 0.16, inX + side * 0.46, springY - 1.30, cz - 0.95);
+        pushStone(0.22, 2.44, 0.16, inX + side * 0.46, springY - 1.30, cz + 0.95);
+        {
+          const cell = new THREE.BoxGeometry(0.30, 2.06, 1.60);
+          cell.translate(inX + side * 0.62, springY - 1.30, cz);
+          recess.push(cell);
+          const candle = new THREE.BoxGeometry(0.05, 0.10, 0.05);
+          candle.translate(inX + side * 0.48, springY - 2.30, cz);
+          glow.push(candle);
+        }
+
+        // ---- dentilled frieze band across the bay, and a small pinnacle on the pier head
+        pushStone(0.34, 0.26, BAY_LEN + 0.04, inX + side * 0.34, apexY + 1.42, cz);
+        pushStone(0.46, 0.10, BAY_LEN + 0.10, inX + side * 0.34, apexY + 1.60, cz);
+        for (let d = 0; d < 10; d++) {
+          pushStone(0.16, 0.14, 0.16, inX + side * 0.52, apexY + 1.24, cz - BAY_LEN * 0.45 + d * (BAY_LEN * 0.1));
+        }
+        // Pier pinnacle: tapered spike with a crocket collar.
+        const pin = this.makeChamferedColumnGeometry(6, 0.7, 6);
+        pin.scale(0.34, 1.15, 0.34);
+        pin.translate(inX, apexY + 2.34, cz);
+        stone.push(pin);
+        pushStone(0.44, 0.10, 0.44, inX, apexY + 2.98, cz);
+
+        // ---- flying rib from the pier head back into the dark, plus a wall stub behind the bay
+        pushStone(0.36, 0.34, 1.30, x + side * 0.62, springY + 0.30, cz + BAY_LEN * 0.5);
+        pushStone(0.26, 2.9, 0.42, x + side * 0.72, gY + 1.45, cz + BAY_LEN * 0.5);
+      }
+    }
+
+    // ---------------------------------------------------------------- CARVED PARAPET
+    // A low wall right beside the causeway, with relief medallions, weep holes and broken runs.
+    for (const side of [-1, 1]) {
+      const x = side * 4.18;
+      for (let i = 0; i < 30; i++) {
+        const z = 21.0 - i * 2.05;
+        // Two of every eleven bays have collapsed: the wall should look maintained, then not.
+        if (i % 11 === 4 || i % 11 === 9) continue;
+        const gY = this.getTerrainHeight(x, z);
+        const h = 0.86 + (i % 3) * 0.05;
+        pushStone(0.30, h, 2.0, x, gY + h * 0.5, z);
+        // Coping stone, slightly proud of the wall.
+        pushStone(0.42, 0.10, 2.02, x, gY + h + 0.05, z);
+        // Carved relief medallion: ring + inner boss, every other bay.
+        if (i % 2 === 0) {
+          const ring = new THREE.TorusGeometry(0.27, 0.035, 5, 18);
+          ring.rotateY(Math.PI / 2);
+          ring.translate(x - side * 0.17, gY + h * 0.55, z);
+          stone.push(ring);
+          pushStone(0.06, 0.14, 0.14, x - side * 0.17, gY + h * 0.55, z);
+        } else {
+          // Vertical blind arcading instead of a medallion.
+          for (let v = -1; v <= 1; v++) {
+            pushStone(0.05, h * 0.52, 0.06, x - side * 0.16, gY + h * 0.55, z + v * 0.52);
+          }
+        }
+        // Weep hole low in the wall.
+        pushStone(0.04, 0.07, 0.11, x - side * 0.16, gY + 0.16, z + 0.86);
+      }
+    }
+
+    const mergedStone = mergeGeometries(stone, false);
+    for (const g of stone) g.dispose();
+    if (mergedStone) {
+      const m = new THREE.Mesh(mergedStone, stoneMat);
+      m.frustumCulled = false;
+      this.group.add(m);
+    }
+    const mergedRecess = mergeGeometries(recess, false);
+    for (const g of recess) g.dispose();
+    if (mergedRecess) {
+      const m = new THREE.Mesh(mergedRecess, new THREE.MeshBasicMaterial({ color: 0x01040b }));
+      m.frustumCulled = false;
+      this.group.add(m);
+    }
+    const mergedGlow = mergeGeometries(glow, false);
+    for (const g of glow) g.dispose();
+    if (mergedGlow) {
+      const m = new THREE.Mesh(
+        mergedGlow,
+        new THREE.MeshBasicMaterial({ color: 0x6a4a22, transparent: true, opacity: 0.9 })
+      );
+      m.frustumCulled = false;
+      this.group.add(m);
+    }
+
+    // ---------------------------------------------------------------- GANTRY CRANES
+    const steel = this.craftMetalMat;
+    if (steel) {
+      const steelGeos: THREE.BufferGeometry[] = [];
+      const beaconGeos: THREE.BufferGeometry[] = [];
+      const beam = (len: number, a: THREE.Vector3, b: THREE.Vector3, w = 0.22) => {
+        const dir = new THREE.Vector3().subVectors(b, a);
+        const l = dir.length();
+        if (l < 1e-3) return;
+        const g = new THREE.BoxGeometry(w, w, l);
+        g.applyMatrix4(
+          new THREE.Matrix4().compose(
+            new THREE.Vector3().addVectors(a, b).multiplyScalar(0.5),
+            new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir.normalize()),
+            new THREE.Vector3(1, 1, 1)
+          )
+        );
+        steelGeos.push(g);
+      };
+      const box = (w: number, h: number, d: number, x: number, y: number, z: number) => {
+        const g = new THREE.BoxGeometry(w, h, d);
+        g.translate(x, y, z);
+        steelGeos.push(g);
+      };
+
+      /** Lattice leg: four chords with horizontal rings and diamond bracing. */
+      const latticeLeg = (cx: number, cz: number, baseY: number, topY: number, spread: number) => {
+        const rings = 7;
+        const half = spread * 0.5;
+        const corners = [
+          [-half, -half],
+          [half, -half],
+          [half, half],
+          [-half, half],
+        ] as const;
+        for (let r = 0; r < rings; r++) {
+          const y0 = baseY + ((topY - baseY) * r) / rings;
+          const y1 = baseY + ((topY - baseY) * (r + 1)) / rings;
+          const s0 = spread * (1.0 - (r / rings) * 0.28);
+          const s1 = spread * (1.0 - ((r + 1) / rings) * 0.28);
+          for (let c = 0; c < 4; c++) {
+            const [ox, oz] = corners[c];
+            beam(0, new THREE.Vector3(cx + ox * s0, y0, cz + oz * s0), new THREE.Vector3(cx + ox * s1, y1, cz + oz * s1));
+            // horizontal ring at the top of this lift
+            const [nx, nz] = corners[(c + 1) % 4];
+            beam(0.12, new THREE.Vector3(cx + ox * s1, y1, cz + oz * s1), new THREE.Vector3(cx + nx * s1, y1, cz + nz * s1), 0.12);
+          }
+          // diamond bracing on each face
+          for (let c = 0; c < 4; c++) {
+            const [ox, oz] = corners[c];
+            const [nx, nz] = corners[(c + 1) % 4];
+            beam(
+              0.10,
+              new THREE.Vector3(cx + ox * s0, y0, cz + oz * s0),
+              new THREE.Vector3(cx + nx * s1, y1, cz + nz * s1),
+              0.10
+            );
+          }
+        }
+      };
+
+      const buildCrane = (cz: number, legX: number, height: number) => {
+        const gA = this.getTerrainHeight(-legX, cz);
+        const gB = this.getTerrainHeight(legX, cz);
+        latticeLeg(-legX, cz, gA, gA + height, 1.9);
+        latticeLeg(legX, cz, gB, gB + height, 1.9);
+
+        // Boom: bottom chord, top chord, vertical posts, diagonal web, and a rail.
+        const boomY0 = Math.min(gA, gB) + height;
+        const boomY1 = boomY0 + 2.3;
+        const span = legX * 2 + 3.0;
+        for (const y of [boomY0, boomY1]) {
+          beam(0.30, new THREE.Vector3(-span * 0.5, y, cz - 0.9), new THREE.Vector3(span * 0.5, y, cz - 0.9), 0.30);
+          beam(0.30, new THREE.Vector3(-span * 0.5, y, cz + 0.9), new THREE.Vector3(span * 0.5, y, cz + 0.9), 0.30);
+        }
+        for (let i = 0; i <= 12; i++) {
+          const x = -span * 0.5 + (span * i) / 12;
+          beam(0.10, new THREE.Vector3(x, boomY0, cz - 0.9), new THREE.Vector3(x, boomY1, cz - 0.9), 0.10);
+          beam(0.10, new THREE.Vector3(x, boomY0, cz + 0.9), new THREE.Vector3(x, boomY1, cz + 0.9), 0.10);
+          beam(0.10, new THREE.Vector3(x, boomY0, cz - 0.9), new THREE.Vector3(x, boomY1, cz + 0.9), 0.10);
+          if (i < 12) {
+            const xn = -span * 0.5 + (span * (i + 1)) / 12;
+            beam(0.09, new THREE.Vector3(x, boomY0, cz - 0.9), new THREE.Vector3(xn, boomY1, cz - 0.9), 0.09);
+            beam(0.09, new THREE.Vector3(x, boomY1, cz + 0.9), new THREE.Vector3(xn, boomY0, cz + 0.9), 0.09);
+          }
+        }
+        // Cross ties between the two vertical trusses.
+        for (let i = 0; i <= 5; i++) {
+          const x = -span * 0.5 + (span * i) / 5;
+          beam(0.09, new THREE.Vector3(x, boomY1, cz - 0.9), new THREE.Vector3(x, boomY1, cz + 0.9), 0.09);
+          beam(0.09, new THREE.Vector3(x, boomY0, cz - 0.9), new THREE.Vector3(x, boomY0, cz + 0.9), 0.09);
+        }
+
+        // Trolley, cable and hook block hanging over the causeway.
+        const trolleyX = Math.sin(cz * 0.7) * legX * 0.35;
+        box(1.4, 0.5, 1.9, trolleyX, boomY0 - 0.30, cz);
+        for (const off of [-0.32, 0.32]) {
+          beam(0.05, new THREE.Vector3(trolleyX + off, boomY0 - 0.5, cz), new THREE.Vector3(trolleyX + off, boomY0 - 12.5, cz), 0.05);
+        }
+        box(1.0, 0.9, 0.7, trolleyX, boomY0 - 13.0, cz);
+        const hook = new THREE.TorusGeometry(0.28, 0.08, 6, 14, Math.PI * 1.4);
+        hook.rotateY(Math.PI * 0.5);
+        hook.translate(trolleyX, boomY0 - 13.8, cz);
+        steelGeos.push(hook);
+
+        // Operator cab and ladder at the near leg.
+        box(2.0, 1.8, 1.8, -legX + 1.4, this.getTerrainHeight(-legX, cz) + height * 0.72, cz);
+        box(2.1, 0.16, 1.9, -legX + 1.4, this.getTerrainHeight(-legX, cz) + height * 0.72 + 0.95, cz);
+        for (let r = 0; r < 16; r++) {
+          const y = this.getTerrainHeight(-legX, cz) + 1.0 + r * (height * 0.72 / 16);
+          box(0.05, 0.05, 0.7, -legX - 1.05, y, cz + 0.2);
+        }
+
+        // Aviation beacons on the boom ends and leg tops.
+        const beaconGeo = (x: number, y: number, z: number) => {
+          const g = new THREE.BoxGeometry(0.28, 0.28, 0.28);
+          g.translate(x, y, z);
+          beaconGeos.push(g);
+        };
+        beaconGeo(-span * 0.5, boomY1 + 0.3, cz - 0.9);
+        beaconGeo(span * 0.5, boomY1 + 0.3, cz - 0.9);
+        beaconGeo(-span * 0.5, boomY1 + 0.3, cz + 0.9);
+        beaconGeo(span * 0.5, boomY1 + 0.3, cz + 0.9);
+      };
+
+      buildCrane(-14.5, 17.5, 24.0);
+      buildCrane(-44.0, 17.5, 20.0);
+
+      const mergedSteel = mergeGeometries(steelGeos, false);
+      for (const g of steelGeos) g.dispose();
+      if (mergedSteel) {
+        const m = new THREE.Mesh(mergedSteel, steel);
+        m.frustumCulled = false;
+        this.group.add(m);
+      }
+      const mergedBeacons = mergeGeometries(beaconGeos, false);
+      for (const g of beaconGeos) g.dispose();
+      if (mergedBeacons && this.craftLedMat) {
+        const m = new THREE.Mesh(mergedBeacons, this.craftLedMat);
+        m.frustumCulled = false;
+        m.renderOrder = 3;
+        this.group.add(m);
+      }
+    }
+
+    this.chapelStoneMat = stoneMat;
+  }
+
   private buildCausewayDetailAndMonoliths(): void {
     // ---------------------------------------------------------------- CAUSEWAY LANTERNS
     const lanternMat = new THREE.ShaderMaterial({
@@ -3768,73 +5816,124 @@ export class GlitchWorld {
     curbInst.instanceMatrix.needsUpdate = true;
     this.group.add(curbInst);
 
-    // Arrival Overlook Octagonal Plaza Ring & Medallion at (0, spawnY, 20)
-    const overlookDais = new THREE.Mesh(
-      new THREE.CylinderGeometry(5.6, 6.2, 0.22, 8),
-      new THREE.MeshLambertMaterial({
-        color: 0x051430,
-        emissive: 0x06285a,
-        emissiveIntensity: 0.55,
-      })
-    );
-    overlookDais.position.set(0, this.getTerrainHeight(0, 20) - 0.04, 20);
-    this.group.add(overlookDais);
-
-    const overlookRing = new THREE.Mesh(
-      new THREE.RingGeometry(4.4, 4.65, 32),
-      new THREE.MeshBasicMaterial({ color: 0x8ad8ff, side: THREE.DoubleSide })
-    );
-    overlookRing.rotation.x = -Math.PI * 0.5;
-    overlookRing.position.set(0, this.getTerrainHeight(0, 20) + 0.085, 20);
-    this.group.add(overlookRing);
-
-    // Central Glowing 64-Bit Kernel Memory Bus Conduit conforming smoothly along the Causeway spine!
-    const busGeo = new THREE.PlaneGeometry(1.15, 68, 1, 48);
+    // Causeway roadbed: a RECESSED memory-bus channel cut into the deck itself.
+    // Deliberately not a glowing wire / piano-string running down the middle — that read as a
+    // taut cable floating above the ground. Instead the deck is milled out into a shallow trench,
+    // its inner walls carry the channel, and the light only leaks from inside the cut.
+    const busWidth = 3.6;
+    const busLength = 74;
+    const busGeo = new THREE.PlaneGeometry(busWidth, busLength, 4, 96);
     busGeo.rotateX(-Math.PI * 0.5);
-    busGeo.translate(0, 0, -14.5);
-    const busPos = busGeo.attributes.position;
-    for (let i = 0; i < busPos.count; i++) {
-      const bx = busPos.getX(i);
-      const bz = busPos.getZ(i);
-      busPos.setY(i, this.getTerrainHeight(bx, bz) + 0.055);
+    busGeo.translate(0, 0, -12);
+    {
+      const bp = busGeo.attributes.position;
+      for (let i = 0; i < bp.count; i++) {
+        const bx = bp.getX(i);
+        const bz = bp.getZ(i);
+        const gy = this.getTerrainHeight(bx, bz);
+        // Cut DOWN into the causeway: the middle of the channel sits below the deck surface.
+        const dip = Math.cos(Math.min(1, Math.abs(bx) / (busWidth * 0.5)) * Math.PI * 0.5);
+        bp.setY(i, gy - 0.06 - dip * 0.34);
+      }
+      bp.needsUpdate = true;
+      busGeo.computeVertexNormals();
     }
     this.causewayBusMat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
-      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
       uniforms: {
         uTime: { value: 0 },
         uAnomaly: { value: 0 },
+        uScanOrigin: { value: this.scanWaveOrigin },
+        uScanRadius: { value: -1.0 },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
         varying vec3 vWorldPos;
+        varying vec3 vNormalW;
         void main() {
           vUv = uv;
           vec4 wp = modelMatrix * vec4(position, 1.0);
           vWorldPos = wp.xyz;
+          vNormalW = normalize(mat3(modelMatrix) * normal);
           gl_Position = projectionMatrix * viewMatrix * wp;
         }
       `,
       fragmentShader: /* glsl */ `
         varying vec2 vUv;
         varying vec3 vWorldPos;
+        varying vec3 vNormalW;
         uniform float uTime;
         uniform float uAnomaly;
+        uniform vec3 uScanOrigin;
+        uniform float uScanRadius;
         void main() {
-          float lane = smoothstep(0.06, 0.0, abs(fract(vUv.x * 8.0) - 0.5));
-          float border = smoothstep(0.08, 0.0, min(vUv.x, 1.0 - vUv.x));
-          float packet = pow(0.5 + 0.5 * sin(vWorldPos.z * 0.42 + uTime * 7.5), 8.0);
-          float endFade = smoothstep(0.0, 0.08, vUv.y) * smoothstep(1.0, 0.92, vUv.y);
-          vec3 col = mix(vec3(0.28, 0.78, 1.0), vec3(1.0, 0.24, 0.34), uAnomaly * 0.8);
-          float alpha = (lane * 0.28 + border * 0.65 + lane * packet * 0.85) * endFade;
-          gl_FragColor = vec4(col, alpha * 0.72);
+          // Light escapes only from the machining cuts, never from the whole surface.
+          float wallL = smoothstep(0.10, 0.0, vUv.x);
+          float wallR = smoothstep(0.90, 1.0, vUv.x);
+          float wall = max(wallL, wallR);
+          float seam = smoothstep(0.06, 0.0, abs(vUv.x - 0.5));
+          // Data packets run along the channel floor and are swallowed by distance.
+          float floorGlow = smoothstep(0.30, 0.70, vUv.x) * smoothstep(0.70, 0.30, vUv.x);
+          float packet = pow(0.5 + 0.5 * sin(vWorldPos.z * 0.55 - uTime * 6.5), 10.0);
+          float packet2 = pow(0.5 + 0.5 * sin(vWorldPos.z * 0.19 + uTime * 2.1 + 1.7), 6.0);
+          // Kilometre markers: faint etched ticks, the only regular element.
+          float ticks = smoothstep(0.03, 0.0, abs(fract(vWorldPos.z * 0.14) - 0.5) - 0.465);
+          float endFade = smoothstep(0.0, 0.06, vUv.y) * smoothstep(1.0, 0.94, vUv.y);
+
+          // Lighting: the channel is a groove, so it is darker than the deck except at the walls.
+          float facing = clamp(abs(normalize(vNormalW).y), 0.0, 1.0);
+          float cavity = mix(0.35, 1.0, 1.0 - facing);
+          vec3 col = mix(vec3(0.10, 0.42, 0.72), vec3(1.0, 0.22, 0.32), uAnomaly * 0.85);
+          float alpha = (wall * 0.55 + seam * 0.10 + floorGlow * (packet * 0.55 + packet2 * 0.22) + ticks * 0.16)
+                      * cavity * endFade;
+          if (uScanRadius > 0.0) {
+            float dScan = length(vWorldPos.xz - uScanOrigin.xz);
+            alpha += exp(-abs(dScan - uScanRadius) * 0.45) * 0.45 * endFade;
+          }
+          gl_FragColor = vec4(col * (0.55 + 0.65 * cavity), alpha * 0.85);
         }
       `,
     });
     const busMesh = new THREE.Mesh(busGeo, this.causewayBusMat);
     busMesh.renderOrder = 2;
     this.group.add(busMesh);
+
+    // Machined side walls of that trench: two thin steel ribs so the cut reads as built, not painted.
+    const ribMat = new THREE.MeshStandardMaterial({
+      color: 0x1b2436,
+      roughness: 0.34,
+      metalness: 0.85,
+    });
+    const ribPositions: number[] = [];
+    const ribGeos: THREE.BufferGeometry[] = [];
+    for (let z = 20; z >= -52; z -= 3.0) {
+      for (const side of [-1, 1]) {
+        const ribGeo = new THREE.BoxGeometry(0.10, 0.30, 1.1);
+        const x = side * (busWidth * 0.5 - 0.06);
+        const y = this.getTerrainHeight(x, z) - 0.20;
+        const m = new THREE.Matrix4();
+        m.compose(
+          new THREE.Vector3(x, y, z),
+          new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, side * 0.06)),
+          new THREE.Vector3(1, 1, 1)
+        );
+        ribGeo.applyMatrix4(m);
+        ribGeos.push(ribGeo);
+        ribPositions.push(z);
+      }
+    }
+    if (ribGeos.length) {
+      const mergedRibs = mergeGeometries(ribGeos, false);
+      for (const g of ribGeos) g.dispose();
+      if (mergedRibs) {
+        const ribMesh = new THREE.Mesh(mergedRibs, ribMat);
+        ribMesh.name = 'CausewayBusTrenchWalls';
+        this.group.add(ribMesh);
+      }
+    }
+    this.causewayBusTrenchZ = ribPositions;
   }
 
   private buildCollapseAndAbyss(concreteDiff: THREE.Texture, concreteDisp: THREE.Texture): void {
@@ -4230,7 +6329,6 @@ export class GlitchWorld {
 
             float onPath = exp(-(vSampleXZ.x * vSampleXZ.x) / 11.0) * step(-58.0, vSampleXZ.y) * step(vSampleXZ.y, 24.0);
             float pathPulse = 0.5 + 0.5 * sin(vSampleXZ.y * 0.38 + uTime * 3.2);
-            float railLine = smoothstep(0.12, 0.0, abs(abs(vSampleXZ.x) - 2.65)) * step(-55.0, vSampleXZ.y) * step(vSampleXZ.y, 22.0);
             float shoreGlow = smoothstep(0.32, 0.0, abs(vWorldPos.y - (-0.32)));
 
             vec3 accentGlow = mix(vec3(0.58, 0.88, 1.0), vec3(1.0, 0.28, 0.36), uAnomaly * 0.7);
@@ -4241,7 +6339,6 @@ export class GlitchWorld {
             float cav = clamp(vEdgeFactor, 0.0, 1.0);
             col *= mix(1.0, 0.52, pow(cav, 2.4) * vCrackGlow);
             col += vec3(0.25, 0.65, 1.0) * lineMinor * 0.12;
-            col += accentGlow * railLine * (0.35 + 0.50 * pathPulse);
             col += vec3(0.45, 0.88, 1.0) * shoreGlow * 0.65;
 
             // Crisp dark-edged fracture bevel + pitch-black chasm gap right along the Voronoi crack!
@@ -4689,6 +6786,11 @@ export class GlitchWorld {
     this.skyMat.uniforms.uCollapse.value = 0;
     this.landingShockTimer = 99.0;
     this.landingShockMat.uniforms.uShockT.value = 99.0;
+    this.arrivalImpactTimer = 99.0;
+    if (this.arrivalFractureMat) this.arrivalFractureMat.uniforms.uImpactT.value = 99.0;
+    if (this.arrivalDebrisMat) this.arrivalDebrisMat.uniforms.uImpactT.value = 99.0;
+    if (this.arrivalPillarMat) this.arrivalPillarMat.uniforms.uImpactT.value = 99.0;
+    this.scanWaveRadius = -1.0;
     this.coreSecretRevealed = false;
   }
 
@@ -4776,7 +6878,7 @@ export class GlitchWorld {
       this.anomalyIntensity = Math.min(1.0, 0.55 + collapseElapsed * 0.25);
     }
 
-    // 2. Central Sanctuary WAKE_UP Stele Convergence (aligns seamlessly as player approaches the Core!)
+    // 2. Central Singularity Proximity Resonance & Global 3D LIDAR Scan-Wave Propagation
     const distToCore = Math.hypot(
       playerPos.x - this.corePosition.x,
       playerPos.z - this.corePosition.z
@@ -4786,23 +6888,12 @@ export class GlitchWorld {
       this.coreSecretRevealed = true;
     }
 
-    for (let i = 0; i < this.wakePlates.length; i++) {
-      const wp = this.wakePlates[i];
-      const hoverY = Math.sin(elapsed * 1.8 + i * 0.7) * (0.28 * (1 - alignT) + 0.05);
-      wp.mesh.position.lerpVectors(wp.scatteredPos, wp.alignedPos, alignT);
-      wp.mesh.position.y += hoverY;
-
-      if (this.anomalyIntensity > 0.2) {
-        wp.mesh.position.x += (Math.random() - 0.5) * 0.14 * this.anomalyIntensity;
+    if (this.scanWaveRadius >= 0.0) {
+      this.scanWaveRadius += dt * 78.0;
+      if (this.scanWaveRadius > 215.0) {
+        this.scanWaveRadius = -1.0;
       }
-
-      wp.mesh.rotation.set(
-        wp.scatteredRot.x * (1 - alignT),
-        wp.scatteredRot.y * (1 - alignT),
-        wp.scatteredRot.z * (1 - alignT)
-      );
     }
-    this.corePlaqueMat.opacity = THREE.MathUtils.lerp(0.28, 0.96, alignT);
 
     if (this.phantomMat) {
       this.phantomMat.uniforms.uTime.value = elapsed;
@@ -4814,13 +6905,38 @@ export class GlitchWorld {
     this.floatingShardMat.uniforms.uTime.value = elapsed;
     this.floatingShardMat.uniforms.uAnomaly.value = this.anomalyIntensity;
 
-    // 4. Update Shaders & Gyroscopic Sanctuary Halo Rings
+    // 4. Update Shaders, Corrupted Mega-Remnants & Gyroscopic Sanctuary Halo Rings
     this.terrainMat.uniforms.uTime.value = elapsed;
     this.terrainMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+    this.terrainMat.uniforms.uScanRadius.value = this.scanWaveRadius;
     this.dataSeaMat.uniforms.uTime.value = elapsed;
     this.dataSeaMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+    this.dataSeaMat.uniforms.uScanRadius.value = this.scanWaveRadius;
     this.citadelMat.uniforms.uTime.value = elapsed;
     this.citadelMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+    this.citadelMat.uniforms.uScanRadius.value = this.scanWaveRadius;
+    if (this.singularitySpireMat) {
+      this.singularitySpireMat.uniforms.uTime.value = elapsed;
+      this.singularitySpireMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+      this.singularitySpireMat.uniforms.uScanRadius.value = this.scanWaveRadius;
+    }
+    if (this.singularityConduitMat) {
+      this.singularityConduitMat.uniforms.uTime.value = elapsed;
+      this.singularityConduitMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+    }
+    if (this.corruptedRemnantMat) {
+      this.corruptedRemnantMat.uniforms.uTime.value = elapsed;
+      this.corruptedRemnantMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+      this.corruptedRemnantMat.uniforms.uScanRadius.value = this.scanWaveRadius;
+    }
+    if (this.smearEchoMat) {
+      this.smearEchoMat.uniforms.uTime.value = elapsed;
+      this.smearEchoMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+    }
+    if (this.cyberTrunkMat) {
+      this.cyberTrunkMat.uniforms.uTime.value = elapsed;
+      this.cyberTrunkMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+    }
     if (this.finMat) {
       this.finMat.uniforms.uTime.value = elapsed;
       this.finMat.uniforms.uAnomaly.value = this.anomalyIntensity;
@@ -4852,14 +6968,56 @@ export class GlitchWorld {
       this.gateShaderMat.uniforms.uTime.value = elapsed;
       this.gateShaderMat.uniforms.uAnomaly.value = this.anomalyIntensity;
     }
+    if (this.craftMetalMat) {
+      this.craftMetalMat.uniforms.uTime.value = elapsed;
+      this.craftMetalMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+    }
+    if (this.craftLedMat) {
+      this.craftLedMat.uniforms.uTime.value = elapsed;
+      this.craftLedMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+    }
+    if (this.chapelStoneMat) {
+      this.chapelStoneMat.uniforms.uTime.value = elapsed;
+      this.chapelStoneMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+    }
     this.causewayBusMat.uniforms.uTime.value = elapsed;
     this.causewayBusMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+    this.causewayBusMat.uniforms.uScanRadius.value = this.scanWaveRadius;
     if (this.landingShockTimer < 2.5) {
       this.landingShockTimer += dt;
       this.landingShockMat.uniforms.uShockT.value = this.landingShockTimer;
     }
+    if (this.arrivalImpactTimer < 8.0) {
+      this.arrivalImpactTimer += dt;
+      if (this.arrivalFractureMat) this.arrivalFractureMat.uniforms.uImpactT.value = this.arrivalImpactTimer;
+      if (this.arrivalDebrisMat) this.arrivalDebrisMat.uniforms.uImpactT.value = this.arrivalImpactTimer;
+      if (this.arrivalPillarMat) this.arrivalPillarMat.uniforms.uImpactT.value = this.arrivalImpactTimer;
+    }
     this.voronoiMat.uniforms.uTime.value = elapsed;
     this.voronoiMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+    // --- Living thunderstorm: author strikes, then envelope the flash (double-pulse like real lightning).
+    this.stormTimer -= dt;
+    if (this.stormTimer <= 0) {
+      const collapseBias = isCollapsing ? 1.9 : 1.0;
+      this.stormTimer = (5.5 + Math.random() * 9.5) / collapseBias;
+      this.stormFlashAge = 0;
+      this.stormIntensity = 0.45 + Math.random() * 0.55;
+      // Heavy anomaly makes strikes feel closer and harder.
+      this.stormIntensity = Math.min(1.0, this.stormIntensity + this.anomalyIntensity * 0.28);
+      this.onLightningStrike?.(this.stormIntensity, 0.35 + (1.0 - this.stormIntensity) * 1.9);
+    }
+    if (this.stormFlashAge < 1.4) {
+      this.stormFlashAge += dt;
+      const a = this.stormFlashAge;
+      // Two hard pulses then a long luminous decay — exactly how a distant bolt reads on camera.
+      const p1 = Math.exp(-Math.pow((a - 0.02) * 22.0, 2.0));
+      const p2 = Math.exp(-Math.pow((a - 0.17) * 13.0, 2.0)) * 0.72;
+      const tail = Math.exp(-a * 2.6) * 0.20;
+      this.stormFlash = Math.min(1.0, (p1 + p2 + tail) * this.stormIntensity);
+    } else {
+      this.stormFlash = 0;
+    }
+    this.skyMat.uniforms.uLightning.value = this.stormFlash;
     this.skyMat.uniforms.uTime.value = elapsed;
     this.skyMat.uniforms.uAnomaly.value = this.anomalyIntensity;
     this.skyMat.uniforms.uPlayerPos.value.copy(playerPos);
@@ -4888,6 +7046,23 @@ export class GlitchWorld {
     this.lanternMat.uniforms.uAnomaly.value = this.anomalyIntensity;
     this.monolithMat.uniforms.uTime.value = elapsed;
     this.monolithMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+    if (this.skyMonumentMat) {
+      this.skyMonumentMat.uniforms.uTime.value = elapsed;
+      this.skyMonumentMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+      this.skyMonumentMat.uniforms.uScanRadius.value = this.scanWaveRadius;
+    }
+    if (this.spireVortexMat) {
+      this.spireVortexMat.uniforms.uTime.value = elapsed;
+      this.spireVortexMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+    }
+    if (this.brokenHaloGroup) {
+      this.brokenHaloGroup.rotation.y = elapsed * 0.018 + Math.sin(elapsed * 0.03) * 0.06;
+      this.brokenHaloGroup.rotation.z = Math.sin(elapsed * 0.021) * 0.045;
+    }
+    if (this.invertedCathedralGroup) {
+      this.invertedCathedralGroup.rotation.y = -0.36 + Math.sin(elapsed * 0.026) * 0.10;
+      this.invertedCathedralGroup.position.y = 128 + Math.sin(elapsed * 0.11) * 2.2;
+    }
 
     // The shattered monitor wreckage orbits its own broken screen.
     this.skyDebris.rotation.z = elapsed * 0.045;

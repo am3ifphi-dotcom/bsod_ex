@@ -53,6 +53,15 @@ export class BedroomScene {
   private rainSplashMat!: THREE.ShaderMaterial;
   private floorCausticMat!: THREE.ShaderMaterial;
   private lenticularMat!: THREE.ShaderMaterial;
+  private framedArtTex!: THREE.Texture;
+  private roomSurface: {
+    wallDiff: THREE.Texture;
+    wallNrm: THREE.Texture;
+    floorDiff: THREE.Texture;
+    floorNrm: THREE.Texture;
+    rugDiff: THREE.Texture;
+    rugNrm: THREE.Texture;
+  } | null = null;
   private mirrorAnomalyMat!: THREE.ShaderMaterial;
 
   private officeChair!: THREE.Object3D;
@@ -63,6 +72,12 @@ export class BedroomScene {
   private aftermathRelicGroup = new THREE.Group();
   private peelShards!: THREE.InstancedMesh;
   private peelShardMat!: THREE.ShaderMaterial;
+
+  // The silhouette standing behind the chair (BSOD madness only).
+  private watcherGroup!: THREE.Group;
+  private watcherMat!: THREE.ShaderMaterial;
+  private watcherEyeMat!: THREE.MeshBasicMaterial;
+  private watcherCreep = 0;
 
   private readonly infectUniforms = {
     uInfect: { value: 0 },
@@ -93,15 +108,66 @@ export class BedroomScene {
     this.scene.fog = new THREE.FogExp2(0x050914, 0.045);
     this.scene.add(this.group);
 
-    const [bedroomGltf, pcGltf, chairGltf, cablesGltf, clockTexWebp, lampTexWebp] =
-      await Promise.all([
+    const [
+      bedroomGltf,
+      pcGltf,
+      chairGltf,
+      cablesGltf,
+      clockTexWebp,
+      lampTexWebp,
+      artTex,
+      wallDiffTex,
+      wallNrmTex,
+      floorDiffTex,
+      floorNrmTex,
+      rugDiffTex,
+      rugNrmTex,
+    ] = await Promise.all([
         gltfLoader.loadAsync('/models/bedroom.glb'),
         gltfLoader.loadAsync('/models/gaming_pc.glb'),
         gltfLoader.loadAsync('/models/office_chair.glb'),
         gltfLoader.loadAsync('/models/cables.glb'),
         texLoader.loadAsync('/textures/alarm_clock_diff.webp'),
         texLoader.loadAsync('/textures/desk_lamp_diff.webp'),
+        // Real public-domain painting: Henry Fuseli, "The Nightmare" (1781).
+        // A sleeper, a crouching demon on her chest, and a horse watching from the dark —
+        // exactly the wrong image to have on the wall above a bed at 02:47.
+        texLoader.loadAsync('/textures/art/nightmare_fuseli.jpg'),
+        // Baked room surfaces (scripts/generate-room-textures.mjs). The GLB ships a 670-byte
+        // flat-white wall map and a low-res parquet strip, which is why the room read as grey mush.
+        texLoader.loadAsync('/textures/room/wall_plaster_diff.png'),
+        texLoader.loadAsync('/textures/room/wall_plaster_nrm.png'),
+        texLoader.loadAsync('/textures/room/floor_parquet_diff.png'),
+        texLoader.loadAsync('/textures/room/floor_parquet_nrm.png'),
+        texLoader.loadAsync('/textures/room/rug_wool_diff.png'),
+        texLoader.loadAsync('/textures/room/rug_wool_nrm.png'),
       ]);
+
+    artTex.colorSpace = THREE.SRGBColorSpace;
+    artTex.anisotropy = 8;
+    (artTex as THREE.Texture).wrapS = THREE.ClampToEdgeWrapping;
+    (artTex as THREE.Texture).wrapT = THREE.ClampToEdgeWrapping;
+    this.framedArtTex = artTex;
+
+    const prepareSurfaceTex = (tex: THREE.Texture, srgb: boolean, clamp = false): THREE.Texture => {
+      tex.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+      tex.wrapS = clamp ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
+      tex.wrapT = clamp ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
+      tex.anisotropy = 8;
+      tex.generateMipmaps = true;
+      tex.minFilter = THREE.LinearMipmapLinearFilter;
+      tex.needsUpdate = true;
+      return tex;
+    };
+    this.roomSurface = {
+      wallDiff: prepareSurfaceTex(wallDiffTex, true),
+      wallNrm: prepareSurfaceTex(wallNrmTex, false),
+      floorDiff: prepareSurfaceTex(floorDiffTex, true),
+      floorNrm: prepareSurfaceTex(floorNrmTex, false),
+      // The rug map is a complete design, not a tile: it must not repeat.
+      rugDiff: prepareSurfaceTex(rugDiffTex, true, true),
+      rugNrm: prepareSurfaceTex(rugNrmTex, false, true),
+    };
 
     clockTexWebp.colorSpace = THREE.SRGBColorSpace;
     clockTexWebp.anisotropy = 8;
@@ -111,7 +177,7 @@ export class BedroomScene {
     // 1. Convert Bedroom materials to specular/rim AtmosphericMaterial & inject fast texture-backed infection shader
     const roomRoot = bedroomGltf.scene;
     const matCache = new Map<THREE.Material, THREE.Material>();
-    let wallTemplateMat: THREE.MeshLambertMaterial | null = null;
+    let wallTemplateMat: THREE.MeshPhongMaterial | null = null;
 
     roomRoot.traverse((obj) => {
       if (!(obj as THREE.Mesh).isMesh) return;
@@ -136,7 +202,13 @@ export class BedroomScene {
             mName === 'Stool' ||
             mName === 'material_47';
 
-          if (isInfectedArch) {
+          if (mName === 'Walls' || mName === 'Floor' || mName === 'material_54') {
+            // Dedicated specular surfaces: plaster, parquet and the wool rug all need their normal
+            // maps, which the Lambert conversion path silently drops.
+            cached = this.createSurfaceMaterial(
+              mName === 'Walls' ? 'wall' : mName === 'Floor' ? 'floor' : 'rug'
+            );
+          } else if (isInfectedArch) {
             const std = m as THREE.MeshStandardMaterial;
             if (std.map) std.map.anisotropy = 8;
             if (std.emissiveMap) std.emissiveMap.anisotropy = 8;
@@ -159,7 +231,7 @@ export class BedroomScene {
           }
 
           if (mName === 'Walls') {
-            wallTemplateMat = cached as THREE.MeshLambertMaterial;
+            wallTemplateMat = cached as THREE.MeshPhongMaterial;
           }
           matCache.set(m, cached);
         }
@@ -172,6 +244,11 @@ export class BedroomScene {
 
     // 2. Enclose cutaway -X wall, +Z wall, flat ceiling, door & nocturnal skyline
     this.buildEnclosedArchitecture(wallTemplateMat);
+
+    // Metric box projection on every plaster / parquet surface: the GLB's UV islands have wildly
+    // different texel densities, so we re-project them from world space instead of trusting them.
+    this.applyBoxUVs(this.group, 2.45, (m) => m.name === 'Walls');
+    this.applyBoxUVs(this.group, 3.05, (m) => m.name === 'Floor');
     this.buildNightExterior();
 
     // 3. Place Gaming Desktop PC Setup against the -X wall
@@ -276,11 +353,182 @@ export class BedroomScene {
     this.buildAftermathRelics();
     this.buildAmbientPracticals();
     this.buildArchitecturalDetail();
+    this.buildRoomWatcher();
   }
 
-  private buildEnclosedArchitecture(wallTemplate: THREE.MeshLambertMaterial | null): void {
+  /**
+   * Plaster / parquet surface material: Phong rather than Lambert so the baked normal maps
+   * actually perturb the lighting, with a little specular so the moonlight grazes the walls.
+   */
+  private createSurfaceMaterial(kind: 'wall' | 'floor' | 'rug'): THREE.MeshPhongMaterial {
+    const surf = this.roomSurface;
+    if (!surf) throw new Error('room surface textures not loaded');
+    const isWall = kind === 'wall';
+    const isRug = kind === 'rug';
+    const mat = new THREE.MeshPhongMaterial({
+      name: isWall ? 'Walls' : isRug ? 'material_54' : 'Floor',
+      map: isWall ? surf.wallDiff : isRug ? surf.rugDiff : surf.floorDiff,
+      normalMap: isWall ? surf.wallNrm : isRug ? surf.rugNrm : surf.floorNrm,
+      normalScale: new THREE.Vector2(isWall ? 0.40 : isRug ? 0.85 : 0.7, isWall ? 0.40 : isRug ? 0.85 : 0.7),
+      color: isWall ? 0xf7f3ea : isRug ? 0xffffff : 0xf3ebdd,
+      specular: isWall ? 0x0e1420 : isRug ? 0x05060a : 0x241f16,
+      shininess: isWall ? 4 : isRug ? 12 : 22,
+      side: THREE.FrontSide,
+    });
+    this.injectRoomInfectionShader(mat);
+    return mat;
+  }
+
+  /**
+   * Overwrites a mesh's UVs with world-space box projection at `tile` metres per texture repeat.
+   * Box mapping is the only sane option here: the GLB's unwrap stretches planks and plaster grain
+   * across different scales on every island, which is exactly what made the room look flat.
+   */
+  private applyBoxUVs(
+    root: THREE.Object3D,
+    tile: number,
+    match: (mat: THREE.Material) => boolean
+  ): void {
+    const inv = 1 / tile;
+    const m4 = new THREE.Matrix4();
+    const m3 = new THREE.Matrix3();
+    const pos = new THREE.Vector3();
+    const nrm = new THREE.Vector3();
+    root.updateMatrixWorld(true);
+    root.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.isMesh || (mesh as THREE.InstancedMesh).isInstancedMesh) return;
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      if (!mats.some((mm) => mm && match(mm))) return;
+      const geo = mesh.geometry as THREE.BufferGeometry;
+      const pAttr = geo.getAttribute('position');
+      const nAttr = geo.getAttribute('normal');
+      if (!pAttr || !nAttr) return;
+      m4.copy(mesh.matrixWorld);
+      m3.getNormalMatrix(m4);
+      const uv = new Float32Array(pAttr.count * 2);
+      for (let i = 0; i < pAttr.count; i++) {
+        pos.fromBufferAttribute(pAttr, i).applyMatrix4(m4);
+        nrm.fromBufferAttribute(nAttr, i).applyMatrix3(m3).normalize();
+        const ax = Math.abs(nrm.x);
+        const ay = Math.abs(nrm.y);
+        const az = Math.abs(nrm.z);
+        let u: number;
+        let w: number;
+        if (ay >= ax && ay >= az) {
+          u = pos.x;
+          w = pos.z;
+        } else if (ax >= az) {
+          u = pos.z;
+          w = pos.y;
+        } else {
+          u = pos.x;
+          w = pos.y;
+        }
+        uv[i * 2] = u * inv;
+        uv[i * 2 + 1] = w * inv;
+      }
+      geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+      geo.getAttribute('uv').needsUpdate = true;
+    });
+  }
+
+  /**
+   * The thing standing behind the chair.
+   * A too-tall silhouette that is only ever lit by the monitor bleed. It stays perfectly still in
+   * your peripheral vision, and when the suction cutscene whips your head around it is closer.
+   */
+  private buildRoomWatcher(): void {
+    this.watcherMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: true,
+      uniforms: {
+        uTime: { value: 0 },
+        uAwake: { value: 0 },
+      },
+      vertexShader: /* glsl */ `
+        varying vec3 vWorldPos;
+        varying vec3 vNormalW;
+        void main() {
+          vec4 wp = modelMatrix * vec4(position, 1.0);
+          vWorldPos = wp.xyz;
+          vNormalW = normalize(mat3(modelMatrix) * normal);
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec3 vWorldPos;
+        varying vec3 vNormalW;
+        uniform float uTime;
+        uniform float uAwake;
+        void main() {
+          vec3 N = normalize(vNormalW);
+          vec3 V = normalize(cameraPosition - vWorldPos);
+          float rim = pow(1.0 - abs(dot(N, V)), 2.6);
+          // Cold monitor rim-light only. The mass itself swallows all light.
+          vec3 col = vec3(0.0015, 0.0030, 0.0060)
+                   + vec3(0.10, 0.42, 0.85) * rim * 0.30 * (0.6 + 0.4 * sin(uTime * 0.9));
+          // Faint vertical banding, as if the body were made of the same broken scanlines.
+          float banding = smoothstep(0.55, 0.95, sin(vWorldPos.y * 26.0 + uTime * 2.1) * 0.5 + 0.5);
+          col += vec3(0.02, 0.10, 0.22) * banding * 0.10;
+          gl_FragColor = vec4(col, uAwake);
+        }
+      `,
+    });
+
+    this.watcherGroup = new THREE.Group();
+    this.watcherGroup.name = 'RoomWatcher';
+    this.watcherGroup.position.set(1.28, 0, 1.92);
+    this.watcherGroup.rotation.y = Math.atan2(0.35 - 1.28, 0.62 - 1.92);
+
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.20, 1.05, 4, 10), this.watcherMat);
+    torso.position.y = 1.08;
+    torso.scale.set(0.92, 1.02, 0.62);
+    this.watcherGroup.add(torso);
+
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.09, 0.16, 8), this.watcherMat);
+    neck.position.y = 1.72;
+    this.watcherGroup.add(neck);
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.145, 14, 12), this.watcherMat);
+    head.position.y = 1.90;
+    head.scale.set(0.92, 1.16, 0.96);
+    this.watcherGroup.add(head);
+
+    for (const side of [-1, 1]) {
+      const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.062, 0.92, 4, 8), this.watcherMat);
+      arm.position.set(side * 0.245, 1.10, 0.01);
+      arm.rotation.z = side * 0.045;
+      arm.scale.set(1, 1, 0.8);
+      this.watcherGroup.add(arm);
+      const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.085, 0.80, 4, 8), this.watcherMat);
+      leg.position.set(side * 0.115, 0.42, 0);
+      this.watcherGroup.add(leg);
+    }
+
+    this.watcherEyeMat = new THREE.MeshBasicMaterial({
+      color: 0x7fc4ff,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    });
+    const eyeGeo = new THREE.SphereGeometry(0.016, 8, 6);
+    for (const side of [-1, 1]) {
+      const eye = new THREE.Mesh(eyeGeo, this.watcherEyeMat);
+      eye.position.set(side * 0.052, 1.915, 0.128);
+      this.watcherGroup.add(eye);
+    }
+
+    this.watcherGroup.visible = false;
+    this.group.add(this.watcherGroup);
+  }
+
+  private buildEnclosedArchitecture(wallTemplate: THREE.MeshPhongMaterial | null): void {
+    // Build a fresh material rather than cloning: Material.clone() drops onBeforeCompile, and the
+    // injected-flag on userData then prevents re-injection — the big walls and ceiling were
+    // rendering with no infection shader at all.
     const wallMat = wallTemplate
-      ? wallTemplate.clone()
+      ? this.createSurfaceMaterial('wall')
       : new THREE.MeshLambertMaterial({ color: 0x262c38 });
     this.injectRoomInfectionShader(wallMat);
 
@@ -651,15 +899,48 @@ export class BedroomScene {
    * 2) Peripheral-Gaze / Grazing-Angle Vanity Mirror Anomaly over Mirror_Mirror_0: silhouette & eyes appear in peripheral vision, vanish when stared at directly!
    */
   private buildViewDependentRoomProps(): void {
-    // 3a. Framed Lenticular Artwork on West Wall (x = -2.045, y = 1.64, z = -0.58)
+    // 3a. The framed painting above the bed.
+    //     A real scan of Fuseli's "The Nightmare" (1781) hangs on the west wall. From the pillow
+    //     it is only a dark old painting. As your gaze swings toward the desk, the varnished
+    //     surface catches the monitor light and the image inside it changes — the demon lifts its
+    //     head, and the sleeper's face is no longer hers. It is a lenticular print, badly framed.
     const frameGroup = new THREE.Group();
-    frameGroup.position.set(-2.044, 1.64, -0.58);
+    frameGroup.position.set(-2.044, 1.66, -0.98);
     frameGroup.rotation.y = Math.PI * 0.5;
+    frameGroup.name = 'FramedNightmare';
+
+    // Gilded wooden frame (four bevelled bars) + inner liner + backing shadow gap.
+    const goldMat = new THREE.MeshStandardMaterial({
+      color: 0x6a5632,
+      roughness: 0.42,
+      metalness: 0.72,
+    });
+    const linerMat = new THREE.MeshLambertMaterial({ color: 0xcfc6b2 });
+    const artW = 0.60;
+    const artH = 0.50;
+    const bar = 0.035;
+    const barDepth = 0.045;
+    const bars: THREE.Mesh[] = [
+      new THREE.Mesh(new THREE.BoxGeometry(artW + bar * 2, bar, barDepth), goldMat),
+      new THREE.Mesh(new THREE.BoxGeometry(artW + bar * 2, bar, barDepth), goldMat),
+      new THREE.Mesh(new THREE.BoxGeometry(bar, artH, barDepth), goldMat),
+      new THREE.Mesh(new THREE.BoxGeometry(bar, artH, barDepth), goldMat),
+    ];
+    bars[0].position.set(0, artH * 0.5 + bar * 0.5, 0.004);
+    bars[1].position.set(0, -artH * 0.5 - bar * 0.5, 0.004);
+    bars[2].position.set(-artW * 0.5 - bar * 0.5, 0, 0.004);
+    bars[3].position.set(artW * 0.5 + bar * 0.5, 0, 0.004);
+    for (const b of bars) frameGroup.add(b);
+
+    const liner = new THREE.Mesh(new THREE.BoxGeometry(artW + 0.012, artH + 0.012, 0.012), linerMat);
+    liner.position.z = -0.004;
+    frameGroup.add(liner);
 
     const frameBacking = new THREE.Mesh(
-      new THREE.BoxGeometry(0.56, 0.74, 0.024),
-      new THREE.MeshLambertMaterial({ color: 0x141821 })
+      new THREE.BoxGeometry(artW + bar * 2, artH + bar * 2, 0.02),
+      new THREE.MeshLambertMaterial({ color: 0x0d1017 })
     );
+    frameBacking.position.z = -0.016;
     frameGroup.add(frameBacking);
 
     this.lenticularMat = new THREE.ShaderMaterial({
@@ -667,6 +948,7 @@ export class BedroomScene {
         uTime: this.infectUniforms.uTime,
         uInfect: this.infectUniforms.uInfect,
         uCamForward: this.infectUniforms.uCamForward,
+        uArt: { value: this.framedArtTex },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -691,6 +973,7 @@ export class BedroomScene {
         uniform float uTime;
         uniform float uInfect;
         uniform vec3 uCamForward;
+        uniform sampler2D uArt;
 
         float hash21(vec2 p) {
           p = fract(p * vec2(234.34, 435.345));
@@ -700,44 +983,68 @@ export class BedroomScene {
 
         void main() {
           vec3 V = normalize(cameraPosition - vWorldPos);
-          // Horizontal parallax angle + head-yaw gaze angle shifts the lenticular prism phase!
+          // Looking at it from the bed vs. from the desk flips the lenticular prism phase.
           float lateralAngle = dot(V, vTangentW) + dot(uCamForward, vTangentW) * 0.55;
-          float flipFactor = clamp(smoothstep(-0.18, 0.24, lateralAngle) + uInfect * 0.85, 0.0, 1.0);
+          float flipFactor = clamp(smoothstep(-0.16, 0.26, lateralAngle) + uInfect * 0.9, 0.0, 1.0);
 
-          // Image A (viewed from bed / -Z side): calm moody monochrome rainy cityscape print
-          float colId = floor(vUv.x * 11.0);
-          float bHeight = 0.28 + 0.48 * hash21(vec2(colId, 3.7));
-          float inTower = step(vUv.y, bHeight);
-          vec2 winCell = fract(vUv * vec2(33.0, 44.0));
-          float winLit = step(0.72, hash21(floor(vUv * vec2(33.0, 44.0)))) * step(0.25, winCell.x) * step(0.3, winCell.y);
-          vec3 skyA = mix(vec3(0.16, 0.20, 0.28), vec3(0.05, 0.07, 0.12), vUv.y);
-          vec3 imgA = mix(skyA, vec3(0.03, 0.04, 0.07) + vec3(0.55, 0.68, 0.85) * winLit * 0.45, inTower);
+          // --- Image A: the real painting, aged varnish, cool moonlight from the window.
+          vec3 art = texture2D(uArt, vUv).rgb;
+          float luma = dot(art, vec3(0.2126, 0.7152, 0.0722));
+          // Old varnish: amber in the shadows, chalky bloom in the highlights.
+          vec3 varnish = art * vec3(1.04, 0.94, 0.78) + vec3(0.020, 0.014, 0.006);
+          varnish = mix(varnish, varnish * 0.5 + vec3(0.03, 0.04, 0.06), smoothstep(0.32, 0.95, luma) * 0.35);
+          // Canvas weave + craquelure.
+          float weave = sin(vUv.x * 620.0) * sin(vUv.y * 640.0) * 0.010;
+          float craq = smoothstep(0.55, 1.0, hash21(floor(vUv * 190.0) + 4.7)) * 0.035;
+          vec3 imgA = varnish + weave + craq;
 
-          // Image B (viewed as you walk toward desk / rotate gaze): stark BSOD ':)' watching eye diagram!
-          vec3 imgB = vec3(0.0, 0.26, 0.58);
-          vec2 p = (vUv - 0.5) * vec2(0.76, 1.0);
-          float irisRing = smoothstep(0.022, 0.006, abs(length(p * vec2(1.0, 1.45)) - 0.23));
-          float pupil = smoothstep(0.075, 0.045, length(p - vec2(lateralAngle * 0.08, 0.0)));
-          float scanGrid = step(0.92, fract(vUv.y * 32.0)) + step(0.92, fract(vUv.x * 24.0));
-          imgB += vec3(0.52, 0.88, 1.0) * (irisRing * 0.95 + scanGrid * 0.14);
-          imgB = mix(imgB, vec3(0.98, 0.24, 0.36), pupil);
+          // --- Image B: the same painting after something inside it noticed you.
+          // Tear the scan into horizontal slabs that drift apart, drain the colour, and slide the
+          // demon's silhouette a few degrees toward the viewer.
+          float slab = floor(vUv.y * 18.0);
+          float slabPick = hash21(vec2(slab, 2.3));
+          float tearGate = step(0.55 - uInfect * 0.30, slabPick);
+          float tearShift = (hash21(vec2(slab * 1.7, 9.1)) - 0.5) * (0.04 + uInfect * 0.09);
+          vec2 bUv = vUv + vec2(tearShift * tearGate, 0.0);
+          // Purple-black inversion band, like the panel is being printed through a broken mask.
+          vec3 raw = texture2D(uArt, bUv).rgb;
+          vec3 imgB = mix(raw, vec3(1.0) - raw, 0.35 + uInfect * 0.4);
+          imgB = mix(imgB, vec3(0.02, 0.10, 0.26) + luma * vec3(0.30, 0.72, 1.0), 0.55);
+          // The two eyes: a cold pinpoint pair where the demon's head is in the painting.
+          vec2 eyeC = vec2(0.545, 0.712);
+          float eyeA = exp(-length((bUv - (eyeC + vec2(-0.026, 0.0))) * vec2(1.0, 1.2)) * 120.0);
+          float eyeB = exp(-length((bUv - (eyeC + vec2(0.026, 0.0))) * vec2(1.0, 1.2)) * 120.0);
+          imgB += vec3(0.86, 0.97, 1.0) * (eyeA + eyeB) * (0.9 + 0.35 * sin(uTime * 2.2));
+          // A thin vertical scan slit travelling down the canvas.
+          float slit = smoothstep(0.09, 0.0, abs(fract(vUv.y * 1.0 - uTime * 0.21) - 0.5) - 0.46);
+          imgB += vec3(0.42, 0.92, 1.0) * slit * 0.22;
 
-          // Physical vertical lenticular prism ridges catching light as view moves!
-          float ridge = 0.5 + 0.5 * sin(vUv.x * 240.0 + lateralAngle * 18.0);
-          float ridgeBlend = clamp(flipFactor + (ridge - 0.5) * 0.24 * sin(flipFactor * 3.14159), 0.0, 1.0);
-          vec3 col = mix(imgA, imgB, ridgeBlend);
+          // Physical lenticular prisms: fine vertical ridges that also bend the sampled column.
+          float ridge = sin(vUv.x * 340.0 + lateralAngle * 22.0);
+          float ridgeBlend = clamp(flipFactor + ridge * 0.16 * sin(flipFactor * 3.14159), 0.0, 1.0);
+          // Sub-pixel column shift simulates the prism bending the two interleaved images.
+          float colShift = ridge * 0.0016 * flipFactor;
+          vec3 col = mix(texture2D(uArt, vUv + vec2(colShift, 0.0)).rgb * vec3(1.04, 0.94, 0.78),
+                         imgB,
+                         ridgeBlend);
 
-          // White matboard border + glass specular sheen
-          float matBorder = step(0.07, vUv.x) * step(vUv.x, 0.93) * step(0.06, vUv.y) * step(vUv.y, 0.94);
-          col = mix(vec3(0.76, 0.79, 0.84) * (0.45 + 0.2 * vUv.y), col, matBorder);
-          float spec = pow(max(dot(reflect(-V, vNormalW), normalize(vec3(0.5, 0.6, 0.4))), 0.0), 36.0);
-          col += vec3(0.35, 0.62, 0.95) * spec * (0.25 + 0.45 * ridge);
+          // Glass: fresnel sheen + the monitor's blue smear raking across the varnish.
+          float fres = pow(1.0 - clamp(dot(V, normalize(vNormalW)), 0.0, 1.0), 3.2);
+          col += vec3(0.30, 0.52, 0.86) * fres * (0.18 + 0.30 * ridgeBlend);
+          float monitorRake = pow(max(0.0, 1.0 - abs(vUv.x - 0.18 - sin(uTime * 0.4) * 0.05) * 2.4), 6.0);
+          col += vec3(0.16, 0.40, 0.85) * monitorRake * (0.05 + uInfect * 0.16) * (1.0 - vUv.y * 0.4);
+
+          // Mat board border (a thin cream liner inside the gilded frame).
+          float matBorder = step(0.018, vUv.x) * step(vUv.x, 0.982) * step(0.018, vUv.y) * step(vUv.y, 0.982);
+          col = mix(vec3(0.66, 0.63, 0.55) * (0.5 + 0.25 * vUv.y), col, matBorder);
+
           gl_FragColor = vec4(col, 1.0);
         }
       `,
     });
-    const artPrint = new THREE.Mesh(new THREE.PlaneGeometry(0.50, 0.68), this.lenticularMat);
-    artPrint.position.z = 0.014;
+    const artPrint = new THREE.Mesh(new THREE.PlaneGeometry(artW, artH), this.lenticularMat);
+    artPrint.position.z = 0.006;
+    artPrint.name = 'FramedNightmareCanvas';
     frameGroup.add(artPrint);
     this.group.add(frameGroup);
 
@@ -1076,10 +1383,11 @@ export class BedroomScene {
         streakData[i * 4 + 1] = Math.random();
         streakData[i * 4 + 2] = -2.65 + Math.random() * 4.20;
       } else {
-        // Above Angled Roof Skylight (x = -2.10 .. 2.75, z = -3.45 .. -1.45)
-        streakData[i * 4 + 0] = -2.10 + Math.random() * 4.85;
+        // Strictly above the angled roof skylight pane (x -1.78..2.46, z -2.82..-1.54) so no
+        // rain can ever be seeded past the glass into the room.
+        streakData[i * 4 + 0] = -1.78 + Math.random() * 4.24;
         streakData[i * 4 + 1] = Math.random();
-        streakData[i * 4 + 2] = -3.45 + Math.random() * 2.00;
+        streakData[i * 4 + 2] = -2.82 + Math.random() * 1.28;
       }
       streakData[i * 4 + 3] = (overSkylight ? 10.0 : 0.0) + 0.72 + Math.random() * 0.65;
     }
@@ -1109,8 +1417,13 @@ export class BedroomScene {
           float fallSpan = mix(4.6, 3.0, isSky);
           float yTop = mix(4.3, 4.9, isSky);
           float cycle = fract(aStreak4.y + uTime * (1.85 * spdSeed * rate));
-          float cy = yTop - cycle * fallSpan;
           float windZ = cycle * 0.42;
+          // The sloped skylight plane: y = 2.33 + (z + 2.16) * 1.088 (rises toward +Z).
+          // Rain above the skylight must die ON the glass, never fall through it into the bedroom.
+          float skyZ = aStreak4.z + windZ;
+          float roofY = 2.33 + (skyZ + 2.16) * 1.088 + 0.10;
+          float floorY = mix(yTop - fallSpan, roofY, isSky);
+          float cy = yTop - cycle * max(0.12, yTop - floorY);
 
           // Billboard horizontally around vertical wind-slanted rain vector so streaks stay razor-visible from every angle!
           vec3 center = vec3(aStreak4.x, cy, aStreak4.z + windZ);
@@ -1121,7 +1434,9 @@ export class BedroomScene {
           vec3 worldP = center + sideAxis * position.x + (-rainAxis) * (position.y * lenScale);
 
           float distFade = smoothstep(5.4, 2.7, distance(cameraPosition, center));
-          vAlpha = (0.30 + 0.45 * distFade) * mix(1.0, 0.38, uAftermath);
+          // Streaks dissolve as they strike the skylight glass instead of clipping through it.
+          float impactFade = mix(1.0, smoothstep(1.0, 0.88, cycle), isSky);
+          vAlpha = (0.30 + 0.45 * distFade) * mix(1.0, 0.38, uAftermath) * impactFade;
           gl_Position = projectionMatrix * viewMatrix * vec4(worldP, 1.0);
         }
       `,
@@ -1759,6 +2074,22 @@ export class BedroomScene {
     this.roomDustMat.uniforms.uTime.value = aftermath ? elapsed * 0.12 : elapsed;
     this.roomDustMat.uniforms.uPull.value = pullLevel;
 
+    // The silhouette behind the chair: fades in with the breach, and creeps a step closer
+    // as you escalate. It never moves while you are looking straight at the screen.
+    if (this.watcherGroup) {
+      const awake = aftermath ? 0 : THREE.MathUtils.clamp((infectLevel - 0.42) / 0.42, 0, 1);
+      this.watcherMat.uniforms.uTime.value = elapsed;
+      this.watcherGroup.visible = awake > 0.02;
+      if (this.watcherGroup.visible) {
+        this.watcherCreep = THREE.MathUtils.lerp(this.watcherCreep, infectLevel, Math.min(1, dt * 0.35));
+        this.watcherGroup.position.set(1.28 - this.watcherCreep * 0.22, Math.sin(elapsed * 0.6) * 0.008, 1.92 - this.watcherCreep * 0.62);
+        this.watcherMat.uniforms.uAwake.value = awake * (0.86 + 0.14 * Math.sin(elapsed * 3.1));
+        this.watcherEyeMat.opacity = awake * (0.20 + 0.80 * Math.pow(0.5 + 0.5 * Math.sin(elapsed * 1.9), 8.0));
+      }
+    } else {
+      this.watcherCreep = 0;
+    }
+
     if (aftermath) {
       this.deskLampLight.intensity = 0.06;
       this.deskLampBulbMat.color.setHex(0x28221e);
@@ -1794,7 +2125,15 @@ export class BedroomScene {
       this.hemiLight.intensity = 0.72 + infectLevel * 0.45;
       this.updateClockDisplay(infectLevel > 0.6 ? '88:88' : '02:47', true);
       if (this.officeChair) {
-        this.officeChair.rotation.y = -2.25 + Math.sin(elapsed * 34.0) * 0.04 * infectLevel;
+        // The chair creeps around to face whoever is sitting in it. There is nobody sitting in it.
+        const wanting = playerPos
+          ? Math.atan2(playerPos.x - this.officeChair.position.x, playerPos.z - this.officeChair.position.z)
+          : -2.25;
+        let d = wanting - this.officeChair.rotation.y;
+        while (d > Math.PI) d -= Math.PI * 2;
+        while (d < -Math.PI) d += Math.PI * 2;
+        this.officeChair.rotation.y += d * Math.min(1, dt * (0.35 + infectLevel * 0.8));
+        this.officeChair.rotation.y += Math.sin(elapsed * 34.0) * 0.04 * infectLevel;
       }
     }
 
