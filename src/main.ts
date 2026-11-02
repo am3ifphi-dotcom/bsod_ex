@@ -159,6 +159,30 @@ class BsodExperienceApp {
   private readonly subtitleEl = document.getElementById('subtitle-banner')!;
   private readonly aftermathBarEl = document.getElementById('aftermath-bar')!;
 
+  // Diegetic HOST_LINK telemetry overlay (shown while the BSOD panel is being inspected)
+  private readonly hostLinkEl = document.getElementById('host-link')!;
+  private readonly hlBpmEl = document.getElementById('hl-bpm')!;
+  private readonly hlClockEl = document.getElementById('hl-clock')!;
+  private readonly hlSignalEl = document.getElementById('hl-signal')!;
+  private readonly hlMeterEl = document.getElementById('hl-meter-fill')!;
+  private readonly hlDepthEl = document.getElementById('hl-depth')!;
+  private readonly hlHookEl = document.getElementById('hl-hook')!;
+  private readonly hlTargetEl = document.getElementById('hl-target')!;
+  private readonly hlStateEl = document.getElementById('hl-state')!;
+  private readonly hlLogEls = Array.from(
+    document.querySelectorAll<HTMLElement>('#host-link .hl-log-line')
+  );
+  private hostLinkVisible = false;
+  private hostLinkAccum = 0;
+
+  private readonly dumpHudEl = document.getElementById('dump-hud')!;
+  private readonly dhPctEl = document.getElementById('dh-pct')!;
+  private readonly dhBarEl = document.getElementById('dh-bar-fill')!;
+  private readonly dhDistEl = document.getElementById('dh-dist')!;
+  private readonly dhStatusEl = document.getElementById('dh-status')!;
+  private dumpHudVisible = false;
+  private dumpHudAccum = 0;
+
   private readonly pauseModal = document.getElementById('pause-modal')!;
   private readonly pausePhaseLabel = document.getElementById('pause-phase-label')!;
   private readonly sensSlider = document.getElementById('sens-slider') as HTMLInputElement;
@@ -1103,24 +1127,28 @@ class BsodExperienceApp {
       return;
     }
 
-    if (!this.hoverFace) {
-      // Even off-face clicks produce a tactile LCD liquid-crystal pressure ripple right at the cursor!
-      this.bedroom.bsodScreen.pulseCrack(this.cursorMonitorUv);
-      if (this.clickCount === 0) {
-        this.showSubtitle('あの顔……。', 3400);
-      } else if (this.clickCount >= 2) {
-        this.audio.playOneShot('glitch_stutter', { volume: 0.24, rate: 1.15, duration: 0.55, releaseSec: 0.2 });
-        this.showSubtitle('こちらを見ている。', 2600);
-      }
-      return;
-    }
-
+    // The whole panel is a live surface: every deliberate touch advances the ritual.
+    // Landing directly on ':(' is a hotspot — it bites harder, but the rhythm never stalls.
+    const onGlyph = this.hoverFace;
     this.endFirstContact();
     this.clickCount++;
-    this.inspectClickCooldown = this.clickCount === 1 ? 1.35 : 1.1;
+    this.inspectClickCooldown = this.clickCount === 1 ? 1.25 : 0.95;
     this.clickPulse = 1.0;
     this.bedroom.bsodScreen.pulseCrack(this.cursorMonitorUv);
-    this.triggerSpatialWave(0.38 + this.clickCount * 0.11, 0.78);
+    this.triggerSpatialWave((onGlyph ? 0.44 : 0.30) + this.clickCount * 0.10, onGlyph ? 0.82 : 0.62);
+    if (!onGlyph) {
+      // Off-glyph contact still reads as the panel pressing back into your fingertip.
+      this.audio.playOneShot('glitch_stutter', {
+        volume: 0.16 + this.clickCount * 0.02,
+        rate: 1.22,
+        duration: 0.34,
+        releaseSec: 0.14,
+      });
+      this.horrorPulse = Math.max(this.horrorPulse, 0.24 + this.clickCount * 0.05);
+    } else {
+      this.horrorPulse = Math.max(this.horrorPulse, 0.36 + this.clickCount * 0.06);
+      this.targetJawOpen = Math.max(this.targetJawOpen, this.targetMadness * 0.25 + 0.05);
+    }
 
     if (this.clickCount === 1) {
       this.targetMadness = 0.23;
@@ -1135,7 +1163,7 @@ class BsodExperienceApp {
         releaseSec: 1.2,
         reverb: 0.5,
       });
-      this.showSubtitle('……笑った？', 3800);
+      this.showSubtitle(onGlyph ? '……笑った？' : '画面が、内側から押し返してくる。', 3800);
     } else if (this.clickCount === 2) {
       this.targetMadness = 0.43;
       this.jawVel += 0.95;
@@ -1435,6 +1463,100 @@ class BsodExperienceApp {
     });
   }
 
+  /**
+   * Diegetic HOST_LINK telemetry: the inspection stops being "a cursor on a texture" and
+   * becomes a live optical-chiasm readout wrapped around the player's own view.
+   * Values are throttled to ~12Hz and only touched when the phase is active.
+   */
+  private updateHostLinkUI(dt: number): void {
+    const active = this.phase === 'INSPECT_PC';
+    if (active !== this.hostLinkVisible) {
+      this.hostLinkVisible = active;
+      this.hostLinkEl.classList.toggle('hidden', !active);
+      this.hostLinkAccum = 1;
+    }
+    if (!active) return;
+    this.hostLinkAccum += dt;
+    if (this.hostLinkAccum < 0.08) return;
+    this.hostLinkAccum = 0;
+
+    const lock = THREE.MathUtils.clamp(
+      this.clickCount / 6 * 0.66 + this.madness * 0.34,
+      0,
+      1
+    );
+    const bpm = Math.round(104 + this.madness * 62 + this.clickPulse * 12);
+    const depth = Math.max(0, 0.66 - this.madness * 0.16 - this.clickPulse * 0.02);
+    const secs = Math.floor(this.elapsed) % 60;
+
+    this.hlSignalEl.textContent = `${String(Math.round(lock * 100)).padStart(2, '0')}%`;
+    this.hlMeterEl.style.width = `${(lock * 100).toFixed(0)}%`;
+    this.hlBpmEl.textContent = String(bpm);
+    this.hlDepthEl.textContent = `${depth.toFixed(2)}m`;
+    this.hlClockEl.textContent = `02:47:${String(secs).padStart(2, '0')}`;
+    this.hlHookEl.textContent = this.madness > 0.55 ? 'BREACH' : this.clickCount > 0 ? 'CONTACT' : 'ACTIVE';
+    this.hlTargetEl.textContent = this.hoverFace ? "TARGET: ':('  // LOCKED" : 'TARGET: PANEL SURFACE';
+    this.hlStateEl.textContent =
+      this.clickCount >= 6 ? 'TRANSFER' : this.madness > 0.5 ? 'BREACH' : this.clickCount > 0 ? 'CONTACT' : 'SCANNING';
+
+    const logSets: string[][] = [
+      ['> 走査中。パネル表面に触れられる。', "> 走査対象: ':(' — 応答を検出。", '> 触れるたびに信号が戻ってくる。'],
+      ['> CONTACT. 液晶が内側へ凹んだ。', "> ':(' が、こちらを向いた。", '> 警告: 反射光の中に二つ目の輪郭。'],
+      ['> 視覚野リンク確立。瞬きを停止。', '> 椅子の背後 0.38m に未登録質量。', '> 振り返らないでください。'],
+      ['> C3-C5 運動路、切断。', '> 離席要求は拒否されました。', '> 表示データが自己複製しています。'],
+      ['> 液晶の下に、歯がある。', '> パネルはもう画面ではない。', '> 吸気を検出。'],
+      ['> OPTIC_CHIASM 開放。', '> こちらを見ている。', '> 逃げ道は画面の内側にしかない。'],
+      ['> 強制転送を開始。', '> さようなら。', '> さようなら。さようなら。'],
+    ];
+    const set = logSets[Math.min(this.clickCount, logSets.length - 1)];
+    for (let i = 0; i < this.hlLogEls.length; i++) {
+      const next = set[i] ?? '';
+      if (this.hlLogEls[i].textContent !== next) this.hlLogEls[i].textContent = next;
+    }
+
+    this.hostLinkEl.classList.toggle('hl-corrupt', this.madness > 0.34);
+    this.hostLinkEl.classList.toggle('hl-hot', this.madness > 0.6);
+  }
+
+  /** Compact diegetic dump readout so the glitch world always reports its own decay. */
+  private updateDumpHud(dt: number): void {
+    const active =
+      this.phase === 'GLITCH_ARRIVAL_CUTSCENE' ||
+      this.phase === 'ROAM_GLITCH' ||
+      this.phase === 'COLLAPSE_CUTSCENE';
+    if (active !== this.dumpHudVisible) {
+      this.dumpHudVisible = active;
+      this.dumpHudEl.classList.toggle('hidden', !active);
+      this.dumpHudAccum = 1;
+    }
+    if (!active) return;
+    this.dumpHudAccum += dt;
+    if (this.dumpHudAccum < 0.15) return;
+    this.dumpHudAccum = 0;
+
+    const anomaly = this.glitchWorld.anomalyIntensity;
+    const integrity = 99.4 - this.glitchWorld.anomalyIntensity * 0.4;
+    const dist = Math.hypot(
+      this.player.position.x - this.glitchWorld.corePosition.x,
+      this.player.position.z - this.glitchWorld.corePosition.z
+    );
+    this.dhPctEl.textContent = `${integrity.toFixed(1)}%`;
+    this.dhBarEl.style.width = `${integrity.toFixed(1)}%`;
+    this.dhDistEl.textContent = `${Math.max(1, Math.round(dist))}m`;
+    this.dhStatusEl.textContent =
+      this.phase === 'COLLAPSE_CUTSCENE'
+        ? 'UNMOUNTING'
+        : this.consoleUI.isOpen
+          ? 'SHELL_OPEN'
+          : anomaly > 0.55
+            ? 'ANOMALY'
+            : 'FREE_ROAM';
+    this.dhStatusEl.style.color =
+      this.phase === 'COLLAPSE_CUTSCENE' || anomaly > 0.55
+        ? 'rgba(255, 118, 148, 0.95)'
+        : 'rgba(206, 242, 255, 0.9)';
+  }
+
   private updatePcCursorRaycast(dt = 0.016): void {
     // At high madness (clickCount >= 3), the Parasyte maw subtly drags & trembles the cursor toward its teeth!
     if (this.madness > 0.38 && !this.aftermath && document.pointerLockElement === this.renderer.domElement) {
@@ -1455,7 +1577,7 @@ class BsodExperienceApp {
     const jy = tremor > 0 ? Math.cos(this.elapsed * 53.0) * tremor : 0;
     const px = this.player.inspectCursorPx.x + jx;
     const py = this.player.inspectCursorPx.y + jy;
-    this.pcCursorEl.style.transform = `translate3d(${px - 3}px, ${py - 2}px, 0)`;
+    this.pcCursorEl.style.transform = `translate3d(${px.toFixed(1)}px, ${py.toFixed(1)}px, 0)`;
 
     this.ndcVec.set(
       (px / Math.max(1, window.innerWidth)) * 2 - 1,
@@ -1578,19 +1700,26 @@ class BsodExperienceApp {
     let bloomAmt = 0.58 + bendAmt * 0.16 + ghostAmt * 0.12;
 
     let sharpenAmt = 0.34;
+    let crtAmt = 0.0;
+    let trailAmt = 0.0;
 
     if (this.phase === 'ROAM_BEDROOM' || this.phase === 'AFTERMATH_ROAM' || this.phase === 'TITLE') {
       vigAmt = 0.32;
       bloomAmt = 0.56;
       sharpenAmt = 0.38;
+      crtAmt = 0.0;
     } else if (this.phase === 'INSPECT_PC') {
+      crtAmt = 0.12 + this.madness * 0.20;
+      trailAmt = 0.04 + this.madness * 0.18;
       chromaAmt = Math.max(chromaAmt, this.madness * 0.22);
       vigAmt = 0.34 + this.madness * 0.24;
       warpAmt = Math.max(0, (this.madness - 0.55) * 0.28);
       horrorAmt = Math.max(horrorAmt, this.madness * 0.45);
-      bloomAmt = 0.60 + this.madness * 0.55;
+      bloomAmt = 0.60 + this.madness * 0.55 + this.clickPulse * 0.38;
       sharpenAmt = 0.36;
     } else if (this.phase === 'SUCTION_CUTSCENE') {
+      crtAmt = 0.46;
+      trailAmt = 0.55 + THREE.MathUtils.smoothstep(this.suctionTimer, 1.0, 5.0) * 0.24;
       const tunnelRush = THREE.MathUtils.smoothstep(this.suctionTimer, 2.1, 6.2);
       const handoffClean = 1.0 - THREE.MathUtils.smoothstep(this.suctionTimer, 5.4, 7.1);
       distortAmt = Math.max(distortAmt, 0.14 + (1.0 - tunnelRush) * 0.34);
@@ -1603,6 +1732,8 @@ class BsodExperienceApp {
       bloomAmt = 0.78 + tunnelRush * 0.28;
       sharpenAmt = 0.18;
     } else if (this.phase === 'GLITCH_ARRIVAL_CUTSCENE') {
+      crtAmt = 0.38;
+      trailAmt = 0.42;
       // Continue the visual treatment from the overlapping tunnel shot into the flight.
       const diveFrac = THREE.MathUtils.clamp(1.0 - this.glitchArrivalTimer / 4.30, 0, 1);
       distortAmt = Math.max(distortAmt, diveFrac * 0.14);
@@ -1612,6 +1743,8 @@ class BsodExperienceApp {
       bloomAmt = 0.84 + diveFrac * 0.22;
       sharpenAmt = 0.32;
     } else if (this.phase === 'ROAM_GLITCH') {
+      crtAmt = 0.30;
+      trailAmt = 0.34 + this.glitchWorld.anomalyIntensity * 0.26;
       // Full-screen razor-sharp view across the entire 3D world (zero mosaic filter!)
       distortAmt = Math.max(distortAmt, this.glitchWorld.anomalyIntensity * 0.65);
       chromaAmt = Math.max(chromaAmt, this.glitchWorld.anomalyIntensity * 0.42);
@@ -1621,6 +1754,8 @@ class BsodExperienceApp {
       bloomAmt = 0.84 + this.glitchWorld.anomalyIntensity * 0.42;
       sharpenAmt = 0.34;
     } else if (this.phase === 'COLLAPSE_CUTSCENE') {
+      crtAmt = 0.52 + THREE.MathUtils.smoothstep(this.collapseTimer, 3.5, 8.0) * 0.16;
+      trailAmt = 0.58;
       const fallFactor = THREE.MathUtils.clamp((this.collapseTimer - 3.8) / 4.8, 0, 1);
       distortAmt = Math.max(distortAmt, 0.24 + fallFactor * 0.38);
       chromaAmt = 0.28 + fallFactor * 0.45;
@@ -1648,6 +1783,8 @@ class BsodExperienceApp {
       ghost: ghostAmt,
       bloom: this.autoBloomEnabled ? bloomAmt : 0,
       sharpen: sharpenAmt,
+      crt: crtAmt,
+      trail: trailAmt,
       transition: this.phase === 'SUCTION_CUTSCENE' && this.suctionTimer > this.suctionDuration - this.handoffDuration
         ? {
             scene: this.glitchWorld.scene,
@@ -1865,13 +2002,14 @@ class BsodExperienceApp {
           this.interactPromptEl.textContent = '[クリック / E] 画面に触れる  |  [右クリック / Q] 離れる';
           this.interactPromptEl.classList.remove('hidden');
         } else if (this.clickCount === 0) {
-          this.interactPromptEl.textContent = '「:(」にカーソルを重ねて [クリック / E]  |  [右クリック / Q] 離れる';
+          this.interactPromptEl.textContent =
+            '[クリック / E] パネルに触れる  |  「:(」を狙うと強く反応する  |  [右クリック / Q] 離れる';
           this.interactPromptEl.classList.remove('hidden');
         } else if (this.clickCount < 3) {
-          this.interactPromptEl.textContent = '「:(」に触れる  |  [右クリック / Q] 離れる';
+          this.interactPromptEl.textContent = 'もう一度、触れる  |  [右クリック / Q] 離れる';
           this.interactPromptEl.classList.remove('hidden');
         } else {
-          this.interactPromptEl.textContent = 'もう一度、触れる';
+          this.interactPromptEl.textContent = '画面が、指を離さない。';
           this.interactPromptEl.classList.remove('hidden');
         }
 
@@ -2091,8 +2229,8 @@ class BsodExperienceApp {
           this.opticStrain = 0;
           this.periodicWarpCooldown = 6.5;
           this.crosshairEl.classList.remove('hidden');
-          this.setObjective('光の柱を目指す');
-          this.worldHintEl.textContent = '[C] コンソール';
+          this.setObjective('光の柱へ向かう（命令語の手がかり）');
+          this.worldHintEl.textContent = '[C] コンソールはどこでも開ける';
           this.worldHintEl.classList.remove('hidden');
           this.showSubtitle('橋の向こうに、光が見える。', 5200);
         }
@@ -2172,10 +2310,16 @@ class BsodExperienceApp {
         }
 
         if (!wasRevealed && this.glitchWorld.coreSecretRevealed) {
-          this.audio.playOneShot('ghost_cantata', { volume: 0.48, reverb: 0.55 });
-          this.setObjective('[C] コンソールで命令を実行する');
-          this.worldHintEl.textContent = '[C] コンソール';
-          this.showSubtitle('命令が読める。コンソールに入力しよう。', 5200);
+          // The sanctuary is a payoff, not a permission slip: the whole basin answers.
+          this.glitchWorld.triggerAnomalySurge(1.0);
+          this.triggerGlitch('bend', 0.92, 1.15);
+          this.triggerGlitch('ghost', 0.52, 1.5);
+          this.horrorPulse = Math.max(this.horrorPulse, 0.62);
+          this.audio.playOneShot('ghost_cantata', { volume: 0.52, reverb: 0.55 });
+          this.audio.playOneShot('sub_boom', { volume: 0.52, rate: 0.94, reverb: 0.4 });
+          this.setObjective('[C] コンソール — 覚醒命令を実行する');
+          this.worldHintEl.textContent = '[C] コンソールはどこでも開ける';
+          this.showSubtitle('七つの碑が、ひとつの言葉になった。 W A K E _ U P。', 5600);
         }
 
         const nearCoreFactor = THREE.MathUtils.clamp(1 - distCore / 50, 0, 1);
@@ -2329,6 +2473,8 @@ class BsodExperienceApp {
       }
     }
 
+    this.updateHostLinkUI(dt);
+    this.updateDumpHud(dt);
     this.audio.updateListener(this.camera);
   }
 }

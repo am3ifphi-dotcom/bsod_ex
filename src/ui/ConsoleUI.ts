@@ -10,6 +10,7 @@ export class ConsoleUI {
   public isOpen = false;
   private locked = false;
   private wrongAttemptCount = 0;
+  /** Optional flavour only — the sanctuary no longer gates command execution. */
   private coreUnlocked = false;
   private coreDistanceM = 76;
   private hijackTimeout: number | null = null;
@@ -105,7 +106,7 @@ export class ConsoleUI {
     this.appendLine('Microsoft(R) Kernel Crash Dump Shell [Version 10.0.19045.78D7]', 'dim');
     this.appendLine('ACTIVE DUMP   : C:\\Windows\\MEMORY_0247.DMP  //  HOST_VITALS: 152 BPM (MOTOR_LOCKED)', 'warn');
     this.appendLine('PARASYTE_HOOK : SMILE_ENTITY.SYS -> OPTIC_CHIASM_RING0 [ACTIVE]', 'err');
-    this.appendLine('診断: STATUS / HELP でダンプ状態を確認、または中央聖堂で特定した緊急割り込み命令を実行してください。', 'dim');
+    this.appendLine('このシェルは常時接続されています。STATUS / HELP / DUMP で診断するか、覚醒命令を直接叩き込め。', 'dim');
   }
 
   private appendLine(text: string, cls: '' | 'dim' | 'err' | 'warn' | 'ok' = ''): void {
@@ -132,12 +133,13 @@ export class ConsoleUI {
     }
 
     if (this.coreUnlocked) {
-      this.appendLine('[SANCTUARY_LINK: SYNCED] 中央聖堂の碑板と同期完了 — 緊急割り込み命令を入力可能。', 'ok');
+      this.appendLine('[SANCTUARY_LINK: SYNCED] 七つの碑と同期済み — 覚醒命令は完全に復元されている。', 'ok');
     } else {
       this.appendLine(
-        `[CORE_SIGNAL: ${Math.max(1, Math.round(this.coreDistanceM))}m] 中央の光の柱（聖堂コア）へ近づくと、散乱した命令語が収束します。`,
+        `[CORE_SIGNAL: ${Math.max(1, Math.round(this.coreDistanceM))}m] シェルは接続済み。命令語が未復元でも入力・実行は可能（強制仲裁を試行）。`,
         'dim'
       );
+      this.appendLine('※ 中央聖堂の七つの碑に近づくと命令語が完全な形で復元される。', 'dim');
     }
 
     this.audio.playOneShot('glitch_slice', { volume: 0.26, rate: 0.88, reverb: 0.45 });
@@ -165,6 +167,17 @@ export class ConsoleUI {
     }
   }
 
+  /** A bad command makes the terminal itself lose composure for a beat. */
+  private glitchWindow(): void {
+    const win = this.modalEl.querySelector<HTMLElement>('.console-window');
+    if (!win) return;
+    win.classList.remove('console-corrupt');
+    // Force a reflow so the animation restarts even on rapid input.
+    void win.offsetWidth;
+    win.classList.add('console-corrupt');
+    window.setTimeout(() => win.classList.remove('console-corrupt'), 460);
+  }
+
   private scheduleParasyteHijack(msg: string): void {
     if (this.hijackTimeout !== null) window.clearTimeout(this.hijackTimeout);
     this.hijackTimeout = window.setTimeout(() => {
@@ -189,9 +202,9 @@ export class ConsoleUI {
 
     if (normalized === 'WAKE_UP') {
       if (!this.coreUnlocked) {
-        this.appendLine('[ACCESS DENIED] 信号が不完全です。光の柱に近づいてください。', 'warn');
-        this.audio.playOneShot('console_error', { volume: 0.4 });
-        return;
+        // The sanctuary is a way to *learn* the word, never a toll gate to speak it.
+        this.appendLine('[SIGNAL_UNVERIFIED] 命令語は聖堂でしか復元されていないが、強制仲裁を試行する。', 'warn');
+        this.appendLine('[FORCED_INTERRUPT] 七文字は既にお前の口の中で形成されていた。', 'err');
       }
       this.locked = true;
       this.inputEl.disabled = true;
@@ -223,11 +236,12 @@ export class ConsoleUI {
 
     if (normalized === 'HELP' || normalized === '?') {
       this.audio.playKeystroke();
-      this.appendLine('利用可能な診断コマンド: STATUS, PS, WHOAMI, DIR, DUMP, CLEAR, REBOOT', 'dim');
+      this.appendLine('利用可能な診断コマンド: STATUS, PS, WHOAMI, DIR, DUMP, CLEAR, WAKE_UP', 'dim');
+      this.appendLine('  └ 覚醒仲裁命令は常に受理される。綴りが分からなければ以下の断片を参照。', 'dim');
       this.appendLine(
         this.coreUnlocked
-          ? '※ 中央聖堂の上空に収束した7文字の強制覚醒命令をそのまま入力してください。'
-          : `※ 光の柱が立つ中央聖堂（残り約 ${Math.max(1, Math.round(this.coreDistanceM))}m）へ向かうと、覚醒命令が判明します。`,
+          ? '※ 碑文同期済み: 覚醒命令 ＝ 7文字。すべての文字が揃っている。'
+          : `※ 覚醒命令 ＝ 7文字。断片:  _ A K E _ U _   （聖堂まで約 ${Math.max(1, Math.round(this.coreDistanceM))}m）`,
         'warn'
       );
       return;
@@ -251,8 +265,8 @@ export class ConsoleUI {
       this.appendLine('DIGESTION     : 99.4% — 意識データが青い深淵に溶けかけています', 'err');
       this.appendLine(
         this.coreUnlocked
-          ? 'SANCTUARY_KEY : 収束完了！ 中央のプレートに浮かぶ命令語を入力してください。'
-          : `CORE_DISTANCE : 中央聖堂まで約 ${Math.max(1, Math.round(this.coreDistanceM))}m — 近づくと秘密の命令語が収束します。`,
+          ? 'SANCTUARY_KEY : 復元完了。シェルは常時開通。'
+          : `CORE_DISTANCE : 中央聖堂まで約 ${Math.max(1, Math.round(this.coreDistanceM))}m — 碑は命令語を復元するが、実行はいつでも可能。`,
         this.coreUnlocked ? 'ok' : 'dim'
       );
       return;
@@ -279,6 +293,7 @@ export class ConsoleUI {
       normalized === 'SHUTDOWN'
     ) {
       this.wrongAttemptCount++;
+      this.glitchWindow();
       this.audio.playOneShot('console_error', { volume: 0.6 });
       this.appendLine(
         `[STOP 0x000000F4] '${raw}' は拒否されました。標準の電源・終了割り込みは表示システムに乗っ取られています。`,
@@ -297,11 +312,12 @@ export class ConsoleUI {
     }
 
     this.wrongAttemptCount++;
+    this.glitchWindow();
     this.audio.playOneShot('console_error', { volume: 0.58 });
     const eerieErrors = [
       `[SYNTAX_FAULT] '${raw}' は無効です。空の瞳孔が収縮し、ダンプ領域が軋んでいます。`,
-      `[ACCESS_DENIED] '${raw}' では目を覚ませません。光の柱が立つ中央聖堂の刻印を読み取ってください。`,
-      `[DIGESTION_WARN] 誤入力 '${raw}' が青画面に咀嚼されました。正しい覚醒命令が必要です。`,
+      `[ACCESS_DENIED] '${raw}' では目を覚ませません。命令語は七文字、聖堂の空中に散らばっています。`,
+      `[DIGESTION_WARN] 誤入力 '${raw}' が青画面に咀嚼されました。正しい覚醒命令を打ち込め。`,
     ];
     this.appendLine(eerieErrors[(this.wrongAttemptCount - 1) % eerieErrors.length], 'err');
     const taunts = [

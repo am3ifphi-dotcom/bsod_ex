@@ -29,6 +29,10 @@ export type PostFXOptions = {
   ghost?: number;
   bloom?: number;
   sharpen?: number;
+  /** Barrel/CRT optics: 0 = perfectly flat glass, 1 = heavy tube curvature + grille. */
+  crt?: number;
+  /** Phosphor feedback: previous frames linger as chromatic ghosts (glitch world signature). */
+  trail?: number;
   transition?: { scene: THREE.Scene; camera: THREE.Camera; progress: number };
 };
 
@@ -38,6 +42,19 @@ export class PostFX {
   private readonly quadScene = new THREE.Scene();
   private readonly quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private readonly mat: THREE.ShaderMaterial;
+
+  // ------------------------------------------------------------------ presentation & feedback
+  // The composite is written into an offscreen target so it can be fed back into itself
+  // (phosphor trails) and then scanned through a CRT-shaped present pass.
+  private rtOut: THREE.WebGLRenderTarget;
+  private rtTrailA: THREE.WebGLRenderTarget;
+  private rtTrailB: THREE.WebGLRenderTarget;
+  private trailFlip = false;
+  private readonly presentScene = new THREE.Scene();
+  private readonly trailScene = new THREE.Scene();
+  private readonly presentMat: THREE.ShaderMaterial;
+  private readonly trailMat: THREE.ShaderMaterial;
+  private trailPrimed = false;
   /** Set if the post-process program cannot be linked — the game then renders straight to screen. */
   private disabled = false;
 
@@ -398,6 +415,150 @@ export class PostFX {
     mesh.frustumCulled = false;
     this.quadScene.add(mesh);
 
+    // ---------------------------------------------------------------- FEEDBACK / PRESENT TARGETS
+    const outOpts: THREE.RenderTargetOptions = {
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      type: THREE.UnsignedByteType,
+      depthBuffer: false,
+      stencilBuffer: false,
+    };
+    this.rtOut = new THREE.WebGLRenderTarget(width, height, outOpts);
+    this.rtTrailA = new THREE.WebGLRenderTarget(width, height, outOpts);
+    this.rtTrailB = new THREE.WebGLRenderTarget(width, height, outOpts);
+
+    this.trailMat = new THREE.ShaderMaterial({
+      depthTest: false,
+      depthWrite: false,
+      uniforms: {
+        tNew: { value: this.rtOut.texture },
+        tPrev: { value: this.rtTrailA.texture },
+        uDecay: { value: 0.84 },
+        uResolution: { value: new THREE.Vector2(width, height) },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = vec4(position.xy, 0.0, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec2 vUv;
+        uniform sampler2D tNew;
+        uniform sampler2D tPrev;
+        uniform float uDecay;
+        uniform vec2 uResolution;
+
+        void main() {
+          vec2 texel = 1.0 / max(uResolution, vec2(2.0));
+          vec3 fresh = texture2D(tNew, vUv).rgb;
+
+          // The held field drifts a hair sideways and splits by channel, like a tape that
+          // refuses to erase: this is what gives the world its burnt-in afterimage.
+          vec2 drift = vec2(texel.x * 1.5, 0.0);
+          vec3 prev;
+          prev.r = texture2D(tPrev, vUv + drift).r;
+          prev.g = texture2D(tPrev, vUv).g;
+          prev.b = texture2D(tPrev, vUv - drift).b;
+
+          // max() keeps hard highlights from being averaged into grey; decay below 1 lets them die.
+          vec3 outc = max(fresh, prev * uDecay);
+          // Slight lift so trails keep the BSOD blue instead of turning muddy.
+          outc = mix(outc, max(outc, prev * uDecay * vec3(0.82, 0.96, 1.12)), 0.35);
+          gl_FragColor = vec4(clamp(outc, 0.0, 1.0), 1.0);
+        }
+      `,
+    });
+
+    const trailMesh = new THREE.Mesh(triGeo, this.trailMat);
+    trailMesh.frustumCulled = false;
+    this.trailScene.add(trailMesh);
+
+    this.presentMat = new THREE.ShaderMaterial({
+      depthTest: false,
+      depthWrite: false,
+      uniforms: {
+        tColor: { value: this.rtOut.texture },
+        tTrail: { value: this.rtTrailA.texture },
+        uTrail: { value: 0 },
+        uCrt: { value: 0 },
+        uTime: { value: 0 },
+        uResolution: { value: new THREE.Vector2(width, height) },
+      },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = vec4(position.xy, 0.0, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec2 vUv;
+        uniform sampler2D tColor;
+        uniform sampler2D tTrail;
+        uniform float uTrail;
+        uniform float uCrt;
+        uniform float uTime;
+        uniform vec2 uResolution;
+
+        vec2 barrel(vec2 uv) {
+          vec2 c = uv - 0.5;
+          float r2 = dot(c, c);
+          return 0.5 + c * (1.0 + uCrt * r2 * 0.42);
+        }
+
+        void main() {
+          vec2 uv = barrel(vUv);
+          vec2 centered = uv - 0.5;
+
+          // tube glass only exists where the CRT mask is: outside it, the image simply ends
+          float tube = 1.0 - smoothstep(0.54, 0.66, length(centered * vec2(1.0, 1.06)) * (1.0 - uCrt * 0.55));
+          float edgeMask = mix(1.0, tube, uCrt);
+
+          vec3 col;
+          if (uCrt > 0.001) {
+            // radial convergence error at the mask edge
+            float fringe = uCrt * 0.0026 * (0.4 + dot(centered, centered) * 3.2);
+            col.r = texture2D(tColor, uv + centered * fringe).r;
+            col.g = texture2D(tColor, uv).g;
+            col.b = texture2D(tColor, uv - centered * fringe).b;
+          } else {
+            col = texture2D(tColor, uv).rgb;
+          }
+
+          if (uTrail > 0.001) {
+            // chromatic retained field, slightly defocused: memory residue
+            float off = 0.0012 * uTrail;
+            vec3 trail;
+            trail.r = texture2D(tTrail, uv + vec2(off, 0.0)).r;
+            trail.g = texture2D(tTrail, uv).g;
+            trail.b = texture2D(tTrail, uv - vec2(off, 0.0)).b;
+            // trails stay *under* the live image so highlights never compound into white
+            col = max(col, trail * (0.34 + 0.30 * uTrail));
+            col = mix(col, trail, uTrail * 0.10);
+          }
+
+          // aperture grille + rolling scanline: only in tube modes
+          if (uCrt > 0.001) {
+            float grille = 0.965 + 0.035 * sin(uv.x * uResolution.x * 1.9);
+            float scan = 0.972 + 0.028 * sin(uv.y * uResolution.y * 1.05 - uTime * 2.4);
+            col *= mix(1.0, grille * scan, uCrt);
+            // faint rolling refresh bar
+            float bar = smoothstep(0.10, 0.0, abs(fract(vUv.y * 0.7 - uTime * 0.11) - 0.5));
+            col += vec3(0.18, 0.36, 0.55) * bar * uCrt * 0.22;
+          }
+
+          col *= edgeMask;
+          gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+        }
+      `,
+    });
+
+    const presentMesh = new THREE.Mesh(triGeo, this.presentMat);
+    presentMesh.frustumCulled = false;
+    this.presentScene.add(presentMesh);
+
     const bw = Math.max(2, Math.floor(width / 5));
     const bh = Math.max(2, Math.floor(height / 5));
     const bloomOpts: THREE.RenderTargetOptions = {
@@ -528,6 +689,12 @@ export class PostFX {
     this.brightMat.uniforms.uResolution.value.set(width, height);
     this.rtBright.setSize(bw, bh);
     this.rtBlur.setSize(bw, bh);
+    this.rtOut.setSize(width, height);
+    this.rtTrailA.setSize(width, height);
+    this.rtTrailB.setSize(width, height);
+    this.trailMat.uniforms.uResolution.value.set(width, height);
+    this.presentMat.uniforms.uResolution.value.set(width, height);
+    this.trailPrimed = false;
     this.mat.uniforms.uResolution.value.set(width, height);
     this.brightMat.uniforms.uTexelX.value = 1 / bw;
     this.blurMat.uniforms.uTexelY.value = 1 / bh;
@@ -541,6 +708,8 @@ export class PostFX {
       renderer.compile(this.bloomSceneH, this.quadCamera);
       renderer.compile(this.bloomSceneV, this.quadCamera);
       renderer.compile(this.quadScene, this.quadCamera);
+      renderer.compile(this.trailScene, this.quadCamera);
+      renderer.compile(this.presentScene, this.quadCamera);
       const programs = (renderer.info?.programs ?? []) as Array<{
         diagnostics?: {
           runnable?: boolean;
@@ -596,6 +765,11 @@ export class PostFX {
     u.uGhost.value = opts.ghost ?? 0;
     u.uSharpen.value = opts.sharpen ?? 0.28;
 
+    const trailAmt = THREE.MathUtils.clamp(opts.trail ?? 0, 0, 1);
+    const crtAmt = THREE.MathUtils.clamp(opts.crt ?? 0, 0, 1);
+    // The low tier keeps the single-pass path: no extra full-screen feedback passes.
+    const usePresent = this.bloomEnabled && (trailAmt > 0.002 || crtAmt > 0.002);
+
     renderer.setRenderTarget(this.rt);
     renderer.clear(true, true, true);
     renderer.render(scene, camera);
@@ -615,7 +789,39 @@ export class PostFX {
       renderer.render(this.bloomSceneV, this.quadCamera);
     }
 
-    renderer.setRenderTarget(null);
+    // 1. grade the frame
+    renderer.setRenderTarget(usePresent ? this.rtOut : null);
     renderer.render(this.quadScene, this.quadCamera);
+    if (!usePresent) return;
+
+    // 2. feed the graded frame back into the phosphor history (ping-pong, never read+write one target)
+    if (trailAmt > 0.002) {
+      if (!this.trailPrimed) {
+        this.trailPrimed = true;
+        renderer.setRenderTarget(this.rtTrailA);
+        renderer.clear(true, false, false);
+        renderer.setRenderTarget(this.rtTrailB);
+        renderer.clear(true, false, false);
+      }
+      const src = this.trailFlip ? this.rtTrailB : this.rtTrailA;
+      const dst = this.trailFlip ? this.rtTrailA : this.rtTrailB;
+      this.trailMat.uniforms.tPrev.value = src.texture;
+      this.trailMat.uniforms.uDecay.value = 0.72 + trailAmt * 0.2;
+      renderer.setRenderTarget(dst);
+      renderer.render(this.trailScene, this.quadCamera);
+      this.trailFlip = !this.trailFlip;
+      this.presentMat.uniforms.tTrail.value = (this.trailFlip ? this.rtTrailB : this.rtTrailA).texture;
+      this.presentMat.uniforms.uTrail.value = trailAmt;
+    } else {
+      this.presentMat.uniforms.uTrail.value = 0;
+      // history goes stale while feedback is off; re-prime on the next activation
+      this.trailPrimed = false;
+    }
+    this.presentMat.uniforms.uCrt.value = crtAmt;
+    this.presentMat.uniforms.uTime.value = elapsed;
+
+    // 3. present through the tube / trail lens
+    renderer.setRenderTarget(null);
+    renderer.render(this.presentScene, this.quadCamera);
   }
 }

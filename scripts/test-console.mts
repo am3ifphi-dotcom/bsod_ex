@@ -30,18 +30,28 @@ const { ConsoleUI } = await import('../src/ui/ConsoleUI.ts');
 const ui: any = new ConsoleUI({ playOneShot() {}, playKeystroke() {} } as any);
 let wakes = 0;
 ui.onWakeUpCommand = () => wakes++;
+
+// The command must work from anywhere: the sanctuary only restores the word, it never gates it.
 ui.handleCommand('WAKE_UP');
-assert.equal(ui.locked, false, 'command must not bypass the sanctuary');
-assert.equal(wakes, 0);
-ui.setWorldState(true, 1);
+assert.equal(ui.locked, true, 'WAKE_UP must be accepted before the sanctuary is reached');
+await new Promise((resolve) => setTimeout(resolve, 650));
+assert.equal(wakes, 1, 'an unsynced command still triggers the ending');
+
+ui.reset();
+ui.setWorldState(true, 8);
 ui.handleCommand('wake up');
 assert.equal(ui.locked, true);
 await new Promise((resolve) => setTimeout(resolve, 650));
-assert.equal(wakes, 1, 'discovered command should trigger the ending');
+assert.equal(wakes, 2, 'synced command still triggers the ending');
+
 ui.reset();
 ui.setWorldState(true, 1);
 ui.handleCommand('WAKE_UP');
 ui.reset();
 await new Promise((resolve) => setTimeout(resolve, 650));
-assert.equal(wakes, 1, 'reset must cancel pending ending callbacks');
+assert.equal(wakes, 2, 'reset must cancel pending ending callbacks');
+
+// Diagnostics never lock the shell.
+ui.handleCommand('STATUS');
+assert.equal(ui.locked, false, 'diagnostics must not arm the ending');
 console.log('Console progression and reset: passed');

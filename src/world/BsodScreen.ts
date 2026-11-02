@@ -229,6 +229,11 @@ export class BsodScreen {
   public readonly root = new THREE.Group();
   public readonly hitboxMesh: THREE.Mesh;
   public readonly monitorLight: THREE.PointLight;
+  /** Additive spill card hugging the glass: makes the panel read as a light source. */
+  private readonly spillCard: THREE.Mesh;
+  /** Volumetric cone of blue haze that pushes into the room as the signal breaches. */
+  private readonly spillCone: THREE.Mesh;
+  private readonly spillMat: THREE.MeshBasicMaterial;
 
   private readonly stageTextures: THREE.CanvasTexture[] = [];
   private readonly aftermathTex: THREE.CanvasTexture;
@@ -1295,6 +1300,11 @@ export class BsodScreen {
             col += vec3(0.45, 0.80, 1.0) * scar * 0.42 + vec3(0.95, 0.18, 0.32) * ghostGlint * 0.48;
           }
 
+          // LCD refresh band: one slow bright line sweeping the panel, faster when it is angry.
+          float refreshY = fract(uTime * (0.055 + uMadness * 0.10));
+          float refreshBand = smoothstep(0.045, 0.0, abs(uv.y - refreshY));
+          col += vec3(0.32, 0.62, 1.0) * refreshBand * (0.035 + uMadness * 0.09);
+
           float glassSheen = pow(max(0.0, 1.0 - length((uv - vec2(0.74, 0.68)) * vec2(1.2, 1.0))), 3.0) * 0.035;
           col += vec3(0.45, 0.65, 0.95) * glassSheen * (1.0 - uMadness * 0.6);
 
@@ -2331,6 +2341,32 @@ export class BsodScreen {
     this.monitorLight = new THREE.PointLight(0x1b8cff, 2.35, 6.5, 1.6);
     this.monitorLight.position.set(0, 0.04, 0.26);
     this.root.add(this.monitorLight);
+
+    // 8. Optical spill: a soft additive card hugging the glass plus a widening haze cone.
+    //    This is what sells "the panel is the only light source in the room" without
+    //    washing out the authentic BSOD texture itself.
+    this.spillMat = new THREE.MeshBasicMaterial({
+      color: 0x2b9dff,
+      transparent: true,
+      opacity: 0.12,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+
+    this.spillCard = new THREE.Mesh(
+      new THREE.PlaneGeometry(BsodScreen.LOCAL_W * 1.16, BsodScreen.LOCAL_H * 1.16),
+      this.spillMat
+    );
+    this.spillCard.position.set(0, 0, 0.014);
+    this.root.add(this.spillCard);
+
+    const coneGeo = new THREE.ConeGeometry(1.55, 2.4, 24, 1, true);
+    coneGeo.rotateX(-Math.PI * 0.5);
+    coneGeo.translate(0, 0, 1.2);
+    this.spillCone = new THREE.Mesh(coneGeo, this.spillMat);
+    this.spillCone.scale.set(1.0, 0.62, 1.0);
+    this.root.add(this.spillCone);
   }
 
   private renderFaceChannelTexture(): void {
@@ -2986,6 +3022,19 @@ export class BsodScreen {
     u.uCrackRun.value = this.crackRun;
     u.uAftermath.value = state.aftermath ? 1.0 : 0.0;
     u.uColonDotOff.value = this.colonDotOff;
+
+    // Optical spill reacts to proximity, hover and madness.
+    const spillBase = state.aftermath ? 0.10 : 0.12 + (state.hoverFace ? 0.06 : 0) + state.madness * 0.30;
+    const spillFlicker = state.madness > 0.2 ? 1.0 + Math.sin(elapsed * 41.0) * 0.12 * state.madness : 1.0;
+    this.spillMat.opacity = Math.min(0.62, spillBase * spillFlicker);
+    this.spillMat.color.setHex(state.aftermath ? 0x1a63b8 : state.madness > 0.5 ? 0x3fa8ff : 0x2b9dff);
+    this.spillCard.visible = !state.aftermath || state.madness > 0.05;
+    this.spillCone.visible = state.madness > 0.08 || state.suctionProgress > 0.001;
+    this.spillCone.scale.set(
+      1.0 + state.madness * 0.55,
+      0.62 + state.madness * 0.3,
+      1.0 + state.madness * 0.9
+    );
 
     // Monitor light intensifies dynamically during escalation
     if (state.aftermath) {

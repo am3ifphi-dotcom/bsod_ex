@@ -35,7 +35,7 @@
           <div><kbd>W A S D</kbd> 移動 / <kbd>SPACE</kbd> ジャンプ</div>
           <div><kbd>MOUSE</kbd> 視点移動</div>
           <div><kbd>CLICK / E</kbd> 調べる・触れる</div>
-          <div><kbd>C</kbd> コンソール（異世界）</div>
+          <div><kbd>C</kbd> コンソール（いつでも入力可）</div>
         </div>
         <p class="experience-note">音声・画面の点滅・急な演出があります。ヘッドホン推奨。<br>ポインターロックが使えない場合はドラッグで視点移動できます。</p>
       </div>
@@ -48,16 +48,59 @@
         <span class="ch-ring"></span>
       </div>
 
-      <!-- Custom OS-like cursor when inspecting the PC monitor -->
+      <!-- Diegetic scan reticle used while inspecting the PC monitor -->
       <div id="pc-cursor" class="hidden">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-          <path
-            d="M4 2L4 19L8.5 14.8L11.8 21.5L14.4 20.2L11.1 13.6L17.2 13.6L4 2Z"
-            fill="#ffffff"
-            stroke="#001a38"
-            stroke-width="1.6"
-          />
-        </svg>
+        <div class="reticle">
+          <span class="ret-ring"></span>
+          <span class="ret-tick ret-n"></span>
+          <span class="ret-tick ret-e"></span>
+          <span class="ret-tick ret-s"></span>
+          <span class="ret-tick ret-w"></span>
+          <span class="ret-dot"></span>
+          <span class="ret-core"></span>
+        </div>
+        <span class="reticle-label">SCAN</span>
+      </div>
+
+      <!-- Diegetic host-link telemetry overlay shown while the BSOD panel is inspected -->
+      <div id="host-link" class="hidden" aria-hidden="true">
+        <span class="hl-corner hl-tl"></span>
+        <span class="hl-corner hl-tr"></span>
+        <span class="hl-corner hl-bl"></span>
+        <span class="hl-corner hl-br"></span>
+        <div class="hl-scan"></div>
+        <div class="hl-top">
+          <span class="hl-id">HOST_LINK<span class="hl-sep">//</span>OPTIC_CHIASM_RING0</span>
+          <span class="hl-meta"><b id="hl-bpm">104</b> BPM<span class="hl-sep">/</span><span id="hl-clock">02:47:00</span></span>
+        </div>
+        <div class="hl-left">
+          <div class="hl-row"><span>DUMP</span><b>MEMORY_0247</b></div>
+          <div class="hl-row"><span>PARASYTE_HOOK</span><b id="hl-hook">ACTIVE</b></div>
+          <div class="hl-row"><span>SIGNAL_LOCK</span><b id="hl-signal">00%</b></div>
+          <div class="hl-meter"><i id="hl-meter-fill"></i></div>
+          <div class="hl-row hl-dim"><span>DEPTH</span><b id="hl-depth">0.00m</b></div>
+        </div>
+        <div class="hl-right">
+          <div class="hl-log-line" data-l="0">&gt; 待機中。パネル表面を走査している。</div>
+          <div class="hl-log-line hl-dim" data-l="1">&gt; 走査対象: ':(' — 応答を検出。</div>
+          <div class="hl-log-line hl-dim" data-l="2">&gt; 作用: 触れるたびに信号が戻ってくる。</div>
+        </div>
+        <div class="hl-bottom">
+          <span id="hl-target">TARGET: NONE</span>
+          <span id="hl-state">IDLE</span>
+        </div>
+      </div>
+
+      <!-- Diegetic dump readout, visible only inside the glitch world -->
+      <div id="dump-hud" class="hidden" aria-hidden="true">
+        <div class="dh-head">MEMORY_0247.DMP</div>
+        <div class="dh-row"><span>INTEGRITY</span><b id="dh-pct">99.4%</b></div>
+        <div class="dh-bar"><i id="dh-bar-fill"></i></div>
+        <div class="dh-row"><span>CORE_DIST</span><b id="dh-dist">76m</b></div>
+        <div class="dh-row"><span>STATE</span><b id="dh-status">FREE_ROAM</b></div>
+        <div class="dh-wave" aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
       </div>
 
       <div id="objective" class="hidden"><span class="objective-label">CURRENT OBJECTIVE</span><span id="objective-text"></span></div>

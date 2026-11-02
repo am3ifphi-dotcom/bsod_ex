@@ -354,7 +354,9 @@ export class FirstPersonController {
 
     this.scratchDir.copy(lookTarget).sub(targetPos).normalize();
     const flinchRecoil = madness > 0.45 ? clickPulse * 0.13 : clickPulse * 0.03;
-    desiredPos.addScaledVector(this.scratchDir, madness * 0.11 - flinchRecoil);
+    // Contact punch: the lens eats a centimetre of distance, then the recoil pushes it back.
+    const contactLunge = clickPulse * clickPulse * 0.024;
+    desiredPos.addScaledVector(this.scratchDir, madness * 0.11 + contactLunge - flinchRecoil);
 
     const lookPt = this.scratchTarget.copy(lookTarget);
     lookPt.z -= nx * 0.036;
@@ -375,7 +377,8 @@ export class FirstPersonController {
     this.camera.position.lerpVectors(this.blendStartPos, this.dummyCam.position, smoothT);
     this.camera.quaternion.slerpQuaternions(this.blendStartQuat, this.dummyCam.quaternion, smoothT);
 
-    const targetFov = THREE.MathUtils.lerp(this.blendStartFov, 58, smoothT) + madness * 5.0;
+    const targetFov =
+      THREE.MathUtils.lerp(this.blendStartFov, 58, smoothT) + madness * 5.0 + clickPulse * 2.4;
     if (Math.abs(this.camera.fov - targetFov) > 0.04) {
       this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, Math.min(1, dt * 10));
       this.camera.updateProjectionMatrix();
