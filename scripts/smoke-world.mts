@@ -39,6 +39,8 @@ const tex = new THREE.Texture();
 w.buildSkyAndLighting();
 w.buildTerrain(tex, tex);
 w.buildKernelMegacityAndSkyRift();
+w.buildImpossibleArchive();
+if (!w.group.getObjectByName('ImpossibleArchive')) throw new Error('Missing impossible archive vista');
 w.buildCathedralCausewayAndLeviathan();
 w.buildCentralSanctuary(new THREE.Object3D(), new THREE.Object3D(), new THREE.Object3D());
 w.buildWorldLandmarks(new THREE.Object3D(), new THREE.Object3D(), new THREE.Object3D(), new THREE.Object3D());

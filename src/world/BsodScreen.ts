@@ -432,7 +432,7 @@ export class BsodScreen {
           float helixB = pow(max(0.0, cos(angle * 10.0 - vTubePos.z * 0.16 + uScrollPhase * 0.265)), 10.0);
           float shockRing = smoothstep(0.92, 1.0, fract(vTubePos.z * 0.09 + uScrollPhase * 0.146));
 
-          vec3 darkGullet = vec3(0.016, 0.005, 0.028);
+          vec3 darkGullet = vec3(0.002, 0.025, 0.095);
           // Match GlitchWorld's spatial exit conduit palette 1:1 in the deep zone for a 0-cut transition!
           vec3 sleeveDeep = vec3(0.004, 0.065, 0.28);
           vec3 sleeveMid = vec3(0.008, 0.14, 0.48);
@@ -444,16 +444,8 @@ export class BsodScreen {
           // Near half: wet crimson Parasyte esophagus -> Deep half: morphs smoothly into GlitchWorld's cerulean conduit!
           vec3 sleeveBase = mix(sleeveDeep, sleeveMid, smoothstep(0.55, 0.94, depthFactor));
           vec3 col = mix(darkGullet, sleeveBase, sleeveZone);
-          col += vec3(0.42, 0.015, 0.06) * ribFold * horrorZone;
-          col += vec3(0.76, 0.05, 0.14) * pow(nSample.a, 2.8) * horrorZone * 0.92;
-
-          // Glaring watching slit-eyes embedded in the fleshy gullet walls (near half)
-          vec2 eyeGrid = fract(vec2(angle * 2.546 + 0.25, -vTubePos.z * 0.14) + vec2(0.0, sin(angle * 3.0) * 0.2));
-          vec2 eyeD = (eyeGrid - 0.5) * vec2(1.0, 2.2);
-          float wallEye = smoothstep(0.28, 0.10, length(eyeD)) * step(0.62, nSample.g) * horrorZone;
-          float wallPupil = smoothstep(0.06, 0.015, abs(eyeD.x)) * smoothstep(0.14, 0.04, abs(eyeD.y));
-          col = mix(col, vec3(0.92, 0.88, 0.84), wallEye * 0.78);
-          col = mix(col, vec3(0.04, 0.0, 0.02), wallEye * wallPupil);
+          col += vec3(0.015, 0.16, 0.44) * ribFold * horrorZone;
+          col += vec3(0.06, 0.38, 0.8) * pow(nSample.a, 2.8) * horrorZone * 0.5;
 
           col += vec3(0.28, 0.76, 1.0) * line * mix(0.06, 0.46, sleeveZone);
           col += vec3(0.32, 0.84, 1.0) * (helixA * 0.55 + helixB * 0.45) * mix(0.08, 0.88, sleeveZone);
@@ -899,10 +891,15 @@ export class BsodScreen {
         vec4 evalParasyteChewV(float t, float madness, float jawOpen, float suction, float clickPulse) {
           float openT = clamp(jawOpen, 0.0, 1.0);
           float baseOpen = pow(openT, 0.68);
-          float inhaleBreath = sin(t * 1.25) * 0.022 * openT;
-          float clickTear = clickPulse * 0.055 * smoothstep(0.08, 0.32, madness);
+          // A living jaw: slow inhalation interrupted by sharp, irregular involuntary bites.
+          // This exact equation is shared by the screen, gums, teeth, eyes and sinews.
+          float alive = smoothstep(0.17, 0.62, madness) * (1.0 - smoothstep(0.10, 0.48, suction));
+          float inhaleBreath = sin(t * 2.0) * 0.055 * openT;
+          float spasm = pow(max(0.0, sin(t * 3.7 + sin(t * 1.13) * 1.8)), 10.0);
+          float bite = spasm * 0.18 * alive * openT;
+          float clickTear = clickPulse * 0.095 * smoothstep(0.08, 0.32, madness);
           float swallowUnhinge = smoothstep(0.10, 0.45, suction) * 0.38;
-          float effOpen = clamp(baseOpen + inhaleBreath + clickTear + swallowUnhinge, 0.0, 1.34);
+          float effOpen = clamp(baseOpen + inhaleBreath - bite + clickTear + swallowUnhinge, 0.0, 1.34);
           return vec4(effOpen, 0.0, 0.0, 0.0);
         }
 
@@ -913,7 +910,10 @@ export class BsodScreen {
           float k = clamp(openN, 0.0, 1.25);
           float cornerFlare = pow(0.5 - 0.5 * cos(ang * 4.0), 1.55);
           float archVertical = 0.07 * pow(abs(sin(ang)), 1.4);
-          return 1.0 + (0.14 * cornerFlare + archVertical) * k;
+          // Neighbouring lobes strain in different directions instead of pulsing as a perfect ring.
+          float twitch = sin(ang * 3.0 + uTime * 4.3) * 0.045
+                       + sin(ang * 5.0 - uTime * 7.1) * 0.025;
+          return 1.0 + (0.14 * cornerFlare + archVertical + twitch * uMadness) * k;
         }
 
         void main() {
@@ -956,7 +956,7 @@ export class BsodScreen {
           // Outward-peeling shattered LCD glass collar around mDist = 1.03..1.36 so 3D jaw flesh tucks cleanly behind it!
           float glassCollar = exp(-pow((nDist - 1.10) * 4.2, 2.0)) * (0.042 * openNcV + 0.018 * uClickPulse) * tearOpenV;
           // Subtle sub-LCD cranial/visage dome bulge pressing outward from behind the panel at Stages 1-3
-          float subFaceDome = exp(-dot(fLocV, fLocV) * 2.2) * smoothstep(0.05, 0.45, uMadness) * (1.0 - tearOpenV * 0.65) * 0.032;
+          float subFaceDome = 0.0; // No anatomical relief beneath the display.
           float clickWave = sin(nDist * 11.0 - (1.0 - uClickPulse) * 13.0) * exp(-nDist * 1.9) * uClickPulse * 0.012;
           p.z += glassCollar + subFaceDome + clickWave;
 
@@ -1023,10 +1023,15 @@ export class BsodScreen {
         vec4 evalParasyteChew(float t, float madness, float jawOpen, float suction, float clickPulse) {
           float openT = clamp(jawOpen, 0.0, 1.0);
           float baseOpen = pow(openT, 0.68);
-          float inhaleBreath = sin(t * 1.25) * 0.022 * openT;
-          float clickTear = clickPulse * 0.055 * smoothstep(0.08, 0.32, madness);
+          // A living jaw: slow inhalation interrupted by sharp, irregular involuntary bites.
+          // This exact equation is shared by the screen, gums, teeth, eyes and sinews.
+          float alive = smoothstep(0.17, 0.62, madness) * (1.0 - smoothstep(0.10, 0.48, suction));
+          float inhaleBreath = sin(t * 2.0) * 0.055 * openT;
+          float spasm = pow(max(0.0, sin(t * 3.7 + sin(t * 1.13) * 1.8)), 10.0);
+          float bite = spasm * 0.18 * alive * openT;
+          float clickTear = clickPulse * 0.095 * smoothstep(0.08, 0.32, madness);
           float swallowUnhinge = smoothstep(0.10, 0.45, suction) * 0.38;
-          float effOpen = clamp(baseOpen + inhaleBreath + clickTear + swallowUnhinge, 0.0, 1.34);
+          float effOpen = clamp(baseOpen + inhaleBreath - bite + clickTear + swallowUnhinge, 0.0, 1.34);
           return vec4(effOpen, 0.0, 0.0, 0.0);
         }
 
@@ -1034,7 +1039,10 @@ export class BsodScreen {
           float k = clamp(openN, 0.0, 1.25);
           float cornerFlare = pow(0.5 - 0.5 * cos(ang * 4.0), 1.55);
           float archVertical = 0.07 * pow(abs(sin(ang)), 1.4);
-          return 1.0 + (0.14 * cornerFlare + archVertical) * k;
+          // Neighbouring lobes strain in different directions instead of pulsing as a perfect ring.
+          float twitch = sin(ang * 3.0 + uTime * 4.3) * 0.045
+                       + sin(ang * 5.0 - uTime * 7.1) * 0.025;
+          return 1.0 + (0.14 * cornerFlare + archVertical + twitch * uMadness) * k;
         }
 
         // Analytic fwidth() anti-aliased SDF sampler for 8K vector-crisp ':(' typography at any zoom!
@@ -1122,7 +1130,8 @@ export class BsodScreen {
 
           // Discard cleanly inside mDist < 1.03 so the 3D sculpted Parasyte jaws & gum-socketed teeth emerge from behind!
           float tearOpen = smoothstep(0.06, 0.26, openNc);
-          if (uAftermath < 0.5 && tearOpen > 0.01 && mDist < 1.03) discard;
+          float portalOpen = smoothstep(0.03, 0.16, uSuction);
+          if (uAftermath < 0.5 && portalOpen > 0.01 && mDist < portalOpen * 1.03) discard;
 
           // ---------------------------------------------------------------- 2. LCD PANEL & TACTILE IMPACT REFRACTION
           vec4 noiseA = texture2D(uNoiseTex, uv * vec2(3.2, 1.8) + vec2(0.0, uTime * 0.04));
@@ -1168,23 +1177,15 @@ export class BsodScreen {
             vec2 eyeALocal = mix(colonLocal + vec2(0.0, eyeOff), vec2(0.22, parenLocal.y + halfLen * 0.88 + 0.09), eyeMorph);
             vec2 eyeBLocal = mix(colonLocal - vec2(0.0, eyeOff), vec2(-0.24, parenLocal.y + halfLen * 0.88 + 0.11), eyeMorph);
 
-            // Per-pixel normal-mapped 3D anatomical Parasyte visage pressing against the liquid crystal from inside!
-            float visageStrength = smoothstep(0.03, 0.36, uMadness + uHover * 0.08);
-            if (visageStrength > 0.005) {
-              float eps = 0.012;
-              vec2 mCent = vec2(mouthCx, parenLocal.y);
-              float hC = evalSubLcdVisage(fLocal, eyeALocal, eyeBLocal, mCent, uMadness, openN);
-              float hX = evalSubLcdVisage(fLocal + vec2(eps, 0.0), eyeALocal, eyeBLocal, mCent, uMadness, openN);
-              float hY = evalSubLcdVisage(fLocal + vec2(0.0, eps), eyeALocal, eyeBLocal, mCent, uMadness, openN);
-              vec3 reliefN = normalize(vec3(-(hX - hC) / eps * 0.22 * visageStrength, -(hY - hC) / eps * 0.22 * visageStrength, 1.0));
-              vec3 reliefL = normalize(vec3(-0.35, 0.58, 0.73));
-              vec3 reliefV = vec3(0.0, 0.0, 1.0);
-              vec3 reliefH = normalize(reliefL + reliefV);
-              float reliefDiff = dot(reliefN, reliefL) - 0.73;
-              float reliefSpec = pow(max(dot(reliefN, reliefH), 0.0), 42.0) * visageStrength;
-              col *= clamp(1.0 + reliefDiff * (0.65 * visageStrength) - max(0.0, -hC) * 0.48 * visageStrength, 0.28, 1.38);
-              col += vec3(0.42, 0.80, 1.0) * reliefSpec * 0.34;
-            }
+            // The face is made of screen signal, not anatomy: displaced scan rows,
+            // duplicated glyphs and a rectangular digital void beneath the glyph.
+            float digitalFace = smoothstep(0.10, 0.45, uMadness);
+            vec2 blockCoord = floor(fLocal * vec2(26.0, 22.0));
+            float blockNoise = hash21(blockCoord + floor(uTime * 8.0));
+            float voidShape = 1.0 - smoothstep(0.82, 1.08, mDist + (blockNoise - 0.5) * 0.14);
+            col = mix(col, vec3(0.002, 0.015, 0.065), voidShape * digitalFace * 0.84);
+            float signalBand = step(0.94 - uMadness * 0.08, blockNoise) * digitalFace;
+            col += vec3(0.08, 0.35, 0.8) * signalBand * 0.3;
 
             if (uMadness > 0.04) {
               // Razor-sharp shattered-LCD glass fractures radiating from the splitting face
@@ -1225,13 +1226,13 @@ export class BsodScreen {
                              * (0.032 * uHover + 0.055 * uMadness);
             vec2 eyeUv = vec2(0.5) + (fLocal - cursorPullF);
 
-            float glyphEyeFade = 1.0 - smoothstep(0.14, 0.26, uMadness);
+            float glyphEyeFade = 1.0;
             float eyesInk = 0.0;
             if (glyphEyeFade > 0.005 && eyeUv.x > 0.01 && eyeUv.x < 0.99 && eyeUv.y > 0.01 && eyeUv.y < 0.99) {
               eyesInk = sampleSdfGlyph(texture2D(uFaceTex, eyeUv).r) * glyphEyeFade;
             }
 
-            float jawFade = 1.0 - smoothstep(0.06, 0.24, openN);
+            float jawFade = 1.0;
             float splitSpread = pow(uMadness, 1.35) * 0.11 + openN * 0.24;
             float mouthLocalX = mix(fLocal.x, parenLocal.x * 2.0 - fLocal.x, smileFlip);
             float mouthLocalY = parenLocal.y + (fLocal.y - parenLocal.y) / (1.0 + smoothstep(0.06, 0.32, uMadness) * 0.18);
@@ -1252,14 +1253,26 @@ export class BsodScreen {
               mouthInk *= jawFade;
             }
 
+            // Horizontal packet loss and offset copies make the original typography
+            // appear to desynchronise and watch the pointer, without becoming an animal.
+            float row = floor(fLocal.y * 30.0);
+            float frame = floor(uTime * (7.0 + uMadness * 8.0));
+            float rowFault = step(0.70, hash21(vec2(row, frame))) * digitalFace;
+            vec2 echoUv = vec2(0.5) + fLocal + vec2((hash21(vec2(row + 4.0, frame)) - 0.5) * 0.16 * uMadness, 0.0);
+            float echoInk = 0.0;
+            if (echoUv.x > 0.01 && echoUv.x < 0.99 && echoUv.y > 0.01 && echoUv.y < 0.99) {
+              vec4 echo = texture2D(uFaceTex, echoUv);
+              echoInk = max(sampleSdfGlyph(echo.r), sampleSdfGlyph(echo.g)) * rowFault;
+            }
             float faceInk = clamp(eyesInk + mouthInk, 0.0, 1.0);
+            col = mix(col, vec3(0.10, 0.85, 1.0), echoInk * 0.65);
             col = mix(col, vec3(1.0), faceInk);
 
             if (eyesInk > 0.05 && (uHover > 0.05 || uMadness > 0.02 || stage0Betrayal > 0.5)) {
               float dDotA = length((fLocal - (colonLocal + vec2(0.0, eyeOff)) - cursorPullF * 1.35) * vec2(1.45, 0.90));
               float dDotB = length((fLocal - (colonLocal - vec2(0.0, eyeOff)) - cursorPullF * 1.35) * vec2(1.45, 0.90));
-              float slitIris = smoothstep(0.020, 0.007, min(dDotA, dDotB))
-                             * clamp(uHover * 0.28 + uMadness * 3.2 + stage0Betrayal * 0.85, 0.0, 0.92);
+              float slitIris = step(min(dDotA, dDotB), 0.014)
+                             * clamp(uHover * 0.28 + uMadness * 2.0 + stage0Betrayal * 0.6, 0.0, 0.8);
               col = mix(col, vec3(0.005, 0.02, 0.06), slitIris * eyesInk);
             }
 
@@ -1363,10 +1376,15 @@ export class BsodScreen {
         vec4 evalParasyteChewT(float t, float madness, float jawOpen, float suction, float clickPulse) {
           float openT = clamp(jawOpen, 0.0, 1.0);
           float baseOpen = pow(openT, 0.68);
-          float inhaleBreath = sin(t * 1.25) * 0.022 * openT;
-          float clickTear = clickPulse * 0.055 * smoothstep(0.08, 0.32, madness);
+          // A living jaw: slow inhalation interrupted by sharp, irregular involuntary bites.
+          // This exact equation is shared by the screen, gums, teeth, eyes and sinews.
+          float alive = smoothstep(0.17, 0.62, madness) * (1.0 - smoothstep(0.10, 0.48, suction));
+          float inhaleBreath = sin(t * 2.0) * 0.055 * openT;
+          float spasm = pow(max(0.0, sin(t * 3.7 + sin(t * 1.13) * 1.8)), 10.0);
+          float bite = spasm * 0.18 * alive * openT;
+          float clickTear = clickPulse * 0.095 * smoothstep(0.08, 0.32, madness);
           float swallowUnhinge = smoothstep(0.10, 0.45, suction) * 0.38;
-          float effOpen = clamp(baseOpen + inhaleBreath + clickTear + swallowUnhinge, 0.0, 1.34);
+          float effOpen = clamp(baseOpen + inhaleBreath - bite + clickTear + swallowUnhinge, 0.0, 1.34);
           return vec4(effOpen, 0.0, 0.0, 0.0);
         }
 
@@ -1374,7 +1392,10 @@ export class BsodScreen {
           float k = clamp(openN, 0.0, 1.25);
           float cornerFlare = pow(0.5 - 0.5 * cos(ang * 4.0), 1.55);
           float archVertical = 0.07 * pow(abs(sin(ang)), 1.4);
-          return 1.0 + (0.14 * cornerFlare + archVertical) * k;
+          // Neighbouring lobes strain in different directions instead of pulsing as a perfect ring.
+          float twitch = sin(ang * 3.0 + uTime * 4.3) * 0.045
+                       + sin(ang * 5.0 - uTime * 7.1) * 0.025;
+          return 1.0 + (0.14 * cornerFlare + archVertical + twitch * uMadness) * k;
         }
 
         void main() {
@@ -1580,10 +1601,15 @@ export class BsodScreen {
         vec4 evalParasyteChewS(float t, float madness, float jawOpen, float suction, float clickPulse) {
           float openT = clamp(jawOpen, 0.0, 1.0);
           float baseOpen = pow(openT, 0.68);
-          float inhaleBreath = sin(t * 1.25) * 0.022 * openT;
-          float clickTear = clickPulse * 0.055 * smoothstep(0.08, 0.32, madness);
+          // A living jaw: slow inhalation interrupted by sharp, irregular involuntary bites.
+          // This exact equation is shared by the screen, gums, teeth, eyes and sinews.
+          float alive = smoothstep(0.17, 0.62, madness) * (1.0 - smoothstep(0.10, 0.48, suction));
+          float inhaleBreath = sin(t * 2.0) * 0.055 * openT;
+          float spasm = pow(max(0.0, sin(t * 3.7 + sin(t * 1.13) * 1.8)), 10.0);
+          float bite = spasm * 0.18 * alive * openT;
+          float clickTear = clickPulse * 0.095 * smoothstep(0.08, 0.32, madness);
           float swallowUnhinge = smoothstep(0.10, 0.45, suction) * 0.38;
-          float effOpen = clamp(baseOpen + inhaleBreath + clickTear + swallowUnhinge, 0.0, 1.34);
+          float effOpen = clamp(baseOpen + inhaleBreath - bite + clickTear + swallowUnhinge, 0.0, 1.34);
           return vec4(effOpen, 0.0, 0.0, 0.0);
         }
 
@@ -1591,7 +1617,10 @@ export class BsodScreen {
           float k = clamp(openN, 0.0, 1.25);
           float cornerFlare = pow(0.5 - 0.5 * cos(ang * 4.0), 1.55);
           float archVertical = 0.07 * pow(abs(sin(ang)), 1.4);
-          return 1.0 + (0.14 * cornerFlare + archVertical) * k;
+          // Neighbouring lobes strain in different directions instead of pulsing as a perfect ring.
+          float twitch = sin(ang * 3.0 + uTime * 4.3) * 0.045
+                       + sin(ang * 5.0 - uTime * 7.1) * 0.025;
+          return 1.0 + (0.14 * cornerFlare + archVertical + twitch * uMadness) * k;
         }
 
         vec3 anchorOnJaw(float ang, float radialMul, float openN, vec2 mawCenter, float faceScale, vec2 parenLoc, float halfLen) {
@@ -1737,10 +1766,15 @@ export class BsodScreen {
         vec4 evalParasyteChewF(float t, float madness, float jawOpen, float suction, float clickPulse) {
           float openT = clamp(jawOpen, 0.0, 1.0);
           float baseOpen = pow(openT, 0.68);
-          float inhaleBreath = sin(t * 1.25) * 0.022 * openT;
-          float clickTear = clickPulse * 0.055 * smoothstep(0.08, 0.32, madness);
+          // A living jaw: slow inhalation interrupted by sharp, irregular involuntary bites.
+          // This exact equation is shared by the screen, gums, teeth, eyes and sinews.
+          float alive = smoothstep(0.17, 0.62, madness) * (1.0 - smoothstep(0.10, 0.48, suction));
+          float inhaleBreath = sin(t * 2.0) * 0.055 * openT;
+          float spasm = pow(max(0.0, sin(t * 3.7 + sin(t * 1.13) * 1.8)), 10.0);
+          float bite = spasm * 0.18 * alive * openT;
+          float clickTear = clickPulse * 0.095 * smoothstep(0.08, 0.32, madness);
           float swallowUnhinge = smoothstep(0.10, 0.45, suction) * 0.38;
-          float effOpen = clamp(baseOpen + inhaleBreath + clickTear + swallowUnhinge, 0.0, 1.34);
+          float effOpen = clamp(baseOpen + inhaleBreath - bite + clickTear + swallowUnhinge, 0.0, 1.34);
           return vec4(effOpen, 0.0, 0.0, 0.0);
         }
 
@@ -1748,7 +1782,10 @@ export class BsodScreen {
           float k = clamp(openN, 0.0, 1.25);
           float cornerFlare = pow(0.5 - 0.5 * cos(ang * 4.0), 1.55);
           float archVertical = 0.07 * pow(abs(sin(ang)), 1.4);
-          return 1.0 + (0.14 * cornerFlare + archVertical) * k;
+          // Neighbouring lobes strain in different directions instead of pulsing as a perfect ring.
+          float twitch = sin(ang * 3.0 + uTime * 4.3) * 0.045
+                       + sin(ang * 5.0 - uTime * 7.1) * 0.025;
+          return 1.0 + (0.14 * cornerFlare + archVertical + twitch * uMadness) * k;
         }
 
         vec3 evalJawPoint(
@@ -1987,10 +2024,15 @@ export class BsodScreen {
         vec4 evalParasyteChewE(float t, float madness, float jawOpen, float suction, float clickPulse) {
           float openT = clamp(jawOpen, 0.0, 1.0);
           float baseOpen = pow(openT, 0.68);
-          float inhaleBreath = sin(t * 1.25) * 0.022 * openT;
-          float clickTear = clickPulse * 0.055 * smoothstep(0.08, 0.32, madness);
+          // A living jaw: slow inhalation interrupted by sharp, irregular involuntary bites.
+          // This exact equation is shared by the screen, gums, teeth, eyes and sinews.
+          float alive = smoothstep(0.17, 0.62, madness) * (1.0 - smoothstep(0.10, 0.48, suction));
+          float inhaleBreath = sin(t * 2.0) * 0.055 * openT;
+          float spasm = pow(max(0.0, sin(t * 3.7 + sin(t * 1.13) * 1.8)), 10.0);
+          float bite = spasm * 0.18 * alive * openT;
+          float clickTear = clickPulse * 0.095 * smoothstep(0.08, 0.32, madness);
           float swallowUnhinge = smoothstep(0.10, 0.45, suction) * 0.38;
-          float effOpen = clamp(baseOpen + inhaleBreath + clickTear + swallowUnhinge, 0.0, 1.34);
+          float effOpen = clamp(baseOpen + inhaleBreath - bite + clickTear + swallowUnhinge, 0.0, 1.34);
           return vec4(effOpen, 0.0, 0.0, 0.0);
         }
 
@@ -1998,7 +2040,10 @@ export class BsodScreen {
           float k = clamp(openN, 0.0, 1.25);
           float cornerFlare = pow(0.5 - 0.5 * cos(ang * 4.0), 1.55);
           float archVertical = 0.07 * pow(abs(sin(ang)), 1.4);
-          return 1.0 + (0.14 * cornerFlare + archVertical) * k;
+          // Neighbouring lobes strain in different directions instead of pulsing as a perfect ring.
+          float twitch = sin(ang * 3.0 + uTime * 4.3) * 0.045
+                       + sin(ang * 5.0 - uTime * 7.1) * 0.025;
+          return 1.0 + (0.14 * cornerFlare + archVertical + twitch * uMadness) * k;
         }
 
         void main() {
@@ -2013,7 +2058,7 @@ export class BsodScreen {
           float openN = chew.x;
 
           float emerge = smoothstep(appearTh, appearTh + 0.13, uMadness);
-          float rad = aEye4.z * faceScale * emerge * (1.0 + 0.04 * sin(uTime * 11.0 + eyeId * 2.7) * uMadness);
+          float rad = aEye4.z * faceScale * emerge * (1.0 + 0.09 * sin(uTime * 11.0 + eyeId * 2.7) * uMadness);
 
           // Anchor each orbital socket directly onto the expanding 3D Parasyte jaw lobes!
           float ang = aEye4.x;
@@ -2040,7 +2085,7 @@ export class BsodScreen {
 
           float lobeArch = 0.52 + 0.48 * (0.5 + 0.5 * cos(ang * 4.0));
           float jawSurfaceZ = (0.095 * clamp(openNc, 0.0, 1.25)) * lobeArch + 0.032 * emerge;
-          float bulgeZ = jawSurfaceZ + rad * 0.36 + uClickPulse * 0.035 * emerge;
+          float bulgeZ = jawSurfaceZ + rad * (0.62 + 0.18 * sin(uTime * 2.8 + eyeId * 1.7)) + uClickPulse * 0.055 * emerge;
 
           // Asynchronous wet Parasyte eyelid blink (each eye blinks on its own organic cycle!)
           float blinkPeriod = 3.1 + mod(eyeId * 0.73, 2.4);
@@ -2623,10 +2668,10 @@ export class BsodScreen {
       const tags = [
         'SACCADE_CAPTURE',
         'C3_MOTOR_INHIBIT',
-        'MANDIBLE_4LOBE',
-        'PUPIL_DILATE_6.4MM',
+        'GLYPH_DEFORM',
+        'CURSOR_TRACK',
         'CHIASM_DMA_LOCK',
-        'ESOPHAGUS_READY',
+        'SIGNAL_BREACH',
       ];
       for (let r = 0; r < 18; r++) {
         const addr = (0xf8000247 + r * 0x18 + stage * 0x100).toString(16).toUpperCase();
@@ -2745,7 +2790,7 @@ export class BsodScreen {
       ctx.restore();
     } else if (stage === 3) {
       ctx.fillText('脊髄運動路 (C3-C5) をアンマウントしました。離席要求は拒否されました。', leftX, 492);
-      ctx.fillText('ガラス面の内側で下顎外殻が4裂開しています。凝視を継続してください。', leftX, 558);
+      ctx.fillText('表示データが自己複製しています。画面から目を離さないでください。', leftX, 558);
       ctx.fillText('運動権委譲: 完了', leftX, 668);
 
       // Cascading corrupted Windows Kernel Exception Dialog Boxes!
@@ -2809,7 +2854,7 @@ export class BsodScreen {
       ctx.font = `700 24px Consolas, ${fontStack}`;
       ctx.fillText(
         stage >= 5
-          ? 'OPTIC_CHIASM_BREACH // 意識領域の嚥下を実行中'
+          ? 'OPTIC_CHIASM_BREACH // 意識領域の転送を実行中'
           : 'HOST_SENSORY_TABLE // 生体デバイス切り離し状況',
         px + 24,
         py + 44
@@ -2819,7 +2864,7 @@ export class BsodScreen {
         ['BLINK_REFLEX (瞬き反射)', 'UNMOUNTED'],
         ['VOCAL_CORD_MOTOR (声帯)', 'UNMOUNTED'],
         ['CERVICAL_SPINE (頸椎回旋)', 'LOCKED_0DEG'],
-        ['MANDIBLE_RIG (下顎4裂開)', stage >= 5 ? 'SWALLOWING' : 'GAPING_OPEN'],
+        ['DISPLAY_STATE (表示異常)', stage >= 5 ? 'TRANSFERRING' : 'DESYNCED'],
         ['CONSCIOUSNESS_DEST', 'RING0://0x0078D7'],
       ];
       ctx.font = `400 22px Consolas, ${fontStack}`;
@@ -2863,8 +2908,8 @@ export class BsodScreen {
       'OPTIC_NERVE_PAGE_FAULT',
       'UNREGISTERED_OBSERVER_BEHIND_HOST',
       'MOTOR_CORTEX_UNMOUNTED',
-      'PARASYTE_MANDIBLE_BREACH',
-      'CONSCIOUSNESS_SWALLOW_COMMIT',
+      'DISPLAY_GLYPH_CORRUPTION',
+      'CONSCIOUSNESS_TRANSFER_COMMIT',
     ];
     const code = stopCodes[Math.min(stage, stopCodes.length - 1)];
     ctx.fillText(`停止コード: ${code}`, infoX, qrY + 148);
@@ -2957,7 +3002,8 @@ export class BsodScreen {
     }
 
     // 100% GPU-driven 3D Parasyte rig, tunnel & glass shard uniform updates (ZERO CPU matrix loops!)
-    const showParasyte = !state.aftermath && (state.madness > 0.12 || state.jawOpen > 0.01) && state.suctionProgress < 0.48;
+    // Legacy anatomical rig is deliberately never displayed: the face stays digital.
+    const showParasyte = false;
     this.parasyteGroup.visible = showParasyte;
     if (showParasyte) {
       const rtu = this.rimToothMat.uniforms;
@@ -2995,9 +3041,10 @@ export class BsodScreen {
       eyu.uCursorUv.value.copy(state.cursorUv);
     }
 
-    const showThroat = !state.aftermath && state.jawOpen > 0.01;
+    const showThroat = !state.aftermath && state.suctionProgress > 0.03;
     this.throatGroup.visible = showThroat;
-    this.glassShards.visible = showThroat && state.suctionProgress < 0.72;
+    this.glassShards.visible = false;
+    this.throatTeeth.visible = false;
     if (!this.insideTunnelMode) {
       this.stencilMaskMesh.visible = showThroat;
     }

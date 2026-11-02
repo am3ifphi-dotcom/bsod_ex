@@ -7,6 +7,10 @@ const FLOATING_SHARD_COUNT = 120;
 const ABYSS_DEBRIS_COUNT = 96;
 const ABYSS_STREAK_COUNT = 160;
 
+// Shared with the arrival-clearance test so future layout changes cannot silently
+// put the landmark back in the camera's flight path.
+export const ARRIVAL_MONITOR = { x: -30, z: 28, heightOffset: 7, scale: 12, rotation: [-0.08, Math.PI, 0.04] as const };
+
 function addInstancedGltf(
   parent: THREE.Object3D,
   template: THREE.Object3D,
@@ -71,6 +75,7 @@ export class GlitchWorld {
   private citadelMat!: THREE.ShaderMaterial;
   private finMat!: THREE.ShaderMaterial;
   private cathedralMat!: THREE.ShaderMaterial;
+  private impossibleArchiveMat!: THREE.ShaderMaterial;
   private dataFallsMat!: THREE.ShaderMaterial;
   private errorCascadeMat!: THREE.ShaderMaterial;
   private leviathanMat!: THREE.ShaderMaterial;
@@ -248,6 +253,7 @@ export class GlitchWorld {
 
     // 2b. Sunken 360° Brutalist Kernel Citadel Megacity + Overhead Sky-Bridges + Sky Arrival Rift!
     this.buildKernelMegacityAndSkyRift();
+    this.buildImpossibleArchive();
 
     // 2c. Cathedral Rib-Arch Boulevard + 40m Data-Waterfalls + Frozen Error Cascades + 140m Sky-Leviathan!
     this.buildCathedralCausewayAndLeviathan();
@@ -1095,6 +1101,7 @@ export class GlitchWorld {
     });
 
     const citadels = new THREE.InstancedMesh(boxGeo, this.citadelMat, towerCount);
+    citadels.name = 'CitadelStructures';
     citadels.frustumCulled = false;
     const tmp = new THREE.Object3D();
     let idx = 0;
@@ -1123,8 +1130,11 @@ export class GlitchWorld {
       const ang = (i / 116) * Math.PI * 2 + Math.sin(i * 7.1) * 0.02;
       const ringLayer = i % 3;
       const rad = 70 + ringLayer * 26 + ((i * 13) % 15);
-      const tx = Math.cos(ang) * rad;
+      let tx = Math.cos(ang) * rad;
       const tz = -18 + Math.sin(ang) * rad;
+      // Keep an actual open flight corridor from the sky portal to the overlook.
+      // The margin includes tower width, camera near-plane and animated slice shear.
+      if (tz > 27 && Math.abs(tx) < 52) tx = (tx < 0 ? -1 : 1) * 52;
       // Leave a narrow notch directly behind the Sanctuary Core so the Eclipsed Sky Sun shines between twin spires!
       if (Math.abs(tx) < 11 && tz < -65) {
         tmp.position.set(tx < 0 ? -16 : 16, 52, tz);
@@ -1692,6 +1702,144 @@ export class GlitchWorld {
     g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
     g.setIndex(idx);
     return g;
+  }
+
+  /** An impossible archive suspended beyond the sanctuary: nested, broken windows
+   * larger than the city, with fragments of an inverted skyline hanging from them.
+   * It is deliberately off the arrival corridor and does not obstruct exploration. */
+  private buildImpossibleArchive(): void {
+    const barGeo = new THREE.BoxGeometry(1, 1, 1);
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 }, uAnomaly: { value: 0 } },
+      vertexShader: /* glsl */ `
+        varying vec3 vWorld;
+        varying vec3 vNormalW;
+        uniform float uTime;
+        uniform float uAnomaly;
+        void main() {
+          vec4 wp = modelMatrix * instanceMatrix * vec4(position, 1.0);
+          // Whole fragments slip in discrete frames, like a broken display buffer.
+          float tick = floor(uTime * 2.0);
+          float id = floor(wp.y * 0.045 + wp.z * 0.019);
+          float fault = step(0.94 - uAnomaly * 0.12, fract(sin(id * 41.7 + tick * 7.1) * 43758.5));
+          wp.x += fault * (1.5 + uAnomaly * 3.0);
+          vWorld = wp.xyz;
+          vNormalW = normalize(mat3(modelMatrix) * mat3(instanceMatrix) * normal);
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec3 vWorld;
+        varying vec3 vNormalW;
+        uniform float uTime;
+        uniform float uAnomaly;
+        void main() {
+          float pulse = 0.5 + 0.5 * sin(vWorld.y * 0.13 + vWorld.x * 0.035 - uTime * 2.0);
+          float edge = pow(1.0 - abs(dot(normalize(vNormalW), normalize(cameraPosition - vWorld))), 2.0);
+          float scan = step(0.94, fract(vWorld.y * 0.24 - uTime * 0.8));
+          vec3 col = vec3(0.006, 0.038, 0.11) + vec3(0.06, 0.36, 0.85) * edge;
+          col += vec3(0.12, 0.48, 0.95) * (0.15 + 0.4 * pulse + 0.65 * scan);
+          col += vec3(0.35, 0.12, 0.25) * uAnomaly * scan;
+          float fog = 1.0 - exp(-0.000015 * length(cameraPosition - vWorld) * length(cameraPosition - vWorld));
+          col = mix(col, vec3(0.018, 0.10, 0.26), clamp(fog, 0.0, 0.65));
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `,
+    });
+    const count = 7 * 4 + 26;
+    const archive = new THREE.InstancedMesh(barGeo, mat, count);
+    archive.name = 'ImpossibleArchive';
+    archive.frustumCulled = false;
+    const part = new THREE.Object3D();
+    let n = 0;
+    // Offset, concentric frames recede into the sky; they are not a flat backdrop.
+    for (let i = 0; i < 7; i++) {
+      const width = 82 + i * 19;
+      const height = 82 + i * 16;
+      const y = 66 + i * 5;
+      const z = -105 - i * 24;
+      const offset = Math.sin(i * 2.1) * 8;
+      for (const side of [-1, 1]) {
+        part.position.set(offset + side * width / 2, y, z);
+        part.rotation.set(0, 0, side * 0.025);
+        part.scale.set(1.4 + i * 0.24, height, 3.5);
+        part.updateMatrix(); archive.setMatrixAt(n++, part.matrix);
+        part.position.set(offset, y + side * height / 2, z);
+        part.rotation.set(0, 0, side * 0.025);
+        part.scale.set(width, 1.4 + i * 0.24, 3.5);
+        part.updateMatrix(); archive.setMatrixAt(n++, part.matrix);
+      }
+    }
+    // Hanging, inverted skyscrapers form a second skyline overhead.
+    for (let i = 0; i < 26; i++) {
+      const side = i % 2 ? 1 : -1;
+      const x = side * (24 + (i % 7) * 11);
+      const z = -90 - (i % 5) * 24;
+      const height = 18 + (i * 17 % 42);
+      part.position.set(x, 144 - height * 0.5 + (i % 3) * 7, z);
+      part.rotation.set(0, i * 0.21, side * 0.04);
+      part.scale.set(5 + (i % 4) * 2, height, 5 + (i % 3) * 2);
+      part.updateMatrix(); archive.setMatrixAt(n++, part.matrix);
+    }
+    archive.instanceMatrix.needsUpdate = true;
+    this.group.add(archive);
+    this.impossibleArchiveMat = mat;
+
+    // Gigantic translucent crash reports hang between the nested frames. They use
+    // the same signal language as the original screen, but at architectural scale.
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024; canvas.height = 512;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = 'rgba(0, 38, 103, 0.72)'; ctx.fillRect(0, 0, 1024, 512);
+    ctx.strokeStyle = 'rgba(148, 223, 255, 0.8)'; ctx.lineWidth = 3; ctx.strokeRect(4, 4, 1016, 504);
+    ctx.fillStyle = 'rgba(194, 237, 255, 0.8)'; ctx.fillRect(0, 0, 1024, 38);
+    ctx.fillStyle = '#00346e'; ctx.font = 'bold 20px monospace';
+    ctx.fillText('MEMORY_DUMP  //  DISPLAY BUFFER LOST', 22, 26);
+    ctx.fillStyle = '#e4f7ff'; ctx.font = '200 128px sans-serif'; ctx.fillText(':(', 54, 218);
+    ctx.font = '25px monospace';
+    ctx.fillText('AN UNEXPECTED REALITY FAULT HAS OCCURRED', 250, 148);
+    ctx.fillText('RECONSTRUCTING MEMORY  . . .  99%', 250, 199);
+    ctx.fillText('0x000000F4  /  0x0078D7  /  02:47', 54, 340);
+    ctx.fillStyle = 'rgba(174, 225, 255, 0.45)'; ctx.fillRect(54, 388, 680, 4);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const windowMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, side: THREE.DoubleSide,
+      uniforms: { uMap: { value: texture }, uTime: mat.uniforms.uTime, uAnomaly: mat.uniforms.uAnomaly },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        uniform float uTime;
+        uniform float uAnomaly;
+        void main() {
+          vUv = uv;
+          vec3 p = position;
+          float row = floor(uv.y * 28.0);
+          float tick = floor(uTime * 7.0);
+          float fault = step(0.95 - uAnomaly * 0.12, fract(sin(row * 83.1 + tick * 13.0) * 43758.5));
+          p.x += fault * (0.8 + uAnomaly * 2.0);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform sampler2D uMap;
+        uniform float uTime;
+        varying vec2 vUv;
+        void main() {
+          vec4 signal = texture2D(uMap, vUv);
+          float scan = 0.8 + 0.2 * sin(vUv.y * 480.0 - uTime * 9.0);
+          float edge = smoothstep(0.0, 0.025, vUv.x) * smoothstep(0.0, 0.025, 1.0 - vUv.x);
+          gl_FragColor = vec4(signal.rgb * scan, signal.a * edge * 0.46);
+        }
+      `,
+    });
+    for (const [x, y, z, width, rotation] of [
+      [-62, 73, -105, 96, 0.13], [78, 99, -162, 132, -0.12],
+    ]) {
+      const panel = new THREE.Mesh(new THREE.PlaneGeometry(width, width * 0.5, 1, 28), windowMat);
+      panel.position.set(x, y, z); panel.rotation.y = rotation;
+      panel.name = 'SkyCrashReport';
+      this.group.add(panel);
+    }
   }
 
   private buildCathedralCausewayAndLeviathan(): void {
@@ -2565,9 +2713,11 @@ export class GlitchWorld {
       crtCableMatrices.push(tmp.matrix.clone());
     }
     // Include the Colossal Fractured Arrival Monitor behind spawn (Z=+27.5) in the same batch!
-    tmp.position.set(0, this.getTerrainHeight(0, 27.5) + 3.2, 27.5);
-    tmp.scale.setScalar(16.0);
-    tmp.rotation.set(-0.08, Math.PI, 0.04);
+    // The old centreline placement intersected the arrival flight. Keep the landmark
+    // in view, but place its entire model to the side of the approach.
+    tmp.position.set(ARRIVAL_MONITOR.x, this.getTerrainHeight(ARRIVAL_MONITOR.x, ARRIVAL_MONITOR.z) + ARRIVAL_MONITOR.heightOffset, ARRIVAL_MONITOR.z);
+    tmp.scale.setScalar(ARRIVAL_MONITOR.scale);
+    tmp.rotation.set(...ARRIVAL_MONITOR.rotation);
     tmp.updateMatrix();
     crtMatrices.push(tmp.matrix.clone());
 
@@ -4684,6 +4834,10 @@ export class GlitchWorld {
     this.leviathanMat.uniforms.uTime.value = elapsed;
     this.leviathanMat.uniforms.uAnomaly.value = this.anomalyIntensity;
     const scrollPhase = tunnelScrollPhase ?? elapsed * 48.0;
+    if (this.impossibleArchiveMat) {
+      this.impossibleArchiveMat.uniforms.uTime.value = elapsed;
+      this.impossibleArchiveMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+    }
     this.skyTunnelMat.uniforms.uTime.value = elapsed;
     this.skyTunnelMat.uniforms.uScrollPhase.value = scrollPhase;
     this.skyTunnelMat.uniforms.uArrivalReveal.value = arrivalReveal;

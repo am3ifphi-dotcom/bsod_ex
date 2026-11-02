@@ -6,6 +6,7 @@ import { GlitchWorld } from './world/GlitchWorld';
 import { FirstPersonController } from './player/FirstPersonController';
 import { ConsoleUI } from './ui/ConsoleUI';
 import { PostFX } from './post/PostFX';
+import { tunnelHandoff } from './utils/TunnelHandoff';
 
 type GlitchKind = 'bend' | 'tear' | 'mash' | 'sort' | 'roll' | 'ghost';
 
@@ -31,6 +32,10 @@ type GamePhase =
 class BsodExperienceApp {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly camera: THREE.PerspectiveCamera;
+  private readonly transitionCamera = new THREE.PerspectiveCamera(64, 1, 0.05, 1600);
+  private readonly transitionPlayer = new FirstPersonController(this.transitionCamera);
+  private readonly handoffDuration = 1.6;
+  private readonly handoffArrivalAdvance = 0.86;
   private readonly postFX: PostFX;
 
   private readonly audio = new AudioManager();
@@ -61,6 +66,7 @@ class BsodExperienceApp {
   private inspectBlend = 0;
   private exitInspectBlend = 0;
   private clickCount = 0;
+  private inspectClickCooldown = 0;
   private madness = 0;
   private targetMadness = 0;
   private jawOpen = 0;
@@ -118,10 +124,11 @@ class BsodExperienceApp {
   private opticStrain = 0;
   private gazeWarnCooldown = 0;
   private chairEscapeCooldown = 0;
+  private creatureTwitchCooldown = 1.8;
   private readonly _camFwd = new THREE.Vector3();
   private readonly _skyEyeDir = new THREE.Vector3(0, 0.25, -0.968).normalize();
 
-  // Hardware audio-locked timeline start timestamps (prevents ANY audio/visual desync on frame stalls!)
+  // Monotonic timeline; pause time is excluded even while WebAudio is suspended.
   private suctionStartClock = 0;
   private arrivalStartClock = 0;
   private collapseStartClock = 0;
@@ -133,7 +140,7 @@ class BsodExperienceApp {
   // PostFX transients
   private extraGlitchBurst = 0;
   private screenFlash = 0;
-  private subtitleTimeout: number | null = null;
+  private subtitleRemaining = 0;
 
   // DOM Elements
   private readonly canvasWrap = document.getElementById('canvas-wrap')!;
@@ -146,6 +153,8 @@ class BsodExperienceApp {
   private readonly crosshairEl = document.getElementById('crosshair')!;
   private readonly pcCursorEl = document.getElementById('pc-cursor')!;
   private readonly interactPromptEl = document.getElementById('interact-prompt')!;
+  private readonly objectiveEl = document.getElementById('objective')!;
+  private readonly objectiveTextEl = document.getElementById('objective-text')!;
   private readonly worldHintEl = document.getElementById('world-hint')!;
   private readonly subtitleEl = document.getElementById('subtitle-banner')!;
   private readonly aftermathBarEl = document.getElementById('aftermath-bar')!;
@@ -214,7 +223,7 @@ class BsodExperienceApp {
   }
 
   private getTimelineClock(): number {
-    return this.audio.getClockSeconds() - this.pausedClockAccum;
+    return performance.now() * 0.001 - this.pausedClockAccum;
   }
 
   public async init(): Promise<void> {
@@ -454,11 +463,7 @@ class BsodExperienceApp {
             return;
           }
         } else if (this.phase === 'INSPECT_PC') {
-          if (this.clickCount < 3) {
-            this.exitPcInspection();
-          } else {
-            this.triggerLockedChairWrench();
-          }
+          if (!e.repeat) this.handlePcScreenClick();
           return;
         }
       }
@@ -473,6 +478,13 @@ class BsodExperienceApp {
       }
 
       this.player.onKeyDown(e.code);
+    });
+
+    // Avoid stuck movement and unseen cutscene progress when the tab loses focus.
+    window.addEventListener('blur', () => {
+      this.player.clearKeys();
+      this.isDraggingLook = false;
+      if (this.phase !== 'TITLE' && !this.paused && !this.consoleUI.isOpen) this.setPaused(true);
     });
 
     window.addEventListener('keyup', (e) => {
@@ -639,6 +651,8 @@ class BsodExperienceApp {
     const w = Math.max(1, window.innerWidth);
     const h = Math.max(1, window.innerHeight);
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.transitionCamera.aspect = w / h;
+    this.transitionCamera.updateProjectionMatrix();
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setPixelRatio(dpr);
@@ -662,13 +676,13 @@ class BsodExperienceApp {
   private setPaused(p: boolean): void {
     if (this.paused === p) return;
     this.paused = p;
-    const rawNow = this.audio.getClockSeconds();
+    const rawNow = performance.now() * 0.001;
     if (p) {
       this.pauseClockStart = rawNow;
       this.audio.setPaused(true);
     } else {
       this.audio.setPaused(false);
-      const afterResume = this.audio.getClockSeconds();
+      const afterResume = performance.now() * 0.001;
       if (this.pauseClockStart !== null) {
         this.pausedClockAccum += Math.max(0, afterResume - this.pauseClockStart);
         this.pauseClockStart = null;
@@ -705,15 +719,24 @@ class BsodExperienceApp {
     }
   }
 
+  private setObjective(text: string | null): void {
+    this.objectiveEl.classList.toggle('hidden', !text);
+    this.objectiveTextEl.textContent = text ?? '';
+  }
+
   private showSubtitle(text: string, durationMs = 4200): void {
-    if (this.subtitleTimeout !== null) {
-      window.clearTimeout(this.subtitleTimeout);
-    }
     this.subtitleEl.textContent = text;
     this.subtitleEl.classList.remove('hidden');
-    this.subtitleTimeout = window.setTimeout(() => {
-      this.subtitleEl.classList.add('hidden');
-    }, durationMs);
+    this.subtitleRemaining = durationMs / 1000;
+  }
+
+  private endFirstContact(): void {
+    if (this.firstContactTimer < 0) return;
+    this.firstContactTimer = -1;
+    this.firstContactDone = true;
+    this.audio.startOrUpdateLoop('room_tone', 'room_tone', {
+      volume: 0.14, lowpassHz: 950, fadeSec: 1.4,
+    });
   }
 
   /**
@@ -760,7 +783,7 @@ class BsodExperienceApp {
     });
     // 1.15s — the panel warms under your gaze.
     cue('face', 1.15, () => {
-      this.audio.playOneShot('flesh_pulse', {
+      this.audio.playOneShot('glitch_stutter', {
         volume: 0.28,
         rate: 0.66,
         duration: 2.2,
@@ -779,7 +802,7 @@ class BsodExperienceApp {
     // 3.05s — the panel settles back into its idle BSOD.
     cue('sink', 3.05, () => {
       this.audio.playOneShot('gasp', { volume: 0.20, rate: 0.9, pos: this.behindNeckSoundPos });
-      this.showSubtitle('……今、画面の奥で何かが動いた気がした。気のせいだ。気のせいのはずだ。', 4600);
+      this.showSubtitle('今、何か動いた？', 4600);
     });
     // 3.55s — the room's own life fades back in, as if nothing happened.
     cue('restore', 3.55, () => {
@@ -866,7 +889,7 @@ class BsodExperienceApp {
         });
         break;
       case 'ghost':
-        this.audio.playOneShot('flesh_pulse', {
+        this.audio.playOneShot('glitch_stutter', {
           volume: 0.10 + lvl * 0.16,
           rate: 0.82 + Math.random() * 0.1,
           duration: 1.4,
@@ -911,6 +934,7 @@ class BsodExperienceApp {
 
     this.aftermath = false;
     this.clickCount = 0;
+    this.inspectClickCooldown = 0;
     this.madness = 0;
     this.targetMadness = 0;
     this.jawOpen = 0;
@@ -931,6 +955,7 @@ class BsodExperienceApp {
     this.firstContactDone = false;
     this.firstContactCues = {};
     this.heartbeatCooldown = 0.9;
+    this.creatureTwitchCooldown = 1.8;
     this.roomDreadTimer = 4.6;
     this.horrorPulse = 0;
     this.extraGlitchBurst = 0;
@@ -949,6 +974,7 @@ class BsodExperienceApp {
     this.pcCursorEl.classList.add('hidden');
     this.crosshairEl.classList.remove('hidden');
     this.worldHintEl.classList.add('hidden');
+    this.setObjective('青く光るモニターを調べる');
     this.aftermathBarEl.classList.add('hidden');
 
     this.audio.startOrUpdateLoop('room_tone', 'room_tone', {
@@ -979,7 +1005,7 @@ class BsodExperienceApp {
       fadeSec: 1.2,
     });
 
-    this.showSubtitle('ふと目が覚めた。机のPCモニターが真っ青な画面のまま光っている……', 4600);
+    this.showSubtitle('……まだ、ついている。', 4600);
   }
 
   private canInspectPc(): boolean {
@@ -995,6 +1021,7 @@ class BsodExperienceApp {
 
   private enterPcInspection(): void {
     this.phase = 'INSPECT_PC';
+    this.setObjective(null);
     this.inspectBlend = 0;
     this.player.clearKeys();
     this.player.capturePoseForBlend();
@@ -1006,7 +1033,7 @@ class BsodExperienceApp {
 
     if (this.aftermath) {
       this.audio.playOneShot('dissonance', { volume: 0.18, duration: 2.8, fadeInSec: 0.3, releaseSec: 1.0, reverb: 0.5 });
-      this.showSubtitle('黒いガラスの奥に、二つの青い瞳孔が張り付いている……クリックすると再び侵食が始まる。', 4200);
+      this.showSubtitle('……まだ、見ている。', 4200);
       return;
     }
 
@@ -1017,13 +1044,11 @@ class BsodExperienceApp {
   }
 
   private exitPcInspection(): void {
-    if (this.firstContactTimer >= 0) {
-      this.firstContactTimer = -1;
-      this.firstContactDone = true;
-    }
+    this.endFirstContact();
     this.player.capturePoseForBlend();
     this.exitInspectBlend = 0;
     this.phase = 'EXIT_INSPECT';
+    this.setObjective(this.aftermath ? null : '青く光るモニターを調べる');
 
     this.pcCursorEl.classList.add('hidden');
     this.crosshairEl.classList.remove('hidden');
@@ -1039,7 +1064,7 @@ class BsodExperienceApp {
     this.clickPulse = Math.max(this.clickPulse, 0.86);
     this.horrorPulse = Math.max(this.horrorPulse, 0.78);
     this.triggerGlitch('roll', 0.68, 0.45);
-    this.audio.playOneShot('flesh_pulse', {
+    this.audio.playOneShot('glitch_stutter', {
       volume: 0.44,
       rate: 1.18,
       duration: 0.7,
@@ -1047,15 +1072,20 @@ class BsodExperienceApp {
       pos: this.behindNeckSoundPos,
     });
     this.audio.playOneShot('creak_room', { volume: 0.52, rate: 0.74, pos: this.behindNeckSoundPos });
-    this.showSubtitle('頸椎がロックされている——椅子の背後から頭を押さえつけられているように動けない。', 3100);
+    this.showSubtitle('動けない。', 3100);
   }
 
   private handlePcScreenClick(): void {
+    // Let each reaction register before accepting another deliberate touch.
+    if (this.inspectBlend < 0.85 || this.inspectClickCooldown > 0) return;
     this.audio.playOneShot('mouse_click', { volume: 0.5, rate: 0.96 + Math.random() * 0.08 });
 
     if (this.aftermath) {
       // Clicking the haunted aftermath monitor violently re-engages PARASYTE_HOOK!
       this.aftermath = false;
+      this.glitchWorld.resetCollapse();
+      this.consoleUI.reset();
+      this.glitchMilestones = {};
       this.bedroom.setAftermathMode(false);
       this.aftermathBarEl.classList.add('hidden');
       this.clickCount = 0;
@@ -1069,7 +1099,7 @@ class BsodExperienceApp {
       this.triggerGlitch('tear', 0.72, 0.38);
       this.audio.playOneShot('glitch_short', { volume: 0.52 });
       this.audio.playOneShot('monitor_glitch', { volume: 0.38, duration: 0.85, releaseSec: 0.3 });
-      this.showSubtitle('黒いガラスの奥の瞳孔が開いた——再び午前2時47分の青画面に引きずり込まれる。', 3400);
+      this.showSubtitle('また、あの青だ。', 3400);
       return;
     }
 
@@ -1077,23 +1107,25 @@ class BsodExperienceApp {
       // Even off-face clicks produce a tactile LCD liquid-crystal pressure ripple right at the cursor!
       this.bedroom.bsodScreen.pulseCrack(this.cursorMonitorUv);
       if (this.clickCount === 0) {
-        this.showSubtitle('左上の「:(」だけが、走査線の隙間でわずかに口角を吊り上げた気がした。', 3400);
+        this.showSubtitle('あの顔……。', 3400);
       } else if (this.clickCount >= 2) {
-        this.audio.playOneShot('flesh_pulse', { volume: 0.24, rate: 1.15, duration: 0.55, releaseSec: 0.2 });
-        this.showSubtitle('大きく開いたまま動かない口と、非対称の眼球群が一斉にカーソルを見つめている。', 2600);
+        this.audio.playOneShot('glitch_stutter', { volume: 0.24, rate: 1.15, duration: 0.55, releaseSec: 0.2 });
+        this.showSubtitle('こちらを見ている。', 2600);
       }
       return;
     }
 
+    this.endFirstContact();
     this.clickCount++;
+    this.inspectClickCooldown = this.clickCount === 1 ? 1.35 : 1.1;
     this.clickPulse = 1.0;
     this.bedroom.bsodScreen.pulseCrack(this.cursorMonitorUv);
     this.triggerSpatialWave(0.38 + this.clickCount * 0.11, 0.78);
 
     if (this.clickCount === 1) {
-      this.targetMadness = 0.16;
+      this.targetMadness = 0.23;
       this.jawVel += 0.45;
-      this.targetJawOpen = 0.10;
+      this.targetJawOpen = 0.18;
       this.horrorPulse = 0.32;
       this.triggerGlitch('tear', 0.65, 0.44);
       this.audio.playOneShot('dissonance', {
@@ -1103,15 +1135,15 @@ class BsodExperienceApp {
         releaseSec: 1.2,
         reverb: 0.5,
       });
-      this.showSubtitle('……今、「:(」が「:)」に裏返って笑った。黒い液晶割れの内側で白い歯が覗いている。', 3800);
+      this.showSubtitle('……笑った？', 3800);
     } else if (this.clickCount === 2) {
-      this.targetMadness = 0.36;
+      this.targetMadness = 0.43;
       this.jawVel += 0.95;
-      this.targetJawOpen = 0.28;
+      this.targetJawOpen = 0.38;
       this.horrorPulse = 0.52;
       this.triggerGlitch('mash', 0.72, 0.52);
       this.audio.playOneShot('monitor_glitch', { volume: 0.42, duration: 1.0, releaseSec: 0.35 });
-      this.audio.playOneShot('flesh_pulse', { volume: 0.36, rate: 1.12, duration: 0.9, releaseSec: 0.3, reverb: 0.3 });
+      this.audio.playOneShot('glitch_stutter', { volume: 0.36, rate: 1.12, duration: 0.9, releaseSec: 0.3, reverb: 0.3 });
       // Creepy spatialised floorboard creak + breath RIGHT BEHIND YOUR CHAIR!
       this.audio.playOneShot('creak_room', {
         volume: 0.58,
@@ -1127,15 +1159,15 @@ class BsodExperienceApp {
         volume: 0.12,
         fadeSec: 1.1,
       });
-      this.showSubtitle('画面右の深度スキャン——椅子の真後ろ38cmに、知らない誰かが立っている。', 3900);
+      this.showSubtitle('後ろに、誰かいる。', 3900);
     } else if (this.clickCount === 3) {
-      this.targetMadness = 0.58;
+      this.targetMadness = 0.66;
       this.jawVel += 1.45;
-      this.targetJawOpen = 0.50;
+      this.targetJawOpen = 0.62;
       this.horrorPulse = 0.72;
       // Desk lamp bulb violently pops out -> bedroom plunges into dread!
       this.audio.playOneShot('shatter', { volume: 0.52, rate: 1.55, duration: 0.55, releaseSec: 0.2, reverb: 0.25 });
-      this.audio.playOneShot('flesh_pulse', { volume: 0.44, rate: 0.98, duration: 1.2, releaseSec: 0.35, reverb: 0.35 });
+      this.audio.playOneShot('glitch_stutter', { volume: 0.44, rate: 0.98, duration: 1.2, releaseSec: 0.35, reverb: 0.35 });
       this.triggerGlitch('sort', 0.80, 0.64);
       this.audio.playOneShot('scrapemare', {
         volume: 0.36,
@@ -1148,21 +1180,21 @@ class BsodExperienceApp {
         volume: 0.22,
         fadeSec: 0.8,
       });
-      this.showSubtitle('電球が破裂した。4枚に裂けた肉顎がガラスから捲れ出し、運動神経が切断されて椅子から立てない！', 3800);
+      this.showSubtitle('立てない。', 3800);
     } else if (this.clickCount === 4) {
-      this.targetMadness = 0.80;
+      this.targetMadness = 0.84;
       this.jawVel += 1.85;
-      this.targetJawOpen = 0.72;
+      this.targetJawOpen = 0.80;
       this.horrorPulse = 0.86;
       this.triggerGlitch('roll', 0.86, 0.78);
       this.audio.playOneShot('noise_wave', { volume: 0.42, duration: 2.8, releaseSec: 1.0, reverb: 0.4 });
       this.audio.playOneShot('monitor_glitch', { volume: 0.58, duration: 1.2, releaseSec: 0.4 });
-      this.audio.playOneShot('flesh_pulse', { volume: 0.52, rate: 0.90, duration: 1.4, releaseSec: 0.4, reverb: 0.38 });
+      this.audio.playOneShot('glitch_stutter', { volume: 0.52, rate: 0.90, duration: 1.4, releaseSec: 0.4, reverb: 0.38 });
       this.audio.startOrUpdateLoop('static_elec', 'static_elec', {
         volume: 0.36,
         fadeSec: 0.7,
       });
-      this.showSubtitle('歯列を剥き出しに大きく開いた口が微動だにせず待ち構え、部屋の空気を喉の奥へ吸い込んでいる……！', 3600);
+      this.showSubtitle('息が、吸えない。', 3600);
     } else if (this.clickCount === 5) {
       // UNHINGED PREDATORY GAPE — wide-open waiting maw pulling air inward before swallowing!
       this.targetMadness = 0.96;
@@ -1172,9 +1204,9 @@ class BsodExperienceApp {
       this.triggerGlitch('ghost', 0.96, 1.5);
       this.triggerGlitch('tear', 0.88, 0.42);
       this.audio.playOneShot('sub_boom', { volume: 0.68, rate: 1.06, reverb: 0.3 });
-      this.audio.playOneShot('flesh_pulse', { volume: 0.62, rate: 0.88, duration: 1.6, releaseSec: 0.4, reverb: 0.42 });
+      this.audio.playOneShot('glitch_stutter', { volume: 0.62, rate: 0.88, duration: 1.6, releaseSec: 0.4, reverb: 0.42 });
       this.audio.playOneShot('pain_glitch', { volume: 0.55, rate: 0.86, duration: 1.4, releaseSec: 0.4, reverb: 0.35 });
-      this.showSubtitle('瞬きも声帯もアンマウントされた——限界まで開いたまま待つ漆黒の喉へ、身体ごと引きずり込まれる！！', 3000);
+      this.showSubtitle('やめて。', 3000);
     } else {
       this.audio.stopLoop('throat_draft', 0.15);
       this.beginPredatorySuction();
@@ -1239,13 +1271,12 @@ class BsodExperienceApp {
   }
 
   /**
-   * 100% Seamless Forward-Flying Tunnel-to-3D-World Arrival!
-   * Hands off mid-tunnel inside Sky-Monitor's 56m 3D Exit Sleeve while flying straight forward
-   * (zero whiteout cut, zero 180° flip), then bursts out through the shattered 28m BSOD glass at t=1.15s!
+   * Continue the destination camera that was already running during the tunnel overlap.
+   * It emerges from the sleeve into the open world without restarting its flight.
    */
   private beginGlitchArrivalCutscene(): void {
     this.phase = 'GLITCH_ARRIVAL_CUTSCENE';
-    this.arrivalStartClock = this.getTimelineClock();
+    this.arrivalStartClock = this.suctionStartClock + this.suctionDuration - this.handoffArrivalAdvance;
     this.glitchArrivalTimer = 0;
     this.glitchArrivalRollCuePlayed = false;
     this.glitchArrivalLanded = false;
@@ -1288,7 +1319,7 @@ class BsodExperienceApp {
 
     this.player.updateGlitchArrivalCutscene(
       0.016,
-      0,
+      this.handoffArrivalAdvance,
       this.glitchWorld.spawnPosition,
       this.glitchWorld.corePosition,
       this.glitchWorld.skyPortalPos,
@@ -1299,6 +1330,7 @@ class BsodExperienceApp {
   private beginCollapseSequence(): void {
     if (this.phase === 'COLLAPSE_CUTSCENE') return;
     this.phase = 'COLLAPSE_CUTSCENE';
+    this.setObjective(null);
     this.collapseStartClock = this.getTimelineClock();
     this.collapseTimer = 0;
     this.collapseStepFlags = { s1: false, s2: false };
@@ -1488,6 +1520,10 @@ class BsodExperienceApp {
 
     if (!this.paused) {
       this.elapsed += dt;
+      if (this.subtitleRemaining > 0) {
+        this.subtitleRemaining = Math.max(0, this.subtitleRemaining - dt);
+        if (this.subtitleRemaining === 0) this.subtitleEl.classList.add('hidden');
+      }
       this.stepSimulation(dt);
     }
 
@@ -1567,7 +1603,7 @@ class BsodExperienceApp {
       bloomAmt = 0.78 + tunnelRush * 0.28;
       sharpenAmt = 0.18;
     } else if (this.phase === 'GLITCH_ARRIVAL_CUTSCENE') {
-      // Crystal-clear C0-continuous match to SUCTION_CUTSCENE (t=7.20s -> arrival t=0.00s), ZERO hitch at exit!
+      // Continue the visual treatment from the overlapping tunnel shot into the flight.
       const diveFrac = THREE.MathUtils.clamp(1.0 - this.glitchArrivalTimer / 4.30, 0, 1);
       distortAmt = Math.max(distortAmt, diveFrac * 0.14);
       chromaAmt = Math.max(chromaAmt, diveFrac * 0.38);
@@ -1612,6 +1648,13 @@ class BsodExperienceApp {
       ghost: ghostAmt,
       bloom: this.autoBloomEnabled ? bloomAmt : 0,
       sharpen: sharpenAmt,
+      transition: this.phase === 'SUCTION_CUTSCENE' && this.suctionTimer > this.suctionDuration - this.handoffDuration
+        ? {
+            scene: this.glitchWorld.scene,
+            camera: this.transitionCamera,
+            progress: tunnelHandoff(this.suctionTimer, this.suctionDuration, this.handoffDuration, this.handoffArrivalAdvance).progress,
+          }
+        : undefined,
     });
   };
 
@@ -1786,8 +1829,22 @@ class BsodExperienceApp {
       }
 
       case 'INSPECT_PC': {
+        this.inspectClickCooldown = Math.max(0, this.inspectClickCooldown - dt);
         if (this.chairEscapeCooldown > 0) {
           this.chairEscapeCooldown = Math.max(0, this.chairEscapeCooldown - dt);
+        }
+        // Between clicks the corrupted signal stutters on its own, spatially anchored to the screen.
+        if (!this.aftermath && this.clickCount >= 2) {
+          this.creatureTwitchCooldown -= dt;
+          if (this.creatureTwitchCooldown <= 0) {
+            this.creatureTwitchCooldown = 2.2 + Math.random() * 2.0;
+            this.jawVel += 0.35 + this.madness * 0.65;
+            this.audio.playOneShot('glitch_stutter', {
+              volume: 0.22 + this.madness * 0.20, rate: 0.78 + Math.random() * 0.26,
+              duration: 0.8, releaseSec: 0.3, pos: this.bedroom.monitorWorldPos,
+            });
+            this.horrorPulse = Math.max(this.horrorPulse, 0.18 + this.madness * 0.22);
+          }
         }
         this.inspectBlend = Math.min(1, this.inspectBlend + dt * 2.4);
         this.player.updateInspectPose(
@@ -1801,23 +1858,26 @@ class BsodExperienceApp {
         );
         this.updatePcCursorRaycast(dt);
 
-        if (this.aftermath) {
-          this.interactPromptEl.textContent = '[左クリック] 黒い画面に触れる（再侵食）  |  [右クリック / Q] 離れる';
+        if (!this.aftermath && this.inspectClickCooldown > 0) {
+          this.interactPromptEl.textContent = '……';
+          this.interactPromptEl.classList.remove('hidden');
+        } else if (this.aftermath) {
+          this.interactPromptEl.textContent = '[クリック / E] 画面に触れる  |  [右クリック / Q] 離れる';
           this.interactPromptEl.classList.remove('hidden');
         } else if (this.clickCount === 0) {
-          this.interactPromptEl.textContent = '「:(」にカーソルを重ねてクリック  |  [右クリック / Q] 離れる';
+          this.interactPromptEl.textContent = '「:(」にカーソルを重ねて [クリック / E]  |  [右クリック / Q] 離れる';
           this.interactPromptEl.classList.remove('hidden');
         } else if (this.clickCount < 3) {
-          this.interactPromptEl.textContent = '裂け始めた「:(」をクリック  |  [右クリック / Q] 離れる';
+          this.interactPromptEl.textContent = '「:(」に触れる  |  [右クリック / Q] 離れる';
           this.interactPromptEl.classList.remove('hidden');
         } else {
-          this.interactPromptEl.textContent = ':(  顎が指を離さない  —  クリックを続けろ  :(';
+          this.interactPromptEl.textContent = 'もう一度、触れる';
           this.interactPromptEl.classList.remove('hidden');
         }
 
         if (!this.aftermath) {
           this.stepFirstContact(dt);
-          // Hollow inward throat draft as the 4-split jaw holds wide open waiting to suck you in (no pakupaku chomp!)
+          // Low digital draft as the signal distortion expands.
           if (this.jawOpen > 0.18) {
             const draftVol = THREE.MathUtils.clamp((this.jawOpen - 0.18) * 0.28, 0.03, 0.22);
             this.audio.startOrUpdateLoop('throat_draft', 'fall_wind', {
@@ -1881,7 +1941,7 @@ class BsodExperienceApp {
         // 1.12s — your head wrenches 62° back at the bedroom: the room "rolls" one frame and drops a beat.
         cue('rollA', 1.12, () => {
           this.triggerGlitch('roll', 0.72, 0.8);
-          this.audio.playOneShot('flesh_pulse', {
+          this.audio.playOneShot('glitch_stutter', {
             volume: 0.34,
             rate: 0.76,
             duration: 1.9,
@@ -1961,8 +2021,21 @@ class BsodExperienceApp {
         );
         this.bedroom.update(dt, this.elapsed, 1.0, 0.55 + progress * 0.65, false, undefined, this._camFwd);
 
+        // Run the destination camera alongside the throat, before the scene switch.
+        // A radial dissolve reveals the actual world, not a painted stand-in at the exit.
+        const handoff = tunnelHandoff(this.suctionTimer, this.suctionDuration, this.handoffDuration, this.handoffArrivalAdvance);
+        if (handoff.progress > 0) {
+          this.transitionPlayer.updateGlitchArrivalCutscene(
+            dt, handoff.arrivalTime, this.glitchWorld.spawnPosition,
+            this.glitchWorld.corePosition, this.glitchWorld.skyPortalPos, this.glitchWorld.skyPortalQuat
+          );
+          this.transitionCamera.getWorldDirection(this._camFwd);
+          this.glitchWorld.update(dt, this.elapsed, this.transitionCamera.position, null, this.tunnelScrollPhase, 1, this._camFwd);
+        }
         if (this.suctionTimer >= this.suctionDuration) {
           this.beginGlitchArrivalCutscene();
+          this.camera.getWorldDirection(this._camFwd);
+          this.glitchWorld.update(0, this.elapsed, this.camera.position, null, this.tunnelScrollPhase, 1, this._camFwd);
         }
         break;
       }
@@ -1979,7 +2052,7 @@ class BsodExperienceApp {
           this.glitchWorld.skyPortalQuat
         );
         this.camera.getWorldDirection(this._camFwd);
-        const arrivalReveal = THREE.MathUtils.smoothstep(this.glitchArrivalTimer, 0.0, 0.62);
+        const arrivalReveal = 1; // The real world is already revealed during the overlap.
 
         this.glitchWorld.update(
           dt,
@@ -1996,7 +2069,7 @@ class BsodExperienceApp {
           this.glitchArrivalRollCuePlayed = true;
           this.audio.playOneShot('swoosh_thunder', { volume: 0.76, rate: 0.94, reverb: 0.55 });
           this.audio.playOneShot('transition_solemn', { volume: 0.58, reverb: 0.55 });
-          this.showSubtitle('天空の亀裂を抜け落ちた——眼下のデータ海の果てに、蒼白い光の柱が立つ聖堂が聳えている。', 4600);
+          this.showSubtitle('あの光は……。', 4600);
         }
 
         if (touchedDown && !this.glitchArrivalLanded) {
@@ -2018,9 +2091,10 @@ class BsodExperienceApp {
           this.opticStrain = 0;
           this.periodicWarpCooldown = 6.5;
           this.crosshairEl.classList.remove('hidden');
-          this.worldHintEl.textContent = '[WASD] 探索  |  [SPACE] ジャンプ  |  [C] コンソールを開く';
+          this.setObjective('光の柱を目指す');
+          this.worldHintEl.textContent = '[C] コンソール';
           this.worldHintEl.classList.remove('hidden');
-          this.showSubtitle('正面の大橋の先に光の柱が見える——消化が100%に達する前に中央聖堂へ向かえ。', 5200);
+          this.showSubtitle('橋の向こうに、光が見える。', 5200);
         }
         break;
       }
@@ -2066,7 +2140,7 @@ class BsodExperienceApp {
             this.gazeWarnCooldown = 5.5;
             this.triggerGlitch('tear', 0.48, 0.28);
             this.audio.playOneShot('heartbeat', { volume: 0.42, rate: 1.2 });
-            this.showSubtitle('天球の紅い瞳孔がこちらを見下ろしている……！', 3000);
+            this.showSubtitle('見られている。', 3000);
           }
         } else {
           this.opticStrain = Math.max(0, this.opticStrain - dt * 1.25);
@@ -2082,25 +2156,26 @@ class BsodExperienceApp {
         if (this.player.position.z < 4.0 && !this.glitchMilestones.archEntry) {
           this.glitchMilestones.archEntry = true;
           this.audio.playOneShot('dissonance', { volume: 0.22, duration: 3.6, fadeInSec: 0.3, releaseSec: 1.2, reverb: 0.55 });
-          this.showSubtitle('橋の縁に立つ黒い人影がこちらを見ている……近づくとノイズに溶けて消える。', 4400);
+          this.showSubtitle('誰か、いる。', 4400);
         } else if (this.player.position.z < -20.0 && !this.glitchMilestones.midSpan) {
           this.glitchMilestones.midSpan = true;
           this.glitchWorld.triggerAnomalySurge(0.70);
           this.horrorPulse = Math.max(this.horrorPulse, 0.34);
           this.triggerGlitch('ghost', 0.42, 0.7);
           this.audio.playOneShot('anomaly_tremor', { volume: 0.30, reverb: 0.58 });
-          this.showSubtitle('頭上140mを巨大な脊椎が泳いでいく——青画面に呑まれた残骸がこの海を漂っている。', 4600);
+          this.showSubtitle('ここは、何の中だ？', 4600);
         } else if (this.player.position.z < -39.0 && !this.glitchMilestones.effigySeen) {
           this.glitchMilestones.effigySeen = true;
           this.horrorPulse = Math.max(this.horrorPulse, 0.48);
           this.audio.playOneShot('heartbeat', { volume: 0.46, rate: 1.15 });
-          this.showSubtitle('聖堂の階段脇——午前2時47分の「自分」がオフィスチェアに座ったまま固まっている……！', 4800);
+          this.showSubtitle('あれは……自分？', 4800);
         }
 
         if (!wasRevealed && this.glitchWorld.coreSecretRevealed) {
           this.audio.playOneShot('ghost_cantata', { volume: 0.48, reverb: 0.55 });
-          this.worldHintEl.textContent = '[C] コンソールを開き「WAKE_UP」を実行せよ';
-          this.showSubtitle('中央聖堂の上空に7文字の命令が収束した——[C] でコンソールを開き入力せよ！', 5200);
+          this.setObjective('[C] コンソールで命令を実行する');
+          this.worldHintEl.textContent = '[C] コンソール';
+          this.showSubtitle('命令が読める。コンソールに入力しよう。', 5200);
         }
 
         const nearCoreFactor = THREE.MathUtils.clamp(1 - distCore / 50, 0, 1);
@@ -2243,9 +2318,10 @@ class BsodExperienceApp {
         if (finished) {
           this.phase = 'AFTERMATH_ROAM';
           this.crosshairEl.classList.remove('hidden');
+          this.setObjective(null);
           this.aftermathBarEl.classList.remove('hidden');
           this.showSubtitle(
-            '自室のラグの上に倒れ込んでいた……窓ガラスを伝う残り雫の向こうは静まり返り、無人の椅子だけがこちらへ向き直っている。',
+            '……帰ってきた？',
             6000
           );
         }

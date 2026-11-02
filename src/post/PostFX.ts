@@ -29,10 +29,12 @@ export type PostFXOptions = {
   ghost?: number;
   bloom?: number;
   sharpen?: number;
+  transition?: { scene: THREE.Scene; camera: THREE.Camera; progress: number };
 };
 
 export class PostFX {
   private rt: THREE.WebGLRenderTarget;
+  private readonly transitionRt: THREE.WebGLRenderTarget;
   private readonly quadScene = new THREE.Scene();
   private readonly quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private readonly mat: THREE.ShaderMaterial;
@@ -60,6 +62,12 @@ export class PostFX {
       samples: 0,
     });
 
+    // Only rendered during the tunnel handoff; kept at the same size as the main frame.
+    this.transitionRt = new THREE.WebGLRenderTarget(width, height, {
+      minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+      depthBuffer: true, stencilBuffer: true,
+    });
+
     const triGeo = new THREE.BufferGeometry();
     triGeo.setAttribute(
       'position',
@@ -72,6 +80,8 @@ export class PostFX {
       depthWrite: false,
       uniforms: {
         tDiffuse: { value: this.rt.texture },
+        tTransition: { value: this.transitionRt.texture },
+        uTransition: { value: 0 },
         uTime: { value: 0 },
         uDistort: { value: 0 },
         uWaveProgress: { value: 0 },
@@ -100,6 +110,8 @@ export class PostFX {
       fragmentShader: /* glsl */ `
         varying vec2 vUv;
         uniform sampler2D tDiffuse;
+        uniform sampler2D tTransition;
+        uniform float uTransition;
         uniform float uTime;
         uniform float uDistort;
         uniform float uWaveProgress;
@@ -140,7 +152,15 @@ export class PostFX {
         }
 
         vec3 fetch(vec2 p) {
-          return texture2D(tDiffuse, clamp(p, 0.0015, 0.9985)).rgb;
+          p = clamp(p, 0.0015, 0.9985);
+          vec3 original = texture2D(tDiffuse, p).rgb;
+          if (uTransition <= 0.0) return original;
+          // The real world emerges from the opening first, then replaces the walls.
+          float aspect = uResolution.x / max(1.0, uResolution.y);
+          float r = length((p - 0.5) * vec2(aspect, 1.0)) / (0.5 * length(vec2(aspect, 1.0)));
+          float edge = mix(-0.35, 1.35, uTransition);
+          float mask = 1.0 - smoothstep(edge - 0.3, edge + 0.3, r);
+          return mix(original, texture2D(tTransition, p).rgb, mask);
         }
 
         void main() {
@@ -396,6 +416,9 @@ export class PostFX {
       depthWrite: false,
       uniforms: {
         tDiffuse: { value: this.rt.texture },
+        tTransition: { value: this.transitionRt.texture },
+        uTransition: { value: 0 },
+        uResolution: { value: new THREE.Vector2(width, height) },
         uThreshold: { value: 0.44 },
         uTexelX: { value: 1 / Math.max(2, bw) },
       },
@@ -409,10 +432,20 @@ export class PostFX {
       fragmentShader: /* glsl */ `
         varying vec2 vUv;
         uniform sampler2D tDiffuse;
+        uniform sampler2D tTransition;
+        uniform float uTransition;
+        uniform vec2 uResolution;
         uniform float uThreshold;
         uniform float uTexelX;
         vec3 thresh(vec2 p) {
           vec3 c = texture2D(tDiffuse, p).rgb;
+          if (uTransition > 0.0) {
+            float aspect = uResolution.x / max(1.0, uResolution.y);
+            float r = length((p - 0.5) * vec2(aspect, 1.0)) / (0.5 * length(vec2(aspect, 1.0)));
+            float edge = mix(-0.35, 1.35, uTransition);
+            float mask = 1.0 - smoothstep(edge - 0.3, edge + 0.3, r);
+            c = mix(c, texture2D(tTransition, p).rgb, mask);
+          }
           float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
           return c * smoothstep(uThreshold, uThreshold + 0.32, luma);
         }
@@ -491,6 +524,8 @@ export class PostFX {
     const bw = Math.max(2, Math.floor(width / 5));
     const bh = Math.max(2, Math.floor(height / 5));
     this.rt.setSize(width, height);
+    this.transitionRt.setSize(width, height);
+    this.brightMat.uniforms.uResolution.value.set(width, height);
     this.rtBright.setSize(bw, bh);
     this.rtBlur.setSize(bw, bh);
     this.mat.uniforms.uResolution.value.set(width, height);
@@ -543,6 +578,9 @@ export class PostFX {
     }
 
     const u = this.mat.uniforms;
+    const transition = opts.transition;
+    u.uTransition.value = transition?.progress ?? 0;
+    this.brightMat.uniforms.uTransition.value = transition?.progress ?? 0;
     u.uTime.value = elapsed;
     u.uDistort.value = opts.distort;
     u.uWaveProgress.value = opts.waveProgress ?? 0.5;
@@ -561,6 +599,11 @@ export class PostFX {
     renderer.setRenderTarget(this.rt);
     renderer.clear(true, true, true);
     renderer.render(scene, camera);
+    if (transition && transition.progress > 0) {
+      renderer.setRenderTarget(this.transitionRt);
+      renderer.clear(true, true, true);
+      renderer.render(transition.scene, transition.camera);
+    }
 
     const bloomStrength = this.bloomEnabled ? (opts.bloom ?? 0.55) : 0;
     u.uBloom.value = bloomStrength;

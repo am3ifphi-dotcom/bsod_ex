@@ -13,6 +13,7 @@ export class ConsoleUI {
   private coreUnlocked = false;
   private coreDistanceM = 76;
   private hijackTimeout: number | null = null;
+  private successTimeouts: number[] = [];
   private readonly cmdHistory: string[] = [];
   private historyIdx = -1;
 
@@ -84,6 +85,10 @@ export class ConsoleUI {
     this.isOpen = false;
     this.wrongAttemptCount = 0;
     this.coreUnlocked = false;
+    this.cmdHistory.length = 0;
+    this.historyIdx = -1;
+    this.successTimeouts.forEach((id) => window.clearTimeout(id));
+    this.successTimeouts = [];
     if (this.hijackTimeout !== null) {
       window.clearTimeout(this.hijackTimeout);
       this.hijackTimeout = null;
@@ -183,25 +188,30 @@ export class ConsoleUI {
     const normalized = raw.toUpperCase().replace(/\s+/g, '_');
 
     if (normalized === 'WAKE_UP') {
+      if (!this.coreUnlocked) {
+        this.appendLine('[ACCESS DENIED] 信号が不完全です。光の柱に近づいてください。', 'warn');
+        this.audio.playOneShot('console_error', { volume: 0.4 });
+        return;
+      }
       this.locked = true;
       this.inputEl.disabled = true;
       this.appendLine('[CRITICAL INTERRUPT ACCEPTED] DIRECTIVE "WAKE_UP" VERIFIED!', 'ok');
       this.audio.playOneShot('reality_rift', { volume: 0.75, reverb: 0.45 });
 
-      setTimeout(() => {
-        this.appendLine('[SMILE_ENTITY.SYS]: 待テ……喉ノ奥カラ這イ出ルナ！！', 'err');
+      this.successTimeouts.push(window.setTimeout(() => {
+        this.appendLine('[SMILE_ENTITY.SYS]: 待テ……画面ノ外ニ出ルナ！！', 'err');
         this.audio.playKeystroke();
-      }, 150);
+      }, 150));
 
-      setTimeout(() => {
+      this.successTimeouts.push(window.setTimeout(() => {
         this.appendLine('[0x0078D7 -> 0x000000] UNMOUNTING PARASYTE_CHIASM_HOOK ... SEVERED', 'ok');
         this.appendLine('[WARNING] VIRTUAL CORTEX INTEGRITY 0% — SHATTERING DUMP SECTOR!', 'warn');
-      }, 330);
+      }, 330));
 
-      setTimeout(() => {
+      this.successTimeouts.push(window.setTimeout(() => {
         this.close(false);
         this.onWakeUpCommand?.();
-      }, 560);
+      }, 560));
       return;
     }
 
@@ -250,7 +260,7 @@ export class ConsoleUI {
 
     if (normalized === 'WHOAMI') {
       this.appendLine('nt authority\\swallowed_observer (PID: 0x0247)', 'warn');
-      this.scheduleParasyteHijack('[SMILE_ENTITY.SYS]: 「お前」はもう半分、私の歯の内側だ。');
+      this.scheduleParasyteHijack('[SMILE_ENTITY.SYS]: 「お前」はもう半分、この画面の中だ。');
       return;
     }
 
@@ -271,7 +281,7 @@ export class ConsoleUI {
       this.wrongAttemptCount++;
       this.audio.playOneShot('console_error', { volume: 0.6 });
       this.appendLine(
-        `[STOP 0x000000F4] '${raw}' は拒否されました。標準の電源・終了割り込みは顎の神経に直結されています。`,
+        `[STOP 0x000000F4] '${raw}' は拒否されました。標準の電源・終了割り込みは表示システムに乗っ取られています。`,
         'err'
       );
       this.scheduleParasyteHijack('[SMILE_ENTITY.SYS]: 再起動？ 何度電源を切っても、黒い画面の奥に私の目が見えるぞ。');

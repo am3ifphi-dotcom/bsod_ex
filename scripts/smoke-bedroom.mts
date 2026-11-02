@@ -96,8 +96,14 @@ for (let i = 0; i < 300; i++) {
     0.4,
     scrollPhase
   );
-  if (i === 120 && bedroom.bsodScreen.parasyteGroup.visible !== true) {
-    throw new Error('parasyteGroup must be visible during active BSOD madness!');
+  if (bedroom.bsodScreen.parasyteGroup.visible || bedroom.bsodScreen.throatTeeth.visible) {
+    throw new Error('Anatomical meshes must remain hidden during digital face escalation and suction.');
+  }
+  if (i === 120 && bedroom.bsodScreen.throatGroup.visible) {
+    throw new Error('The tunnel must not replace the digital face during inspection.');
+  }
+  if (i === 250 && !bedroom.bsodScreen.throatGroup.visible) {
+    throw new Error('The digital tunnel must open during suction.');
   }
   bedroom.update(1 / 60, i / 60, Math.min(1, i / 200), Math.min(0.5, i / 400), false, new THREE.Vector3(0.35, 0.017, 0.62), camFwd);
 }
