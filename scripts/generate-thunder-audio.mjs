@@ -120,7 +120,7 @@ function declick(signal, fadeInSec = 0.004, fadeOutSec = 0.18) {
  * Core thunder model.
  *  distance 0 = overhead strike (sharp, bright, immediate), 1 = far horizon (dull, rolling, late).
  */
-function bakeThunder({ seconds, seed, distance, subGain, crackleAmount, reflections, targetRmsValue }) {
+function bakeThunder({ seconds, seed, distance, subGain, reflections, targetRmsValue }) {
   const n = Math.floor(seconds * SR);
   const rng = makeRng(seed);
   const out = new Float32Array(n);
@@ -139,7 +139,7 @@ function bakeThunder({ seconds, seed, distance, subGain, crackleAmount, reflecti
       const env = Math.exp(-t * (42 - distance * 26)) * (0.55 + 0.45 * Math.sin(t * 900));
       crack[i] *= env;
     }
-    addInto(out, crack, 0.85 * (1 - distance) + 0.18, 0);
+    addInto(out, crack, 0.62 * (1 - distance) + 0.14, 0);
   }
 
   // --- 2. Broad body: several detuned noise "columns" so it never sounds like one noise sweep.
@@ -180,17 +180,9 @@ function bakeThunder({ seconds, seed, distance, subGain, crackleAmount, reflecti
     addInto(out, sub, subGain, 0);
   }
 
-  // --- 4. Electrical crackle rain: sparse high ticks decaying over the strike.
-  if (crackleAmount > 0) {
-    const ticks = Math.floor(30 + crackleAmount * 140 * (1 - distance));
-    for (let k = 0; k < ticks; k++) {
-      const at = Math.floor(Math.pow(rng(), 1.8) * seconds * 0.55 * SR);
-      const len = Math.floor((0.006 + rng() * 0.02) * SR);
-      const tick = bandpass(whiteNoise(len, rng), 1400, 7600);
-      for (let i = 0; i < len; i++) tick[i] *= Math.exp((-i / SR) * 220);
-      addInto(out, tick, (0.05 + rng() * 0.12) * crackleAmount * (1 - distance * 0.5), at);
-    }
-  }
+  // --- 4. (removed) electrical tick rain.
+  // Sparse high-frequency ticks sounded like frying bacon and made the tail read as an electrical
+  // fault rather than thunder. A strike should be a body plus a roll: nothing sparkles.
 
   // --- 5. Canyon / terrain reflections: discrete delayed, darkened copies of the body.
   if (reflections > 0) {
@@ -204,6 +196,17 @@ function bakeThunder({ seconds, seed, distance, subGain, crackleAmount, reflecti
         echo[j] *= Math.exp(-t / (1.1 + distance * 2.6)) * Math.min(1, t / 0.05);
       }
       addInto(out, echo, (reflections * 0.30) / (i + 1.7), Math.floor(delay * SR));
+    }
+  }
+
+  // --- 5b. Tail shaping: the back half loses everything above ~700 Hz, so the roll closes on a
+  // deep, smooth rumble instead of grit.
+  {
+    const tailStart = Math.floor(n * 0.30);
+    const rumble = lowpass(out, 620);
+    for (let i = tailStart; i < n; i++) {
+      const k = Math.min(1, (i - tailStart) / Math.max(1, n - tailStart) * 1.6);
+      out[i] = out[i] * (1 - k) + rumble[i] * k;
     }
   }
 
@@ -263,7 +266,6 @@ const PRESETS = [
     seed: 0x5eed01,
     distance: 0.08,
     subGain: 0.42,
-    crackleAmount: 1.0,
     reflections: 0.55,
   },
   {
@@ -273,7 +275,6 @@ const PRESETS = [
     seed: 0x5eed02,
     distance: 0.46,
     subGain: 0.58,
-    crackleAmount: 0.5,
     reflections: 0.75,
   },
   {
@@ -283,7 +284,6 @@ const PRESETS = [
     seed: 0x5eed03,
     distance: 0.86,
     subGain: 0.72,
-    crackleAmount: 0.18,
     reflections: 0.9,
   },
   {
@@ -294,7 +294,6 @@ const PRESETS = [
     seed: 0x5eed04,
     distance: 0.62,
     subGain: 0.95,
-    crackleAmount: 0.75,
     reflections: 1.15,
   },
 ];

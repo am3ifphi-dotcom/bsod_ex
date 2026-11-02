@@ -107,6 +107,7 @@ export class GlitchWorld {
   private spireMat!: THREE.ShaderMaterial;
   private lanternMat!: THREE.ShaderMaterial;
   private craftMetalMat: THREE.ShaderMaterial | null = null;
+  private chapelStoneMat: THREE.ShaderMaterial | null = null;
   private craftLedMat: THREE.ShaderMaterial | null = null;
   private monolithMat!: THREE.ShaderMaterial;
 
@@ -305,6 +306,10 @@ export class GlitchWorld {
     // 5c-2. Structural craft pass: riveted handrails, cable trays, junction boxes, sagging
     // conduit, torn rebar and rubble along the whole walkable boulevard.
     this.buildStructuralCraft();
+
+    // 5c-3. Architecture pass: gothic side chapels, a carved parapet along the walkway and two
+    // lattice gantry cranes standing behind the arcade.
+    this.buildCathedralArcadesAndGantries();
 
     // 5d. Threshold Host Effigy & Peripheral Stalking Glitch Apparitions
     this.buildHostEffigyAndPhantoms();
@@ -5149,6 +5154,443 @@ export class GlitchWorld {
     this.group.add(slabs);
   }
 
+
+  /**
+   * Cathedral side chapels, a carved parapet and two lattice gantry cranes.
+   *
+   * The craft pass gave the causeway its industrial skin; this gives it architecture. Nine bays of
+   * buttressed arcade line both flanks — moulded plinths, entasis piers, pointed voussoir arches,
+   * hood moulds, quatrefoil tracery, gilded niche recesses and a dentilled frieze — and a low
+   * carved parapet runs right beside the player's feet so the detail is legible up close instead
+   * of only at silhouette distance. Two shipyard cranes stand behind them for scale.
+   *
+   * Everything is merged into four static meshes (stone / dark recesses / candle glow / steel),
+   * so the whole ensemble costs four draw calls.
+   */
+  private buildCathedralArcadesAndGantries(): void {
+    const stoneMat = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uAnomaly: { value: 0 },
+        uFogColor: { value: new THREE.Color(0x011330) },
+        uFogDensity: { value: 0.0056 },
+      },
+      vertexShader: /* glsl */ `
+        varying vec3 vWorldPos;
+        varying vec3 vNormalW;
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          vec4 wp = modelMatrix * vec4(position, 1.0);
+          vWorldPos = wp.xyz;
+          vNormalW = normalize(mat3(modelMatrix) * normal);
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec3 vWorldPos;
+        varying vec3 vNormalW;
+        varying vec2 vUv;
+        uniform float uTime;
+        uniform float uAnomaly;
+        uniform vec3 uFogColor;
+        uniform float uFogDensity;
+
+        float hash21S(vec2 p) {
+          p = fract(p * vec2(127.1, 311.7));
+          p += dot(p, p + 34.23);
+          return fract(p.x * p.y);
+        }
+
+        void main() {
+          vec3 nrm = normalize(vNormalW);
+          vec3 viewDir = normalize(cameraPosition - vWorldPos);
+
+          // Ashlar courses: horizontal beds wrap the whole structure, with staggered head joints.
+          float courseH = 0.46;
+          float row = floor(vWorldPos.y / courseH);
+          float mortarY = smoothstep(0.0, 0.035, abs(fract(vWorldPos.y / courseH) - 0.5) - 0.44);
+          float jointOffset = mod(row, 2.0) * 0.5 + hash21S(vec2(row, 3.7)) * 0.35;
+          float bx = vWorldPos.x * 0.9 + vWorldPos.z * 0.9 + jointOffset;
+          float mortarX = smoothstep(0.0, 0.03, abs(fract(bx) - 0.5) - 0.44);
+          float mortar = max(mortarY, mortarX);
+
+          // Each block is a slightly different stone: some warm, some cold, some water-stained.
+          float blockRand = hash21S(vec2(floor(bx), row));
+          vec3 stone = mix(vec3(0.058, 0.068, 0.092), vec3(0.098, 0.102, 0.112), blockRand);
+          stone *= 0.82 + 0.30 * hash21S(vec2(floor(bx) + 11.0, row + 5.0));
+          // Damp wicking up from the ground and streaking down from above.
+          float damp = smoothstep(2.2, 0.0, vWorldPos.y - floor(vWorldPos.y * 0.0)) * 0.5;
+          float streak = smoothstep(0.35, 0.95, hash21S(vec2(floor(bx * 0.7), 0.0))) * 0.35;
+          stone = mix(stone, stone * 0.62 + vec3(0.0, 0.012, 0.020), clamp(damp + streak * 0.5, 0.0, 0.8));
+          // Mortar is darker and matte.
+          stone = mix(stone, vec3(0.030, 0.036, 0.048), mortar * 0.85);
+
+          // Crisp carved edges catch the cold key light; the flats stay dark.
+          vec3 keyDir = normalize(vec3(0.12, 0.62, -0.78));
+          float ndl = clamp(dot(nrm, keyDir), 0.0, 1.0);
+          float sky = clamp(nrm.y * 0.5 + 0.5, 0.0, 1.0);
+          float rim = pow(1.0 - clamp(dot(nrm, viewDir), 0.0, 1.0), 3.0);
+
+          vec3 glowTint = mix(vec3(0.30, 0.80, 1.0), vec3(1.0, 0.24, 0.30), uAnomaly * 0.7);
+          vec3 col = stone * (0.30 + 0.72 * ndl);
+          col += vec3(0.012, 0.045, 0.10) * sky * 0.55;
+          col += glowTint * (rim * 0.20 + 0.035);
+
+          // A slow votive shimmer low down, as if lamps are burning in the chapels.
+          float votive = pow(0.5 + 0.5 * sin(uTime * 1.3 + vWorldPos.z * 0.6), 6.0);
+          col += vec3(0.55, 0.42, 0.24) * votive * smoothstep(3.4, 0.2, vWorldPos.y) * 0.05;
+
+          // Aerial perspective, matched to the rest of the world.
+          float camDist = length(cameraPosition - vWorldPos);
+          float heightMist = exp(-max(vWorldPos.y + 1.5, 0.0) * 0.022);
+          float airDensity = uFogDensity * (0.72 + heightMist * 1.25);
+          float fogFactor = 1.0 - exp(-airDensity * airDensity * camDist * camDist);
+          vec3 viewW = normalize(vWorldPos - cameraPosition);
+          float sunScatter = pow(max(dot(viewW, normalize(vec3(0.0, 0.26, -0.96))), 0.0), 5.0);
+          vec3 aerialTint = mix(vec3(0.008, 0.078, 0.20), vec3(0.035, 0.21, 0.47), clamp((vWorldPos.y + 4.0) * 0.014, 0.0, 1.0));
+          aerialTint += vec3(0.16, 0.42, 0.88) * sunScatter * 0.72;
+          col = mix(col, aerialTint, clamp(fogFactor, 0.0, 0.95));
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `,
+    });
+
+    const stone: THREE.BufferGeometry[] = [];
+    const recess: THREE.BufferGeometry[] = [];
+    const glow: THREE.BufferGeometry[] = [];
+
+    const pushStone = (w: number, h: number, d: number, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) => {
+      const g = new THREE.BoxGeometry(w, h, d);
+      if (rx || ry || rz) g.applyQuaternion(new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)));
+      g.translate(x, y, z);
+      stone.push(g);
+    };
+
+    /** One pointed (two-centre) arch of voussoirs in the Z–Y plane, extruded along X. */
+    const pushPointedArch = (
+      cx: number,
+      baseY: number,
+      cz: number,
+      halfSpan: number,
+      rise: number,
+      depth: number,
+      thick: number,
+      segments = 9
+    ) => {
+      const pts: Array<[number, number]> = [];
+      for (let k = 0; k <= segments; k++) {
+        const th = (k / segments) * (Math.PI / 2);
+        pts.push([cz - halfSpan * Math.cos(th), baseY + rise * Math.sin(th)]);
+      }
+      for (let k = segments; k >= 0; k--) {
+        const th = (k / segments) * (Math.PI / 2);
+        pts.push([cz + halfSpan * Math.cos(th), baseY + rise * Math.sin(th)]);
+      }
+      const axis = new THREE.Vector3(1, 0, 0);
+      for (let k = 0; k < pts.length - 1; k++) {
+        const [z0, y0] = pts[k];
+        const [z1, y1] = pts[k + 1];
+        const dz = z1 - z0;
+        const dy = y1 - y0;
+        const len = Math.hypot(dz, dy);
+        if (len < 1e-4) continue;
+        // Splay each voussoir slightly so seams read from close up.
+        const g = new THREE.BoxGeometry(depth * (0.97 + (k % 2) * 0.03), thick * 1.22, len * 1.16);
+        const a = Math.atan2(-dy, dz);
+        g.applyQuaternion(new THREE.Quaternion().setFromAxisAngle(axis, a));
+        g.translate(cx, (y0 + y1) * 0.5, (z0 + z1) * 0.5);
+        stone.push(g);
+      }
+    };
+
+    const BAYS = 9;
+    const BAY_LEN = 5.2;
+    const Z_FIRST = 9.6;
+    const CHAPEL_X = 8.15;
+
+    for (const side of [-1, 1]) {
+      for (let b = 0; b < BAYS; b++) {
+        const cz = Z_FIRST - b * BAY_LEN;
+        const x = side * CHAPEL_X;
+        // Inner face of the arcade points at the causeway, so offsets flip with the side.
+        const inX = x - side * 0.0;
+        const gY = this.getTerrainHeight(x, cz);
+        const pierH = 3.85;
+        const springY = gY + pierH;
+        const apexY = springY + 2.55;
+
+        // ---- plinth, moulded base, pier shaft with entasis, capital and abacus
+        pushStone(1.28, 0.34, 1.34, inX, gY + 0.17, cz);
+        pushStone(1.06, 0.10, 1.12, inX, gY + 0.39, cz);
+        const shaft = this.makeChamferedColumnGeometry(8, 0.55, 10);
+        shaft.scale(0.78, pierH - 0.40, 0.86);
+        shaft.translate(inX, gY + 0.44 + (pierH - 0.40) * 0.5, cz);
+        stone.push(shaft);
+        pushStone(0.92, 0.16, 0.98, inX, springY - 0.10, cz);
+        pushStone(1.06, 0.13, 1.10, inX, springY - 0.24, cz);
+        pushStone(1.16, 0.11, 1.20, inX, springY + 0.02, cz);
+
+        // ---- arch head, hood mould in front, keystone
+        const halfSpan = BAY_LEN * 0.5 - 0.10;
+        pushPointedArch(inX, springY + 0.06, cz, halfSpan, 2.45, 0.64, 0.30, 10);
+        pushPointedArch(inX - side * 0.44, springY + 0.06, cz, halfSpan + 0.16, 2.62, 0.20, 0.18, 10);
+        pushStone(0.78, 0.46, 0.20, inX - side * 0.30, apexY + 0.52, cz);
+        // trefoil finial above the apex
+        pushStone(0.24, 0.30, 0.24, inX - side * 0.30, apexY + 0.90, cz);
+
+        // ---- tracery: a ring inside the head plus a quatrefoil cluster above it
+        const ring = new THREE.TorusGeometry(halfSpan * 0.50, 0.048, 6, 22);
+        ring.rotateY(Math.PI / 2);
+        ring.translate(inX - side * 0.30, springY + 1.02, cz);
+        stone.push(ring);
+        for (let q = 0; q < 4; q++) {
+          const qa = (q / 4) * Math.PI * 2 + Math.PI * 0.25;
+          const qr = halfSpan * 0.20;
+          const t = new THREE.TorusGeometry(qr * 0.34, 0.026, 5, 14);
+          t.rotateY(Math.PI / 2);
+          t.translate(inX - side * 0.30, springY + 1.92 + Math.sin(qa) * qr * 0.7, cz + Math.cos(qa) * qr * 0.7);
+          stone.push(t);
+        }
+
+        // ---- niche recess: a dark cell behind a stepped frame, with a votive candle in it
+        pushStone(0.16, 2.24, 1.86, inX + side * 0.52, springY - 1.30, cz);
+        pushStone(0.22, 0.16, 2.06, inX + side * 0.46, springY - 0.14, cz);
+        pushStone(0.22, 0.16, 2.06, inX + side * 0.46, springY - 2.44, cz);
+        pushStone(0.22, 2.44, 0.16, inX + side * 0.46, springY - 1.30, cz - 0.95);
+        pushStone(0.22, 2.44, 0.16, inX + side * 0.46, springY - 1.30, cz + 0.95);
+        {
+          const cell = new THREE.BoxGeometry(0.30, 2.06, 1.60);
+          cell.translate(inX + side * 0.62, springY - 1.30, cz);
+          recess.push(cell);
+          const candle = new THREE.BoxGeometry(0.05, 0.10, 0.05);
+          candle.translate(inX + side * 0.48, springY - 2.30, cz);
+          glow.push(candle);
+        }
+
+        // ---- dentilled frieze band across the bay, and a small pinnacle on the pier head
+        pushStone(0.34, 0.26, BAY_LEN + 0.04, inX + side * 0.34, apexY + 1.42, cz);
+        pushStone(0.46, 0.10, BAY_LEN + 0.10, inX + side * 0.34, apexY + 1.60, cz);
+        for (let d = 0; d < 10; d++) {
+          pushStone(0.16, 0.14, 0.16, inX + side * 0.52, apexY + 1.24, cz - BAY_LEN * 0.45 + d * (BAY_LEN * 0.1));
+        }
+        // Pier pinnacle: tapered spike with a crocket collar.
+        const pin = this.makeChamferedColumnGeometry(6, 0.7, 6);
+        pin.scale(0.34, 1.15, 0.34);
+        pin.translate(inX, apexY + 2.34, cz);
+        stone.push(pin);
+        pushStone(0.44, 0.10, 0.44, inX, apexY + 2.98, cz);
+
+        // ---- flying rib from the pier head back into the dark, plus a wall stub behind the bay
+        pushStone(0.36, 0.34, 1.30, x + side * 0.62, springY + 0.30, cz + BAY_LEN * 0.5);
+        pushStone(0.26, 2.9, 0.42, x + side * 0.72, gY + 1.45, cz + BAY_LEN * 0.5);
+      }
+    }
+
+    // ---------------------------------------------------------------- CARVED PARAPET
+    // A low wall right beside the causeway, with relief medallions, weep holes and broken runs.
+    for (const side of [-1, 1]) {
+      const x = side * 4.18;
+      for (let i = 0; i < 30; i++) {
+        const z = 21.0 - i * 2.05;
+        // Two of every eleven bays have collapsed: the wall should look maintained, then not.
+        if (i % 11 === 4 || i % 11 === 9) continue;
+        const gY = this.getTerrainHeight(x, z);
+        const h = 0.86 + (i % 3) * 0.05;
+        pushStone(0.30, h, 2.0, x, gY + h * 0.5, z);
+        // Coping stone, slightly proud of the wall.
+        pushStone(0.42, 0.10, 2.02, x, gY + h + 0.05, z);
+        // Carved relief medallion: ring + inner boss, every other bay.
+        if (i % 2 === 0) {
+          const ring = new THREE.TorusGeometry(0.27, 0.035, 5, 18);
+          ring.rotateY(Math.PI / 2);
+          ring.translate(x - side * 0.17, gY + h * 0.55, z);
+          stone.push(ring);
+          pushStone(0.06, 0.14, 0.14, x - side * 0.17, gY + h * 0.55, z);
+        } else {
+          // Vertical blind arcading instead of a medallion.
+          for (let v = -1; v <= 1; v++) {
+            pushStone(0.05, h * 0.52, 0.06, x - side * 0.16, gY + h * 0.55, z + v * 0.52);
+          }
+        }
+        // Weep hole low in the wall.
+        pushStone(0.04, 0.07, 0.11, x - side * 0.16, gY + 0.16, z + 0.86);
+      }
+    }
+
+    const mergedStone = mergeGeometries(stone, false);
+    for (const g of stone) g.dispose();
+    if (mergedStone) {
+      const m = new THREE.Mesh(mergedStone, stoneMat);
+      m.frustumCulled = false;
+      this.group.add(m);
+    }
+    const mergedRecess = mergeGeometries(recess, false);
+    for (const g of recess) g.dispose();
+    if (mergedRecess) {
+      const m = new THREE.Mesh(mergedRecess, new THREE.MeshBasicMaterial({ color: 0x01040b }));
+      m.frustumCulled = false;
+      this.group.add(m);
+    }
+    const mergedGlow = mergeGeometries(glow, false);
+    for (const g of glow) g.dispose();
+    if (mergedGlow) {
+      const m = new THREE.Mesh(
+        mergedGlow,
+        new THREE.MeshBasicMaterial({ color: 0x6a4a22, transparent: true, opacity: 0.9 })
+      );
+      m.frustumCulled = false;
+      this.group.add(m);
+    }
+
+    // ---------------------------------------------------------------- GANTRY CRANES
+    const steel = this.craftMetalMat;
+    if (steel) {
+      const steelGeos: THREE.BufferGeometry[] = [];
+      const beaconGeos: THREE.BufferGeometry[] = [];
+      const beam = (len: number, a: THREE.Vector3, b: THREE.Vector3, w = 0.22) => {
+        const dir = new THREE.Vector3().subVectors(b, a);
+        const l = dir.length();
+        if (l < 1e-3) return;
+        const g = new THREE.BoxGeometry(w, w, l);
+        g.applyMatrix4(
+          new THREE.Matrix4().compose(
+            new THREE.Vector3().addVectors(a, b).multiplyScalar(0.5),
+            new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir.normalize()),
+            new THREE.Vector3(1, 1, 1)
+          )
+        );
+        steelGeos.push(g);
+      };
+      const box = (w: number, h: number, d: number, x: number, y: number, z: number) => {
+        const g = new THREE.BoxGeometry(w, h, d);
+        g.translate(x, y, z);
+        steelGeos.push(g);
+      };
+
+      /** Lattice leg: four chords with horizontal rings and diamond bracing. */
+      const latticeLeg = (cx: number, cz: number, baseY: number, topY: number, spread: number) => {
+        const rings = 7;
+        const half = spread * 0.5;
+        const corners = [
+          [-half, -half],
+          [half, -half],
+          [half, half],
+          [-half, half],
+        ] as const;
+        for (let r = 0; r < rings; r++) {
+          const y0 = baseY + ((topY - baseY) * r) / rings;
+          const y1 = baseY + ((topY - baseY) * (r + 1)) / rings;
+          const s0 = spread * (1.0 - (r / rings) * 0.28);
+          const s1 = spread * (1.0 - ((r + 1) / rings) * 0.28);
+          for (let c = 0; c < 4; c++) {
+            const [ox, oz] = corners[c];
+            beam(0, new THREE.Vector3(cx + ox * s0, y0, cz + oz * s0), new THREE.Vector3(cx + ox * s1, y1, cz + oz * s1));
+            // horizontal ring at the top of this lift
+            const [nx, nz] = corners[(c + 1) % 4];
+            beam(0.12, new THREE.Vector3(cx + ox * s1, y1, cz + oz * s1), new THREE.Vector3(cx + nx * s1, y1, cz + nz * s1), 0.12);
+          }
+          // diamond bracing on each face
+          for (let c = 0; c < 4; c++) {
+            const [ox, oz] = corners[c];
+            const [nx, nz] = corners[(c + 1) % 4];
+            beam(
+              0.10,
+              new THREE.Vector3(cx + ox * s0, y0, cz + oz * s0),
+              new THREE.Vector3(cx + nx * s1, y1, cz + nz * s1),
+              0.10
+            );
+          }
+        }
+      };
+
+      const buildCrane = (cz: number, legX: number, height: number) => {
+        const gA = this.getTerrainHeight(-legX, cz);
+        const gB = this.getTerrainHeight(legX, cz);
+        latticeLeg(-legX, cz, gA, gA + height, 1.9);
+        latticeLeg(legX, cz, gB, gB + height, 1.9);
+
+        // Boom: bottom chord, top chord, vertical posts, diagonal web, and a rail.
+        const boomY0 = Math.min(gA, gB) + height;
+        const boomY1 = boomY0 + 2.3;
+        const span = legX * 2 + 3.0;
+        for (const y of [boomY0, boomY1]) {
+          beam(0.30, new THREE.Vector3(-span * 0.5, y, cz - 0.9), new THREE.Vector3(span * 0.5, y, cz - 0.9), 0.30);
+          beam(0.30, new THREE.Vector3(-span * 0.5, y, cz + 0.9), new THREE.Vector3(span * 0.5, y, cz + 0.9), 0.30);
+        }
+        for (let i = 0; i <= 12; i++) {
+          const x = -span * 0.5 + (span * i) / 12;
+          beam(0.10, new THREE.Vector3(x, boomY0, cz - 0.9), new THREE.Vector3(x, boomY1, cz - 0.9), 0.10);
+          beam(0.10, new THREE.Vector3(x, boomY0, cz + 0.9), new THREE.Vector3(x, boomY1, cz + 0.9), 0.10);
+          beam(0.10, new THREE.Vector3(x, boomY0, cz - 0.9), new THREE.Vector3(x, boomY1, cz + 0.9), 0.10);
+          if (i < 12) {
+            const xn = -span * 0.5 + (span * (i + 1)) / 12;
+            beam(0.09, new THREE.Vector3(x, boomY0, cz - 0.9), new THREE.Vector3(xn, boomY1, cz - 0.9), 0.09);
+            beam(0.09, new THREE.Vector3(x, boomY1, cz + 0.9), new THREE.Vector3(xn, boomY0, cz + 0.9), 0.09);
+          }
+        }
+        // Cross ties between the two vertical trusses.
+        for (let i = 0; i <= 5; i++) {
+          const x = -span * 0.5 + (span * i) / 5;
+          beam(0.09, new THREE.Vector3(x, boomY1, cz - 0.9), new THREE.Vector3(x, boomY1, cz + 0.9), 0.09);
+          beam(0.09, new THREE.Vector3(x, boomY0, cz - 0.9), new THREE.Vector3(x, boomY0, cz + 0.9), 0.09);
+        }
+
+        // Trolley, cable and hook block hanging over the causeway.
+        const trolleyX = Math.sin(cz * 0.7) * legX * 0.35;
+        box(1.4, 0.5, 1.9, trolleyX, boomY0 - 0.30, cz);
+        for (const off of [-0.32, 0.32]) {
+          beam(0.05, new THREE.Vector3(trolleyX + off, boomY0 - 0.5, cz), new THREE.Vector3(trolleyX + off, boomY0 - 12.5, cz), 0.05);
+        }
+        box(1.0, 0.9, 0.7, trolleyX, boomY0 - 13.0, cz);
+        const hook = new THREE.TorusGeometry(0.28, 0.08, 6, 14, Math.PI * 1.4);
+        hook.rotateY(Math.PI * 0.5);
+        hook.translate(trolleyX, boomY0 - 13.8, cz);
+        steelGeos.push(hook);
+
+        // Operator cab and ladder at the near leg.
+        box(2.0, 1.8, 1.8, -legX + 1.4, this.getTerrainHeight(-legX, cz) + height * 0.72, cz);
+        box(2.1, 0.16, 1.9, -legX + 1.4, this.getTerrainHeight(-legX, cz) + height * 0.72 + 0.95, cz);
+        for (let r = 0; r < 16; r++) {
+          const y = this.getTerrainHeight(-legX, cz) + 1.0 + r * (height * 0.72 / 16);
+          box(0.05, 0.05, 0.7, -legX - 1.05, y, cz + 0.2);
+        }
+
+        // Aviation beacons on the boom ends and leg tops.
+        const beaconGeo = (x: number, y: number, z: number) => {
+          const g = new THREE.BoxGeometry(0.28, 0.28, 0.28);
+          g.translate(x, y, z);
+          beaconGeos.push(g);
+        };
+        beaconGeo(-span * 0.5, boomY1 + 0.3, cz - 0.9);
+        beaconGeo(span * 0.5, boomY1 + 0.3, cz - 0.9);
+        beaconGeo(-span * 0.5, boomY1 + 0.3, cz + 0.9);
+        beaconGeo(span * 0.5, boomY1 + 0.3, cz + 0.9);
+      };
+
+      buildCrane(-14.5, 17.5, 24.0);
+      buildCrane(-44.0, 17.5, 20.0);
+
+      const mergedSteel = mergeGeometries(steelGeos, false);
+      for (const g of steelGeos) g.dispose();
+      if (mergedSteel) {
+        const m = new THREE.Mesh(mergedSteel, steel);
+        m.frustumCulled = false;
+        this.group.add(m);
+      }
+      const mergedBeacons = mergeGeometries(beaconGeos, false);
+      for (const g of beaconGeos) g.dispose();
+      if (mergedBeacons && this.craftLedMat) {
+        const m = new THREE.Mesh(mergedBeacons, this.craftLedMat);
+        m.frustumCulled = false;
+        m.renderOrder = 3;
+        this.group.add(m);
+      }
+    }
+
+    this.chapelStoneMat = stoneMat;
+  }
+
   private buildCausewayDetailAndMonoliths(): void {
     // ---------------------------------------------------------------- CAUSEWAY LANTERNS
     const lanternMat = new THREE.ShaderMaterial({
@@ -6533,6 +6975,10 @@ export class GlitchWorld {
     if (this.craftLedMat) {
       this.craftLedMat.uniforms.uTime.value = elapsed;
       this.craftLedMat.uniforms.uAnomaly.value = this.anomalyIntensity;
+    }
+    if (this.chapelStoneMat) {
+      this.chapelStoneMat.uniforms.uTime.value = elapsed;
+      this.chapelStoneMat.uniforms.uAnomaly.value = this.anomalyIntensity;
     }
     this.causewayBusMat.uniforms.uTime.value = elapsed;
     this.causewayBusMat.uniforms.uAnomaly.value = this.anomalyIntensity;

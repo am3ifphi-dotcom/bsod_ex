@@ -49,13 +49,12 @@ class BsodExperienceApp {
   private readonly ndcVec = new THREE.Vector2();
   // The OS cursor is caged inside the monitor glass: it is a thing *in* the screen, not on the
   // desktop, so it must never slide off the bezel and float over the bedroom.
-  private readonly cursorCageCorners = [
-    new THREE.Vector3(),
-    new THREE.Vector3(),
-    new THREE.Vector3(),
-    new THREE.Vector3(),
-  ];
-  private readonly cursorCageRect = { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+  private readonly cursorPlane = new THREE.Plane();
+  private readonly cursorQuat = new THREE.Quaternion();
+  private readonly cursorPlaneNormal = new THREE.Vector3();
+  private readonly cursorHitPoint = new THREE.Vector3();
+  private readonly cursorLocalPoint = new THREE.Vector3();
+  private readonly cursorClamped = { x: 0, y: 0, clamped: false };
   private readonly scratchCamDir = new THREE.Vector3();
   private readonly scratchToMon = new THREE.Vector3();
 
@@ -101,6 +100,8 @@ class BsodExperienceApp {
   // Cinematic impact: the world is allowed to run in slow motion for the touchdown beat.
   private arrivalTimeScale = 1.0;
   private arrivalSlowMo = 0;
+  // 1 -> 0 after touchdown: carries the transition's ink lines and radial rush into the world.
+  private landingGlow = 0;
   private glitchArrivalAccum = 0;
   private suctionClockOffset = 0;
   private suctionFreeze = 0;
@@ -108,7 +109,6 @@ class BsodExperienceApp {
   // Storm director: every visible lightning flash gets thunder at a believable distance.
   private stormFlashPrev = 0;
   private pendingThunder: Array<{ t: number; intensity: number; close: boolean }> = [];
-  private stormCrackleCooldown = 0;
 
   // Staged glitch-event scheduler: every disturbance is an authored signature with its own sound.
   private glitchEvents: GlitchEvent[] = [];
@@ -1742,47 +1742,53 @@ class BsodExperienceApp {
   }
 
   /**
-   * Projects the monitor's glass quad into CSS pixels and caches the axis-aligned cage.
-   * Returns false when the quad is behind the camera (never during gameplay, but cheap to guard).
+   * Clamps a cursor position to the monitor's glass.
+   *
+   * A projected-quad bounding box is only an approximation: under perspective the glass is a
+   * trapezoid, and near the edges of the screen its AABB sticks out past the actual panel — which
+   * is exactly what made the cursor's travel look "almost but not quite" aligned with the screen.
+   * Instead we intersect the view ray with the glass plane, clamp in the panel's own local space
+   * and project the clamped point back, so the reachable area is the panel, pixel for pixel.
    */
-  private refreshCursorCage(): boolean {
+  private clampCursorToGlass(px: number, py: number): { x: number; y: number; clamped: boolean } {
+    const out = this.cursorClamped;
+    out.x = px;
+    out.y = py;
+    out.clamped = false;
+
     const hit = this.bedroom.bsodScreen.hitboxMesh;
-    const hw = BsodScreen.LOCAL_W * 0.5;
-    const hh = BsodScreen.LOCAL_H * 0.5;
-    const signs = [
-      [-hw, hh],
-      [hw, hh],
-      [hw, -hh],
-      [-hw, -hh],
-    ];
     const w = Math.max(1, window.innerWidth);
     const h = Math.max(1, window.innerHeight);
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (let i = 0; i < 4; i++) {
-      const v = this.cursorCageCorners[i];
-      v.set(signs[i][0], signs[i][1], 0);
-      hit.localToWorld(v);
-      v.project(this.camera);
-      if (v.z > 1) return false;
-      const px = (v.x * 0.5 + 0.5) * w;
-      const py = (-v.y * 0.5 + 0.5) * h;
-      minX = Math.min(minX, px);
-      minY = Math.min(minY, py);
-      maxX = Math.max(maxX, px);
-      maxY = Math.max(maxY, py);
-    }
-    if (!Number.isFinite(minX) || !Number.isFinite(maxY) || maxX - minX < 40 || maxY - minY < 40) {
-      return false;
-    }
-    const rect = this.cursorCageRect;
-    rect.minX = minX;
-    rect.minY = minY;
-    rect.maxX = maxX;
-    rect.maxY = maxY;
-    return true;
+
+    this.ndcVec.set((px / w) * 2 - 1, -(py / h) * 2 + 1);
+    this.camera.updateMatrixWorld();
+    this.raycaster.setFromCamera(this.ndcVec, this.camera);
+
+    this.cursorPlaneNormal.set(0, 0, 1).applyQuaternion(hit.getWorldQuaternion(this.cursorQuat));
+    hit.getWorldPosition(this.cursorHitPoint);
+    this.cursorPlane.setFromNormalAndCoplanarPoint(this.cursorPlaneNormal, this.cursorHitPoint);
+    if (!this.raycaster.ray.intersectPlane(this.cursorPlane, this.cursorHitPoint)) return out;
+
+    // local space of the panel: x/y inside ±LOCAL_W/2, ±LOCAL_H/2 by construction
+    this.cursorLocalPoint.copy(this.cursorHitPoint);
+    hit.worldToLocal(this.cursorLocalPoint);
+
+    const hw = BsodScreen.LOCAL_W * 0.5;
+    const hh = BsodScreen.LOCAL_H * 0.5;
+    // Inset by roughly the arrow glyph's own footprint, so the whole pointer stays on the glass.
+    const insetX = hw * 0.022;
+    const insetY = hh * 0.040;
+    const lx = THREE.MathUtils.clamp(this.cursorLocalPoint.x, -hw + insetX, hw - insetX);
+    const ly = THREE.MathUtils.clamp(this.cursorLocalPoint.y, -hh + insetY, hh - insetY);
+    if (lx === this.cursorLocalPoint.x && ly === this.cursorLocalPoint.y) return out;
+
+    this.cursorLocalPoint.set(lx, ly, 0);
+    hit.localToWorld(this.cursorLocalPoint);
+    this.cursorLocalPoint.project(this.camera);
+    out.x = (this.cursorLocalPoint.x * 0.5 + 0.5) * w;
+    out.y = (-this.cursorLocalPoint.y * 0.5 + 0.5) * h;
+    out.clamped = true;
+    return out;
   }
 
   private updatePcCursorRaycast(dt = 0.016): void {
@@ -1801,27 +1807,26 @@ class BsodExperienceApp {
     }
 
     // Cage the pointer to the glass before anything else reads it.
-    if (this.refreshCursorCage()) {
-      const pad = 6;
-      const rect = this.cursorCageRect;
-      this.player.inspectCursorPx.x = THREE.MathUtils.clamp(
-        this.player.inspectCursorPx.x,
-        rect.minX + pad,
-        Math.max(rect.minX + pad, rect.maxX - pad)
-      );
-      this.player.inspectCursorPx.y = THREE.MathUtils.clamp(
-        this.player.inspectCursorPx.y,
-        rect.minY + pad,
-        Math.max(rect.minY + pad, rect.maxY - pad)
-      );
+    const caged = this.clampCursorToGlass(
+      this.player.inspectCursorPx.x,
+      this.player.inspectCursorPx.y
+    );
+    if (caged.clamped) {
+      this.player.inspectCursorPx.x = caged.x;
+      this.player.inspectCursorPx.y = caged.y;
     }
 
     const tremor = this.madness > 0.30 ? (this.madness - 0.30) * 4.5 : 0;
     const jx = tremor > 0 ? Math.sin(this.elapsed * 47.0) * tremor : 0;
     const jy = tremor > 0 ? Math.cos(this.elapsed * 53.0) * tremor : 0;
-    const px = this.player.inspectCursorPx.x + jx;
-    const py = this.player.inspectCursorPx.y + jy;
-    this.pcCursorEl.style.transform = `translate3d(${px - 3}px, ${py - 2}px, 0)`;
+    const jittered = this.clampCursorToGlass(
+      this.player.inspectCursorPx.x + jx,
+      this.player.inspectCursorPx.y + jy
+    );
+    const px = jittered.x;
+    const py = jittered.y;
+    // The SVG's hotspot (the arrow tip) sits at (4, 2) in its 24×24 viewBox.
+    this.pcCursorEl.style.transform = `translate3d(${px - 4}px, ${py - 2}px, 0)`;
 
     this.ndcVec.set(
       (px / Math.max(1, window.innerWidth)) * 2 - 1,
@@ -1930,21 +1935,10 @@ class BsodExperienceApp {
         this.queueThunder(intensity);
       }
       this.stormFlashPrev = flash;
-      if (flash > 0.2 && this.stormCrackleCooldown <= 0) {
-        this.stormCrackleCooldown = 0.9 + Math.random() * 1.4;
-        this.audio.playOneShot('static_elec', {
-          volume: 0.05 + flash * 0.06,
-          rate: 1.18,
-          duration: 0.9,
-          releaseSec: 0.5,
-          lowpassHz: 2600,
-          channel: 'sfx',
-        });
-      }
+      // No crackle layer on the flash: lightning is a flash and a roll, not a bzzt.
     } else {
       this.stormFlashPrev = 0;
     }
-    this.stormCrackleCooldown = Math.max(0, this.stormCrackleCooldown - dt);
 
     if (this.pendingThunder.length) {
       for (let i = this.pendingThunder.length - 1; i >= 0; i--) {
@@ -1998,6 +1992,9 @@ class BsodExperienceApp {
     if (!this.paused) {
       this.elapsed += dt;
       this.updateStorm(dt);
+      if (this.landingGlow > 0) {
+        this.landingGlow = Math.max(0, this.landingGlow - dt / 8.5);
+      }
       if (this.subtitleRemaining > 0) {
         this.subtitleRemaining = Math.max(0, this.subtitleRemaining - dt);
         if (this.subtitleRemaining === 0) this.subtitleEl.classList.add('hidden');
@@ -2125,8 +2122,21 @@ class BsodExperienceApp {
       horrorAmt = Math.max(horrorAmt, this.glitchWorld.anomalyIntensity * 0.28);
       bloomAmt = 0.84 + this.glitchWorld.anomalyIntensity * 0.42;
       sharpenAmt = 0.34;
-      focusAmt = Math.max(focusAmt, this.glitchWorld.anomalyIntensity * 0.26);
-      zoomBlurAmt = Math.max(zoomBlurAmt, this.glitchWorld.anomalyIntensity * 0.30);
+      // The transition's filter does not stop at the landing: the ink lines keep breathing in the
+      // periphery and the radial rush eases out over the next few seconds, settling into a faint
+      // permanent version so the world always looks photographed through the same lens.
+      const glow = this.landingGlow * this.landingGlow;
+      focusAmt = Math.max(
+        focusAmt,
+        0.06 + this.glitchWorld.anomalyIntensity * 0.26 + glow * 0.30
+      );
+      zoomBlurAmt = Math.max(
+        zoomBlurAmt,
+        0.02 + this.glitchWorld.anomalyIntensity * 0.30 + glow * 0.42
+      );
+      chromaAmt = Math.max(chromaAmt, 0.04 + this.glitchWorld.anomalyIntensity * 0.42 + glow * 0.18);
+      vigAmt += glow * 0.10;
+      bloomAmt += glow * 0.14;
     } else if (this.phase === 'COLLAPSE_CUTSCENE') {
       const fallFactor = THREE.MathUtils.clamp((this.collapseTimer - 3.8) / 4.8, 0, 1);
       distortAmt = Math.max(distortAmt, 0.24 + fallFactor * 0.38);
@@ -2693,6 +2703,7 @@ class BsodExperienceApp {
           this.audio.stopLoop('fall_wind', 0.22);
           // Slow motion: the impact is too big to happen at normal speed.
           this.arrivalSlowMo = 0.78;
+          this.landingGlow = 1.0;
           this.audio.playOneShot('land_impact', { volume: 0.92, rate: 0.86, reverb: 0.5 });
           this.audio.playOneShot('sub_boom', { volume: 0.82, rate: 0.86, reverb: 0.42 });
           this.audio.playOneShot('swoosh_thunder', { volume: 0.52, rate: 1.1, reverb: 0.55 });
