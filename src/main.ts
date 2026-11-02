@@ -1743,8 +1743,8 @@ class BsodExperienceApp {
       bloomAmt = 0.84 + diveFrac * 0.22;
       sharpenAmt = 0.32;
     } else if (this.phase === 'ROAM_GLITCH') {
-      crtAmt = 0.30;
-      trailAmt = 0.34 + this.glitchWorld.anomalyIntensity * 0.26;
+      crtAmt = 0.16;
+      trailAmt = 0.26 + this.glitchWorld.anomalyIntensity * 0.22;
       // Full-screen razor-sharp view across the entire 3D world (zero mosaic filter!)
       distortAmt = Math.max(distortAmt, this.glitchWorld.anomalyIntensity * 0.65);
       chromaAmt = Math.max(chromaAmt, this.glitchWorld.anomalyIntensity * 0.42);
@@ -1754,8 +1754,8 @@ class BsodExperienceApp {
       bloomAmt = 0.84 + this.glitchWorld.anomalyIntensity * 0.42;
       sharpenAmt = 0.34;
     } else if (this.phase === 'COLLAPSE_CUTSCENE') {
-      crtAmt = 0.52 + THREE.MathUtils.smoothstep(this.collapseTimer, 3.5, 8.0) * 0.16;
-      trailAmt = 0.58;
+      crtAmt = 0.46 + THREE.MathUtils.smoothstep(this.collapseTimer, 3.5, 8.0) * 0.18;
+      trailAmt = 0.40;
       const fallFactor = THREE.MathUtils.clamp((this.collapseTimer - 3.8) / 4.8, 0, 1);
       distortAmt = Math.max(distortAmt, 0.24 + fallFactor * 0.38);
       chromaAmt = 0.28 + fallFactor * 0.45;

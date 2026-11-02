@@ -201,9 +201,19 @@ export class BedroomScene {
         const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(this.monitorWorldQuat);
         this.bsodScreen.root.position.addScaledVector(fwd, 0.003);
 
-        this.inspectLookTarget.copy(this.monitorWorldPos);
-        this.inspectCamPos.copy(this.monitorWorldPos).addScaledVector(fwd, 0.66);
-        this.inspectCamPos.y += 0.035;
+        // 3/4 framing: never look at a monitor dead-on. A little lateral offset gives the
+        // bezel real depth and lets the room fall away behind the glass.
+        const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.monitorWorldQuat);
+        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.monitorWorldQuat);
+        this.inspectLookTarget
+          .copy(this.monitorWorldPos)
+          .addScaledVector(right, -0.075)
+          .addScaledVector(up, 0.018);
+        this.inspectCamPos
+          .copy(this.monitorWorldPos)
+          .addScaledVector(fwd, 0.60)
+          .addScaledVector(right, 0.085)
+          .addScaledVector(up, 0.028);
 
         mesh.visible = false;
         screenNodeFound = true;
