@@ -3,6 +3,11 @@ import * as THREE from 'three';
 export interface SoundManifestEntry {
   id: string;
   url: string;
+  /**
+   * Large asset fetched AFTER the loading screen has finished. Thunder recordings are tens of
+   * seconds of 16-bit audio each; blocking the start of the game on them would be rude.
+   */
+  lazy?: boolean;
 }
 
 export const SOUND_MANIFEST: SoundManifestEntry[] = [
@@ -54,12 +59,18 @@ export const SOUND_MANIFEST: SoundManifestEntry[] = [
   { id: 'dissonance', url: '/audio/dissonance.mp3' },
   { id: 'noise_wave', url: '/audio/noise_wave.mp3' },
   { id: 'heartbeat', url: '/audio/heartbeat.mp3' },
-  // Dedicated thunder recordings (baked offline by scripts/generate-thunder-audio.mjs).
-  // Layered strike/crack/roll assets replace pitch-shifted generic SFX for weather.
-  { id: 'thunder_close', url: '/audio/thunder_close.wav' },
-  { id: 'thunder_mid', url: '/audio/thunder_mid.wav' },
-  { id: 'thunder_far', url: '/audio/thunder_far.wav' },
-  { id: 'thunder_roll', url: '/audio/thunder_roll.wav' },
+  // Real field recordings, imported by scripts/import-thunder-audio.py.
+  // See public/audio/CREDITS.md for provenance and licences. Two of them load eagerly so the
+  // first strike of a session is never silent; the rest stream in once the game is running.
+  { id: 'thunder_close_2', url: '/audio/thunder_close_2.wav' },
+  { id: 'thunder_mid_1', url: '/audio/thunder_mid_1.wav' },
+  { id: 'thunder_far_2', url: '/audio/thunder_far_2.wav' },
+  { id: 'thunder_close_1', url: '/audio/thunder_close_1.wav', lazy: true },
+  { id: 'thunder_close_3', url: '/audio/thunder_close_3.wav', lazy: true },
+  { id: 'thunder_mid_2', url: '/audio/thunder_mid_2.wav', lazy: true },
+  { id: 'thunder_far_1', url: '/audio/thunder_far_1.wav', lazy: true },
+  // Deep long roll (CC0 Stargate Sample Pack) for cutscene scale hits.
+  { id: 'thunder_roll', url: '/audio/thunder_roll.wav', lazy: true },
 ];
 
 interface ActiveLoop {
@@ -74,6 +85,9 @@ export class AudioManager {
   private masterGain: GainNode | null = null;
   private reverbNode: ConvolverNode | null = null;
   private reverbWetGain: GainNode | null = null;
+  // Dedicated long, dark tail for thunder: the valley answering back after the strike.
+  private stormReverbNode: ConvolverNode | null = null;
+  private stormWetGain: GainNode | null = null;
 
   private rawBuffers = new Map<string, ArrayBuffer>();
   private buffers = new Map<string, AudioBuffer>();
@@ -159,6 +173,15 @@ export class AudioManager {
       this.reverbNode.connect(this.reverbWetGain);
       this.reverbWetGain.connect(this.masterGain);
 
+      // Storm bus: a slow, dark 3.1 s tail. Keep the dry strike on the short room reverb and send
+      // only the thunder here, otherwise every footstep would turn into a cathedral.
+      this.stormReverbNode = this.ctx.createConvolver();
+      this.stormReverbNode.buffer = this.buildStormImpulse(this.ctx, 3.1, 2.35);
+      this.stormWetGain = this.ctx.createGain();
+      this.stormWetGain.gain.value = 0.55;
+      this.stormReverbNode.connect(this.stormWetGain);
+      this.stormWetGain.connect(this.masterGain);
+
       // Synthesize realistic nocturnal window-rain & post-storm drip beds once at boot
       this.storeDecoded('rain_window', this.buildWindowRainBuffer(this.ctx, false));
       this.storeDecoded('rain_aftermath', this.buildWindowRainBuffer(this.ctx, true));
@@ -168,39 +191,52 @@ export class AudioManager {
     }
   }
 
+  private async loadEntry(entry: SoundManifestEntry, ctx: AudioContext | null): Promise<void> {
+    if (this.buffers.has(entry.id) || this.rawBuffers.has(entry.id)) return;
+    try {
+      const res = await fetch(entry.url);
+      if (!res.ok) return;
+      const buf = await res.arrayBuffer();
+      if (ctx) {
+        try {
+          const decoded = await ctx.decodeAudioData(buf.slice(0));
+          this.storeDecoded(entry.id, decoded);
+        } catch {
+          this.rawBuffers.set(entry.id, buf);
+        }
+      } else {
+        this.rawBuffers.set(entry.id, buf);
+      }
+    } catch {
+      // Graceful fallback if offline
+    }
+  }
+
   /**
    * Fetch AND pre-decode audio buffers during the loading screen so clicking Start has ZERO delay!
+   * Only the `lazy` entries are deferred: they are streamed in one by one after the loading screen
+   * has cleared so the multi-megabyte thunder recordings never hold up the first frame.
    */
   public async preloadFiles(onProgress?: (loaded: number, total: number) => void): Promise<void> {
     const ctx = this.ensureContext();
+    const eager = SOUND_MANIFEST.filter((entry) => !entry.lazy);
+    const deferred = SOUND_MANIFEST.filter((entry) => entry.lazy);
     let done = 0;
-    const total = SOUND_MANIFEST.length;
+    const total = eager.length;
 
     await Promise.all(
-      SOUND_MANIFEST.map(async (entry) => {
-        try {
-          const res = await fetch(entry.url);
-          if (res.ok) {
-            const buf = await res.arrayBuffer();
-            if (ctx) {
-              try {
-                const decoded = await ctx.decodeAudioData(buf.slice(0));
-                this.storeDecoded(entry.id, decoded);
-              } catch {
-                this.rawBuffers.set(entry.id, buf);
-              }
-            } else {
-              this.rawBuffers.set(entry.id, buf);
-            }
-          }
-        } catch {
-          // Graceful fallback if offline
-        } finally {
-          done++;
-          onProgress?.(done, total);
-        }
+      eager.map(async (entry) => {
+        await this.loadEntry(entry, ctx);
+        done++;
+        onProgress?.(done, total);
       })
     );
+
+    void (async () => {
+      for (const entry of deferred) {
+        await this.loadEntry(entry, ctx);
+      }
+    })();
   }
 
   /**
@@ -242,6 +278,36 @@ export class AudioManager {
     } else if (!paused && this.ctx.state === 'suspended') {
       this.ctx.resume().catch(() => {});
     }
+  }
+
+  /**
+   * Impulse for the storm tail only. Unlike the bright, flat 0.85 s room impulse, the noise is
+   * run through a one-pole filter that closes as the tail decays, so the reflection loses its top
+   * end like real air does, plus a few discrete early reflections off the valley walls.
+   */
+  private buildStormImpulse(ctx: AudioContext, durationSec: number, decay: number): AudioBuffer {
+    const length = Math.floor(ctx.sampleRate * durationSec);
+    const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
+    const taps = [
+      [0.071, 0.138, 0.246, 0.399, 0.63],
+      [0.094, 0.161, 0.212, 0.357, 0.71],
+    ];
+    for (let ch = 0; ch < 2; ch++) {
+      const data = impulse.getChannelData(ch);
+      let lp = 0;
+      for (let i = 0; i < length; i++) {
+        const t = i / length;
+        const n = Math.random() * 2 - 1;
+        const k = 0.18 * (1 - t * 0.9);
+        lp += (n - lp) * k;
+        data[i] = lp * Math.pow(1 - t, decay) * 1.6;
+      }
+      taps[ch].forEach((tap, idx) => {
+        const at = Math.floor(tap * ctx.sampleRate);
+        if (at < length) data[at] += (idx % 2 ? -0.42 : 0.5) / (idx + 1);
+      });
+    }
+    return impulse;
   }
 
   private buildImpulseBuffer(ctx: AudioContext, durationSec: number, decay: number): AudioBuffer {
@@ -373,6 +439,10 @@ export class AudioManager {
       fadeInSec?: number;
       /** Smooth release applied to the tail of a duration-limited cue (prevents hard chopped clicks). */
       releaseSec?: number;
+      /** -1..1 stereo placement. Keeps mono field recordings from stacking dead centre. */
+      pan?: number;
+      /** Send into the long dark storm tail (thunder only). 0..1 */
+      stormReverb?: number;
       channel?: 'sfx' | 'transition';
     } = {}
   ): void {
@@ -408,6 +478,11 @@ export class AudioManager {
       const panner = this.createLightPanner(opts.pos);
       tail.connect(panner);
       tail = panner;
+    } else if (opts.pan !== undefined && opts.pan !== 0) {
+      const panner = this.ctx.createStereoPanner();
+      panner.pan.value = Math.max(-1, Math.min(1, opts.pan));
+      tail.connect(panner);
+      tail = panner;
     }
 
     tail.connect(gain);
@@ -418,6 +493,13 @@ export class AudioManager {
       send.gain.value = opts.reverb;
       gain.connect(send);
       send.connect(this.reverbNode);
+    }
+
+    if (opts.stormReverb && opts.stormReverb > 0 && this.stormReverbNode) {
+      const send = this.ctx.createGain();
+      send.gain.value = opts.stormReverb;
+      gain.connect(send);
+      send.connect(this.stormReverbNode);
     }
 
     const entry = { src, gain, channel: opts.channel ?? 'sfx' };
