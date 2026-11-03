@@ -11,6 +11,19 @@ import { tunnelHandoff } from './utils/TunnelHandoff';
 
 type GlitchKind = 'bend' | 'tear' | 'mash' | 'sort' | 'roll' | 'ghost';
 
+/** Distance band of a real thunder take: how close the strike actually was. */
+type ThunderBand = 'close' | 'mid' | 'far';
+
+/**
+ * Take IDs per distance band. These are real field recordings imported by
+ * scripts/import-thunder-audio.py — see public/audio/CREDITS.md.
+ */
+const THUNDER_BANKS: Record<ThunderBand, readonly string[]> = {
+  close: ['thunder_close_1', 'thunder_close_2', 'thunder_close_3'],
+  mid: ['thunder_mid_1', 'thunder_mid_2'],
+  far: ['thunder_far_1', 'thunder_far_2'],
+};
+
 interface GlitchEvent {
   kind: GlitchKind;
   age: number;
@@ -109,6 +122,10 @@ class BsodExperienceApp {
   // Storm director: every visible lightning flash gets thunder at a believable distance.
   private stormFlashPrev = 0;
   private pendingThunder: Array<{ t: number; intensity: number; close: boolean }> = [];
+  // Real recordings, grouped by how far the strike was. Never play the same take twice in a row.
+  private thunderBag: Record<ThunderBand, string[]> = { close: [], mid: [], far: [] };
+  private thunderLast: Record<ThunderBand, string> = { close: '', mid: '', far: '' };
+  private thunderBusyUntil = 0;
 
   // Staged glitch-event scheduler: every disturbance is an authored signature with its own sound.
   private glitchEvents: GlitchEvent[] = [];
@@ -1472,13 +1489,14 @@ class BsodExperienceApp {
       this.audio.playOneShot('pain_glitch', { volume: 0.58, rate: 0.86, duration: 1.4, releaseSec: 0.4, reverb: 0.35 });
       this.audio.playOneShot('void_swell', { volume: 0.44, duration: 3.0, fadeInSec: 0.4, releaseSec: 1.2, reverb: 0.5 });
       this.audio.playOneShot('thunder_roll', {
-        volume: 0.26,
-        rate: 1.18,
-        lowpassHz: 3200,
-        duration: 3.2,
-        fadeInSec: 0.05,
-        releaseSec: 1.6,
-        reverb: 0.55,
+        volume: 0.3,
+        rate: 1.06,
+        lowpassHz: 2600,
+        duration: 3.4,
+        fadeInSec: 0.04,
+        releaseSec: 1.8,
+        reverb: 0.3,
+        stormReverb: 0.8,
       });
       this.audio.stopLoop('breath', 0.8);
       this.audio.startOrUpdateLoop('pulse', 'heartbeat', { volume: 0.62, rate: 1.52, fadeSec: 0.5 });
@@ -1499,11 +1517,12 @@ class BsodExperienceApp {
     this.audio.playOneShot('console_error', { volume: 0.44, rate: 0.66, channel: 'transition' });
     // The room tearing open answers with a deep, slow thunderclap.
     this.audio.playOneShot('thunder_roll', {
-      volume: 0.30,
-      rate: 0.82,
-      lowpassHz: 2400,
+      volume: 0.34,
+      rate: 0.94,
+      lowpassHz: 2200,
       channel: 'transition',
-      reverb: 0.6,
+      reverb: 0.3,
+      stormReverb: 0.9,
     });
     this.suctionStartClock = this.getTimelineClock();
     this.suctionTimer = 0;
@@ -1863,6 +1882,17 @@ class BsodExperienceApp {
     return Math.pow(Math.max(0, a * b), 18);
   }
 
+  /** True once the camera is out in the fractured 3D world rather than inside the bedroom. */
+  private isWorldPhase(): boolean {
+    return (
+      this.phase === 'GLITCH_ARRIVAL_CUTSCENE' ||
+      this.phase === 'ROAM_GLITCH' ||
+      this.phase === 'COLLAPSE_CUTSCENE' ||
+      this.phase === 'RETURN_LANDING' ||
+      this.phase === 'AFTERMATH_ROAM'
+    );
+  }
+
   /**
    * Thunder is scheduled almost immediately: the flash IS the strike, so the sound has to land on
    * the same frame. Distance is expressed as level, low-pass and reverb (see playThunder) instead
@@ -1874,41 +1904,105 @@ class BsodExperienceApp {
     this.pendingThunder.push({ t: delay, intensity, close: intensity > 0.78 });
   }
 
+  /**
+   * Draws one take from a band without repeating it until that band's bag is empty. Real
+   * recordings are long and recognisable; the old single baked WAV repeating every strike was
+   * the main reason the storm sounded canned.
+   */
+  private drawThunder(band: ThunderBand): string {
+    const bank = THUNDER_BANKS[band];
+    let bag = this.thunderBag[band].filter((id) => bank.includes(id));
+    if (bag.length === 0) {
+      bag = bank.slice();
+      // Fisher-Yates: every take in the band plays once before any of them repeats.
+      for (let i = bag.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [bag[i], bag[j]] = [bag[j], bag[i]];
+      }
+      // Push the take that just played to the back so it never lands back-to-back.
+      const prev = this.thunderLast[band];
+      if (prev && bag.length > 1 && bag[0] === prev) {
+        [bag[0], bag[bag.length - 1]] = [bag[bag.length - 1], bag[0]];
+      }
+    }
+    const id = bag.shift() as string;
+    this.thunderBag[band] = bag;
+    this.thunderLast[band] = id;
+    return id;
+  }
+
   private playThunder(intensity: number, close: boolean, heavy = false): void {
     const i = THREE.MathUtils.clamp(intensity, 0.2, 1.0);
-    // Real recorded thunder, chosen by how near the strike actually was. Everything else is
-    // seasoning: a sub-only body for pressure, and a faint electrical crackle layer.
-    const variant = heavy ? 'thunder_roll' : i > 0.82 ? 'thunder_close' : i > 0.55 ? 'thunder_mid' : 'thunder_far';
-    const rate = 0.94 + Math.random() * 0.12;
-    this.audio.playOneShot(variant, {
-      volume: 0.34 + i * 0.42,
+    // Straight playback of a real recording. Nothing is pitch-shifted and nothing is synthesised:
+    // distance is carried by level, air absorption and reverb tail, exactly like the physical thing.
+    const band: ThunderBand = i > 0.78 ? 'close' : i > 0.5 ? 'mid' : 'far';
+    const now = this.getTimelineClock();
+    // A long take is still ringing: duck the newcomer instead of stacking two peaks on top of
+    // each other, which is what turns a storm into mush.
+    const ducked = now < this.thunderBusyUntil;
+    this.thunderBusyUntil = now + (band === 'close' ? 3.4 : 2.8);
+    // A hair of rate variation only: enough that repeats never phase, small enough that the
+    // recording never turns into a slowed-down tape.
+    const rate = 0.992 + Math.random() * 0.016;
+    // The storm is not a single point source. Each strike lands somewhere else across the stereo
+    // field, which is most of what separates "a storm" from "one sound effect on loop".
+    const pan = (Math.random() * 2 - 1) * 0.45;
+    // From inside the bedroom the storm arrives through glass: one more layer of dulling on top of
+    // distance, which is why it never sounds like the Strike is happening in the room.
+    const indoors = !this.isWorldPhase();
+    const bandLowpass = band === 'close' ? 15000 : band === 'mid' ? 5200 : 2600;
+    this.audio.playOneShot(this.drawThunder(band), {
+      volume: (0.46 + i * 0.38) * (ducked ? 0.78 : 1) * (indoors ? 0.86 : 1),
       rate,
-      reverb: 0.46 + i * 0.3,
-      // Air absorption: a far strike is dull, a near one cracks.
-      lowpassHz: i > 0.82 ? 11000 : 2600 + i * 6200,
+      pan,
+      reverb: band === 'close' ? 0.22 : 0.3 + (1 - i) * 0.2,
+      stormReverb: indoors ? 0.35 : band === 'close' ? 0.55 : 0.75,
+      // Air absorption: a far strike is a dull roar, a near one still has its crack.
+      lowpassHz: indoors ? Math.min(bandLowpass, 6000) : bandLowpass,
       channel: 'sfx',
     });
-    // Overlapping second voice keeps the tail moving instead of looping one envelope.
-    if (i > 0.5) {
-      this.audio.playOneShot('thunder_far', {
-        volume: 0.12 + i * 0.18,
-        rate: 0.72 + Math.random() * 0.16,
-        reverb: 0.62,
-        lowpassHz: 1400,
-        offset: 0.8 + Math.random() * 1.4,
-        duration: 3.4,
-        releaseSec: 2.0,
+    // In the glitch world the valley walls throw a wall of weight back at the player. A filtered
+    // deep roll sits under the take for scale; it is felt more than heard.
+    if (heavy) {
+      this.audio.playOneShot('thunder_roll', {
+        volume: 0.14 + i * 0.14,
+        rate: 0.98 + Math.random() * 0.04,
+        lowpassHz: 700,
+        pan: -pan * 0.6,
+        offset: 0.25 + Math.random() * 0.6,
+        duration: 5.0,
+        releaseSec: 2.8,
+        reverb: 0.25,
+        stormReverb: 0.85,
+        channel: 'sfx',
+      });
+    }
+    // A near strike gets a second, distant roll behind it: the sound bouncing off the valley.
+    if (band === 'close' && Math.random() < 0.7) {
+      this.audio.playOneShot(this.drawThunder('far'), {
+        volume: 0.16 + i * 0.12,
+        rate: 1.0,
+        pan: -pan * 0.8,
+        reverb: 0.4,
+        stormReverb: 0.8,
+        lowpassHz: 1800,
+        offset: 1.1 + Math.random() * 1.2,
+        duration: 4.2,
+        releaseSec: 2.4,
         channel: 'sfx',
       });
     }
     if (close) {
+      // Sub-only pressure under a near strike. Filtered to a band where it is felt, not heard,
+      // so it adds weight without becoming a second, competing rumble.
       this.audio.playOneShot('earthquake', {
-        volume: 0.14 + i * 0.14,
-        rate: 0.66,
-        duration: 2.8,
-        fadeInSec: 0.05,
+        volume: 0.1 + i * 0.1,
+        rate: 1.0,
+        lowpassHz: 130,
+        duration: 2.4,
+        fadeInSec: 0.08,
         releaseSec: 1.4,
-        reverb: 0.5,
+        reverb: 0.3,
         channel: 'sfx',
       });
       this.screenFlash = Math.max(this.screenFlash, 0.07 * i);
@@ -2710,10 +2804,11 @@ class BsodExperienceApp {
           this.audio.playOneShot('earthquake', { volume: 0.42, rate: 0.66, duration: 3.4, releaseSec: 1.6, reverb: 0.55 });
           // The impact rolls away across the basin like a thunderclap born underground.
           this.audio.playOneShot('thunder_roll', {
-            volume: 0.44,
-            rate: 0.96,
-            reverb: 0.62,
-            lowpassHz: 5200,
+            volume: 0.5,
+            rate: 1.0,
+            reverb: 0.24,
+            stormReverb: 0.95,
+            lowpassHz: 4200,
             channel: 'sfx',
           });
           this.audio.playOneShot('scrapemare', { volume: 0.24, rate: 0.72, duration: 3.0, fadeInSec: 0.2, releaseSec: 1.4, reverb: 0.6 });

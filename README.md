@@ -42,5 +42,8 @@ npm run build
 
 ```bash
 node scripts/generate-room-textures.mjs   # -> public/textures/room/*.png
-node scripts/generate-thunder-audio.mjs   # -> public/audio/thunder_*.wav
 ```
+
+雷鳴は実録音（ImmersiveThunder / Stargate Sample Pack）をトリミング・正規化して同梱しています。
+出典とライセンス、再生成手順は `public/audio/CREDITS.md` と
+`scripts/import-thunder-audio.py` を参照してください。
